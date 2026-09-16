@@ -1,0 +1,22 @@
+# .NET
+bin/
+obj/
+
+# Node / Vite
+node_modules/
+dist/
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# VS Code
+.vscode/
+
+# Visual Studio
+.vs/
+
+# OS/editor temporary files
+.DS_Store
+Thumbs.db
