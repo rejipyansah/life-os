@@ -1,12 +1,59 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using LifeOS.Api.Data;
+
+if (args.Contains("--reset-owner-password"))
+{
+    var exitCode = await RunPasswordResetAsync();
+    Environment.Exit(exitCode);
+}
+
+if (args.Contains("--provision-owner"))
+{
+    var exitCode = await RunProvisioningAsync(args);
+    Environment.Exit(exitCode);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+{
+    options.Password.RequireDigit = false;
+    options.Password.RequiredLength = 8;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireUppercase = false;
+    options.Password.RequireLowercase = false;
+})
+.AddEntityFrameworkStores<ApplicationDbContext>()
+.AddDefaultTokenProviders();
+
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.ExpireTimeSpan = TimeSpan.FromDays(30);
+    options.Events.OnRedirectToLogin = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    };
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    };
+});
+
+builder.Services.AddAuthorization();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -14,7 +61,217 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithName("GetHealth");
 
+app.MapGet("/api/auth/me", (ClaimsPrincipal user) =>
+{
+    var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+    var userName = user.FindFirstValue(ClaimTypes.Name);
+    var email = user.FindFirstValue(ClaimTypes.Email);
+
+    return Results.Ok(new
+    {
+        userId,
+        userName,
+        email,
+        isAuthenticated = user.Identity?.IsAuthenticated ?? false
+    });
+})
+.RequireAuthorization()
+.WithName("GetAuthMe");
+
+app.MapPost("/api/auth/login", async (
+    SignInManager<IdentityUser> signInManager,
+    UserManager<IdentityUser> userManager,
+    HttpContext http) =>
+{
+    var body = await http.Request.ReadFromJsonAsync<LoginRequest>();
+    if (body is null || string.IsNullOrWhiteSpace(body.Email) || string.IsNullOrWhiteSpace(body.Password))
+        return Results.Json(new { error = "Invalid email or password." }, statusCode: 401);
+
+    var user = await userManager.FindByEmailAsync(body.Email);
+    if (user is null)
+        return Results.Json(new { error = "Invalid email or password." }, statusCode: 401);
+
+    var result = await signInManager.PasswordSignInAsync(user, body.Password, isPersistent: true, lockoutOnFailure: false);
+    if (!result.Succeeded)
+        return Results.Json(new { error = "Invalid email or password." }, statusCode: 401);
+
+    return Results.Ok(new { isAuthenticated = true });
+})
+.WithName("Login");
+
+app.MapPost("/api/auth/logout", async (SignInManager<IdentityUser> signInManager) =>
+{
+    await signInManager.SignOutAsync();
+    return Results.NoContent();
+})
+.RequireAuthorization()
+.WithName("Logout");
+
 app.Run();
+
+static async Task<int> RunProvisioningAsync(string[] args)
+{
+    var builder = WebApplication.CreateBuilder(args);
+
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+    builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+    {
+        options.Password.RequireDigit = false;
+        options.Password.RequiredLength = 8;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireLowercase = false;
+    })
+    .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();
+
+    await using var host = builder.Build();
+
+    using var scope = host.Services.CreateScope();
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+
+    var emailIndex = Array.IndexOf(args, "--email");
+    var email = emailIndex >= 0 && emailIndex + 1 < args.Length
+        ? args[emailIndex + 1]
+        : null;
+
+    if (string.IsNullOrWhiteSpace(email))
+    {
+        Console.Write("Owner email: ");
+        email = Console.ReadLine()?.Trim();
+    }
+
+    if (string.IsNullOrWhiteSpace(email))
+    {
+        Console.Error.WriteLine("Error: email is required.");
+        return 1;
+    }
+
+    var existingUsers = await userManager.Users.CountAsync();
+    if (existingUsers > 0)
+    {
+        Console.Error.WriteLine("Error: an Owner already exists. Provisioning is single-use only.");
+        return 1;
+    }
+
+    Console.Write("Owner password: ");
+    var password = ReadPassword();
+
+    if (string.IsNullOrEmpty(password))
+    {
+        Console.Error.WriteLine("Error: password is required.");
+        return 1;
+    }
+
+    var user = new IdentityUser { UserName = email, Email = email, EmailConfirmed = true };
+    var result = await userManager.CreateAsync(user, password);
+
+    if (!result.Succeeded)
+    {
+        foreach (var error in result.Errors)
+            Console.Error.WriteLine($"Error: {error.Description}");
+        return 1;
+    }
+
+    Console.WriteLine($"Owner created successfully (Id: {user.Id}).");
+    return 0;
+}
+
+static async Task<int> RunPasswordResetAsync()
+{
+    var builder = WebApplication.CreateBuilder(args: []);
+
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+    builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+    {
+        options.Password.RequireDigit = false;
+        options.Password.RequiredLength = 8;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireLowercase = false;
+    })
+    .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();
+
+    await using var host = builder.Build();
+
+    using var scope = host.Services.CreateScope();
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+
+    var userCount = await userManager.Users.CountAsync();
+    if (userCount == 0)
+    {
+        Console.Error.WriteLine("Error: no users found. Use --provision-owner first.");
+        return 1;
+    }
+    if (userCount > 1)
+    {
+        Console.Error.WriteLine("Error: multiple users found. Cannot determine which account to reset.");
+        return 1;
+    }
+
+    var owner = await userManager.Users.FirstAsync();
+
+    Console.Write("New password: ");
+    var newPassword = ReadPassword();
+
+    if (string.IsNullOrEmpty(newPassword))
+    {
+        Console.Error.WriteLine("Error: password is required.");
+        return 1;
+    }
+
+    var resetToken = await userManager.GeneratePasswordResetTokenAsync(owner);
+    var result = await userManager.ResetPasswordAsync(owner, resetToken, newPassword);
+
+    if (!result.Succeeded)
+    {
+        foreach (var error in result.Errors)
+            Console.Error.WriteLine($"Error: {error.Description}");
+        return 1;
+    }
+
+    Console.WriteLine("Owner password reset successfully.");
+    return 0;
+}
+
+static string? ReadPassword()
+{
+    var password = new System.Text.StringBuilder();
+    while (true)
+    {
+        var key = Console.ReadKey(intercept: true);
+        if (key.Key == ConsoleKey.Enter)
+        {
+            Console.WriteLine();
+            break;
+        }
+        if (key.Key == ConsoleKey.Backspace && password.Length > 0)
+        {
+            password.Remove(password.Length - 1, 1);
+            Console.Write("\b \b");
+        }
+        else if (!char.IsControl(key.KeyChar))
+        {
+            password.Append(key.KeyChar);
+            Console.Write('*');
+        }
+    }
+    return password.ToString();
+}
+
+public class LoginRequest
+{
+    public string Email { get; set; } = "";
+    public string Password { get; set; } = "";
+}
