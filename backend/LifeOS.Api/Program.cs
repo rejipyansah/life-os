@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using LifeOS.Api.Data;
+using LifeOS.Api.Models;
+using LifeOS.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using LifeOS.Api.Data;
 
 if (args.Contains("--reset-owner-password"))
 {
@@ -12,6 +14,12 @@ if (args.Contains("--reset-owner-password"))
 if (args.Contains("--provision-owner"))
 {
     var exitCode = await RunProvisioningAsync(args);
+    Environment.Exit(exitCode);
+}
+
+if (args.Contains("--ensure-owner-scope"))
+{
+    var exitCode = await RunEnsureOwnerScopeAsync();
     Environment.Exit(exitCode);
 }
 
@@ -50,6 +58,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 });
 
 builder.Services.AddAuthorization();
+builder.Services.AddScoped<GuestTokenService>();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -63,6 +72,8 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ENDPOINTS
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithName("GetHealth");
@@ -113,7 +124,110 @@ app.MapPost("/api/auth/logout", async (SignInManager<IdentityUser> signInManager
 .RequireAuthorization()
 .WithName("Logout");
 
+// GUEST SESSION
+app.MapPost("/api/guest/session", async (HttpContext http) =>
+{
+    if (http.User.Identity?.IsAuthenticated == true)
+    {
+        return Results.Json(new { error = "Authenticated users must not create guest sessions." }, statusCode: 403);
+    }
+
+    var guestTokenService = http.RequestServices.GetRequiredService<GuestTokenService>();
+
+    var existingSession = await guestTokenService.ResolveAsync(http);
+    if (existingSession is not null)
+    {
+        await guestTokenService.UpdateActivityAsync(existingSession);
+        return Results.Ok(new { isGuest = true });
+    }
+
+    // Invalid/expired cookie: clear it and create a fresh session
+    var existingToken = GuestTokenService.ReadToken(http);
+    if (existingToken is not null)
+    {
+        GuestTokenService.ClearGuestCookie(http);
+    }
+
+    // Create new Guest Scope + GuestSession atomically
+    var db = http.RequestServices.GetRequiredService<ApplicationDbContext>();
+    var scope = new Scope { Type = ScopeType.Guest };
+    var token = GuestTokenService.GenerateToken();
+    var session = new GuestSession { Scope = scope, TokenHash = GuestTokenService.HashToken(token) };
+
+    db.Scopes.Add(scope);
+    db.GuestSessions.Add(session);
+    await db.SaveChangesAsync();
+
+    GuestTokenService.SetGuestCookie(http, token);
+
+    return Results.Ok(new { isGuest = true });
+})
+.WithName("CreateGuestSession");
+
 app.Run();
+
+// --- CLI Commands ---
+
+static async Task<int> RunEnsureOwnerScopeAsync()
+{
+    var builder = WebApplication.CreateBuilder(args: []);
+
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+    builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+    {
+        options.Password.RequireDigit = false;
+        options.Password.RequiredLength = 8;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireLowercase = false;
+    })
+    .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();
+
+    await using var host = builder.Build();
+
+    using var scope = host.Services.CreateScope();
+    var services = scope.ServiceProvider;
+    var db = services.GetRequiredService<ApplicationDbContext>();
+    var userManager = services.GetRequiredService<UserManager<IdentityUser>>();
+
+    var userCount = await userManager.Users.CountAsync();
+    if (userCount == 0)
+    {
+        Console.Error.WriteLine("Error: no Identity users found. Run --provision-owner first.");
+        return 1;
+    }
+    if (userCount > 1)
+    {
+        Console.Error.WriteLine("Error: multiple Identity users found. Cannot determine Owner.");
+        return 1;
+    }
+
+    var owner = await userManager.Users.FirstAsync();
+
+    var existingScope = await db.Scopes.FirstOrDefaultAsync(s =>
+        s.Type == ScopeType.Owner && s.OwnerUserId == owner.Id);
+
+    if (existingScope is not null)
+    {
+        Console.WriteLine($"Owner Scope already exists (Id: {existingScope.Id}).");
+        return 0;
+    }
+
+    var ownerScope = new Scope
+    {
+        Type = ScopeType.Owner,
+        OwnerUserId = owner.Id
+    };
+
+    db.Scopes.Add(ownerScope);
+    await db.SaveChangesAsync();
+
+    Console.WriteLine($"Owner Scope created (Id: {ownerScope.Id}).");
+    return 0;
+}
 
 static async Task<int> RunProvisioningAsync(string[] args)
 {
@@ -136,7 +250,9 @@ static async Task<int> RunProvisioningAsync(string[] args)
     await using var host = builder.Build();
 
     using var scope = host.Services.CreateScope();
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+    var services = scope.ServiceProvider;
+    var userManager = services.GetRequiredService<UserManager<IdentityUser>>();
+    var db = services.GetRequiredService<ApplicationDbContext>();
 
     var emailIndex = Array.IndexOf(args, "--email");
     var email = emailIndex >= 0 && emailIndex + 1 < args.Length
@@ -181,7 +297,16 @@ static async Task<int> RunProvisioningAsync(string[] args)
         return 1;
     }
 
+    var ownerScope = new Scope
+    {
+        Type = ScopeType.Owner,
+        OwnerUserId = user.Id
+    };
+    db.Scopes.Add(ownerScope);
+    await db.SaveChangesAsync();
+
     Console.WriteLine($"Owner created successfully (Id: {user.Id}).");
+    Console.WriteLine($"Owner Scope created (Id: {ownerScope.Id}).");
     return 0;
 }
 
