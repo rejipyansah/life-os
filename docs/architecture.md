@@ -47,7 +47,13 @@
 - Creating a Guest sandbox creates: GuestSession + Guest Scope.
 - Existing valid Guest sessions are reused instead of creating a new sandbox.
 - Guest persistence is based on inactivity, tracked through LastActivityAt.
-- Expiration/cleanup infrastructure is intentionally deferred until there is a real need.
+- Guest session expiration is determined by inactivity using LastActivityAt and the configured inactivity threshold.
+- When a GuestSession expires, it is no longer valid and must never be reactivated from the old cookie.
+- The expired GuestSession and its Guest Scope are retained temporarily.
+- A future Guest session receives a new GuestSession and a new Guest Scope.
+- Data cleanup/deletion for expired guest sandboxes is a separate concern and is intentionally deferred until a real operational need exists.
+- Do not introduce an Expired status field unless required by implementation.
+- Do not add cleanup workers/jobs yet.
 
 ## Domain Architecture
 
