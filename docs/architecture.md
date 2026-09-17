@@ -12,6 +12,19 @@
 - Client must never choose or submit an arbitrary ScopeId.
 - The server resolves the current Scope from trusted authentication/session context.
 
+## Scope Identity
+
+- Scope.Id uses Guid/UUID.
+- GuestSession.Id uses Guid/UUID.
+- PostgreSQL stores these as uuid.
+
+## Scope Type
+
+- Scope has exactly two current types: Owner and Guest.
+- In C#, represent this as an enum for compile-time safety.
+- Persist the enum as a readable string in PostgreSQL, e.g. "Owner" and "Guest".
+- The database representation should remain easy to inspect and debug.
+
 ## Owner
 
 - The Owner is an ASP.NET Core Identity user.
