@@ -67,6 +67,7 @@ builder.Services.AddScoped<GuestTokenService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<AllocationService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<IInterpreter, GeminiInterpreter>();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -659,6 +660,50 @@ app.MapPatch("/api/finance/accounts/{id:guid}", async (
     }
 })
 .WithName("UpdateAccount");
+
+// INTERPRET
+app.MapPost("/api/interpret", async (
+    HttpContext http,
+    IInterpreter interpreter,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    InterpretInputRequest? body;
+    try
+    {
+        body = await http.Request.ReadFromJsonAsync<InterpretInputRequest>();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+    }
+    if (body is null || string.IsNullOrWhiteSpace(body.Input))
+        return Results.Json(new { error = "Input is required." }, statusCode: 400);
+
+    var result = await InterpretEndpoint.HandleAsync(body, interpreter, scopeId, db);
+    return Results.Json(result.Body, statusCode: result.StatusCode);
+})
+.WithName("Interpret");
 
 app.Run();
 
