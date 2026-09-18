@@ -1,6 +1,7 @@
 using LifeOS.Api.Data;
 using LifeOS.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using IsolationLevel = System.Data.IsolationLevel;
 
 namespace LifeOS.Api.Services;
@@ -8,6 +9,8 @@ namespace LifeOS.Api.Services;
 public class TransactionService
 {
     private readonly ApplicationDbContext _db;
+
+    private const int MaxSerializationRetries = 3;
 
     public TransactionService(ApplicationDbContext db)
     {
@@ -18,78 +21,106 @@ public class TransactionService
         CreateTransactionCommand command,
         CancellationToken ct = default)
     {
-        // Execute the entire operation inside a serializable transaction.
-        // This provides two guarantees:
-        // 1. Atomicity: Transaction + Entries are committed together or not at all.
-        // 2. Concurrency: Serializable isolation prevents two concurrent spending
-        //    requests from both passing the balance check. The second transaction
-        //    will see the lock conflict and retry/abort.
-        await using var dbTransaction = await _db.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable, ct);
-
-        try
+        // Retry loop handles PostgreSQL serialization failures (SQLSTATE 40001).
+        // Under SERIALIZABLE isolation, concurrent transactions that read overlapping
+        // rows can cause one to fail at commit time. Retrying the entire transaction
+        // allows the loser to re-read fresh data and succeed.
+        for (var attempt = 1; ; attempt++)
         {
-            var scopeId = command.ScopeId;
+            await using var dbTransaction = await _db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, ct);
 
-            // Validate all referenced Accounts belong to the current Scope
-            var accountIds = command.Entries.Select(e => e.AccountId).Distinct().ToList();
-            var accounts = await _db.Accounts
-                .Where(a => accountIds.Contains(a.Id) && a.ScopeId == scopeId)
-                .ToListAsync(ct);
-
-            if (accounts.Count != accountIds.Count)
+            try
             {
-                var foundIds = accounts.Select(a => a.Id).ToHashSet();
-                var missingIds = accountIds.Where(id => !foundIds.Contains(id));
-                throw new ValidationException(
-                    $"Account(s) not found in current Scope: {string.Join(", ", missingIds)}");
+                var result = await ExecuteInTransactionAsync(command, ct);
+                await dbTransaction.CommitAsync(ct);
+                return result;
             }
-
-            // Validate referenced Accounts are not archived
-            var archivedAccounts = accounts.Where(a => a.IsArchived).ToList();
-            if (archivedAccounts.Count > 0)
+            catch (Exception ex) when (IsSerializationFailure(ex) && attempt < MaxSerializationRetries)
             {
-                throw new ValidationException(
-                    $"Cannot use archived Account(s): {string.Join(", ", archivedAccounts.Select(a => a.Name))}");
+                await dbTransaction.RollbackAsync(ct);
+                // Brief yield to let the winning transaction release its locks
+                await Task.Yield();
             }
-
-            // Build Transaction entity
-            var transaction = new Transaction
+            catch (Exception ex) when (IsSerializationFailure(ex))
             {
-                ScopeId = scopeId,
-                Type = command.Type,
-                Amount = command.Amount,
-                Description = command.Description,
-                CategoryName = command.CategoryName,
-                OccurredOn = command.OccurredOn,
-                RelatedTransactionId = command.RelatedTransactionId,
-                FeeAmount = command.FeeAmount
-            };
-
-            // Validate and build entries based on TransactionType
-            var entries = command.Type switch
+                await dbTransaction.RollbackAsync(ct);
+                throw new SerializationConflictException();
+            }
+            catch (Exception)
             {
-                TransactionType.Income => ValidateIncome(command, transaction),
-                TransactionType.Expense => await ValidateExpenseAsync(command, transaction, ct),
-                TransactionType.Transfer => await ValidateTransferAsync(command, transaction, ct),
-                TransactionType.Refund => await ValidateRefundAsync(command, transaction, scopeId, ct),
-                TransactionType.Reversal => await ValidateReversalAsync(command, transaction, scopeId, ct),
-                TransactionType.Adjustment => ValidateAdjustment(command, transaction),
-                _ => throw new ValidationException($"Unsupported TransactionType: {command.Type}")
-            };
-
-            _db.Transactions.Add(transaction);
-            _db.TransactionEntries.AddRange(entries);
-            await _db.SaveChangesAsync(ct);
-            await dbTransaction.CommitAsync(ct);
-
-            return (transaction, entries);
+                await dbTransaction.RollbackAsync(ct);
+                throw;
+            }
         }
-        catch
+    }
+
+    private async Task<(Transaction transaction, List<TransactionEntry> entries)> ExecuteInTransactionAsync(
+        CreateTransactionCommand command,
+        CancellationToken ct)
+    {
+        var scopeId = command.ScopeId;
+
+        // Validate all referenced Accounts belong to the current Scope
+        var accountIds = command.Entries.Select(e => e.AccountId).Distinct().ToList();
+        var accounts = await _db.Accounts
+            .Where(a => accountIds.Contains(a.Id) && a.ScopeId == scopeId)
+            .ToListAsync(ct);
+
+        if (accounts.Count != accountIds.Count)
         {
-            await dbTransaction.RollbackAsync(ct);
-            throw;
+            var foundIds = accounts.Select(a => a.Id).ToHashSet();
+            var missingIds = accountIds.Where(id => !foundIds.Contains(id));
+            throw new ValidationException(
+                $"Account(s) not found in current Scope: {string.Join(", ", missingIds)}");
         }
+
+        // Validate referenced Accounts are not archived
+        var archivedAccounts = accounts.Where(a => a.IsArchived).ToList();
+        if (archivedAccounts.Count > 0)
+        {
+            throw new ValidationException(
+                $"Cannot use archived Account(s): {string.Join(", ", archivedAccounts.Select(a => a.Name))}");
+        }
+
+        // Build Transaction entity
+        var transaction = new Transaction
+        {
+            ScopeId = scopeId,
+            Type = command.Type,
+            Amount = command.Amount,
+            Description = command.Description,
+            CategoryName = command.CategoryName,
+            OccurredOn = command.OccurredOn,
+            RelatedTransactionId = command.RelatedTransactionId,
+            FeeAmount = command.FeeAmount
+        };
+
+        // Validate and build entries based on TransactionType
+        var entries = command.Type switch
+        {
+            TransactionType.Income => ValidateIncome(command, transaction),
+            TransactionType.Expense => await ValidateExpenseAsync(command, transaction, ct),
+            TransactionType.Transfer => await ValidateTransferAsync(command, transaction, ct),
+            TransactionType.Refund => await ValidateRefundAsync(command, transaction, scopeId, ct),
+            TransactionType.Reversal => await ValidateReversalAsync(command, transaction, scopeId, ct),
+            TransactionType.Adjustment => ValidateAdjustment(command, transaction),
+            _ => throw new ValidationException($"Unsupported TransactionType: {command.Type}")
+        };
+
+        _db.Transactions.Add(transaction);
+        _db.TransactionEntries.AddRange(entries);
+        await _db.SaveChangesAsync(ct);
+
+        return (transaction, entries);
+    }
+
+    private static bool IsSerializationFailure(Exception ex)
+    {
+        // PostgreSQL serialization failure: SQLSTATE 40001
+        // Detected via NpgsqlException which carries the SQLSTATE code.
+        return ex is NpgsqlException npgsqlEx
+            && npgsqlEx.SqlState == PostgresErrorCodes.SerializationFailure;
     }
 
     public async Task<decimal> GetAccountBalanceAsync(Guid accountId, Guid scopeId, CancellationToken ct = default)
@@ -286,4 +317,10 @@ public class TransactionService
 public class ValidationException : Exception
 {
     public ValidationException(string message) : base(message) { }
+}
+
+public class SerializationConflictException : Exception
+{
+    public SerializationConflictException()
+        : base("The request conflicted with a concurrent operation. Please try again.") { }
 }

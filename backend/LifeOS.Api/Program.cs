@@ -218,6 +218,12 @@ app.MapPost("/api/finance/transactions", async (
     {
         return Results.Json(new { error = ex.Message }, statusCode: 422);
     }
+    catch (SerializationConflictException)
+    {
+        return Results.Json(
+            new { error = "The request conflicted with a concurrent operation. Please try again." },
+            statusCode: 409);
+    }
 })
 .WithName("CreateTransaction");
 
