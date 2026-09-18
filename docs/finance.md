@@ -10,6 +10,8 @@ This document records finalized v1 architecture decisions. It is not an implemen
 
 Account represents where money is stored or held.
 
+Identity is defined by the user-provided Name. Account does not have a Provider or Institution field in v1. Users are free to name accounts according to their own mental model.
+
 Fields:
 
 - Id: Guid
@@ -25,15 +27,20 @@ Current AccountType values:
 - Bank
 - EWallet
 
+Type is a small structural classification. Provider/institution taxonomy is not introduced in v1.
+
 Rules:
 
+- Account belongs to exactly one Scope.
+- Scope is resolved server-side; never trust arbitrary ScopeId from the client.
 - Account may be created with zero balance.
-- Opening balance is optional.
+- Opening balance is optional and is not required for Account creation.
 - Account does not store Balance as source of truth.
 - Balance is derived from financial ledger entries.
 - Cash, Bank, and EWallet must not go below zero in v1.
 - Accounts are archived instead of hard-deleted so transaction history remains intact.
-- Purpose is not a permanent Account property.
+- Account name does not need to be globally unique.
+- Preserve Scope isolation.
 
 ---
 
@@ -179,3 +186,7 @@ The following are intentionally excluded from Finance v1:
 - Automatic allocation matching
 - Event sourcing
 - Finance-specific Owner/Guest services
+- Provider/institution taxonomy on Account
+- Purpose on Account
+- Balance on Account
+- Currency on Account

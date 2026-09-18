@@ -13,6 +13,7 @@ public class ApplicationDbContext : IdentityDbContext
 
     public DbSet<Scope> Scopes => Set<Scope>();
     public DbSet<GuestSession> GuestSessions => Set<GuestSession>();
+    public DbSet<Account> Accounts => Set<Account>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -57,6 +58,28 @@ public class ApplicationDbContext : IdentityDbContext
                 .WithMany()
                 .HasForeignKey(gs => gs.ScopeId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Account configuration
+        builder.Entity<Account>(e =>
+        {
+            e.HasKey(a => a.Id);
+
+            e.Property(a => a.Name)
+                .HasMaxLength(256);
+
+            e.Property(a => a.Type)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            // FK to Scope
+            e.HasOne(a => a.Scope)
+                .WithMany()
+                .HasForeignKey(a => a.ScopeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for querying accounts within a scope
+            e.HasIndex(a => a.ScopeId);
         });
     }
 }
