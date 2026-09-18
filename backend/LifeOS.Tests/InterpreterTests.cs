@@ -11,6 +11,10 @@ public class InterpreterTests : IDisposable
     private readonly ApplicationDbContext _db;
     private readonly SqliteConnection _connection;
     private readonly Guid _scopeId;
+    private readonly AccountLookup _cashAccount;
+    private readonly AccountLookup _mandiriAccount;
+    private readonly AccountLookup _seaBankAccount;
+    private readonly IReadOnlyList<AccountLookup> _accounts;
 
     public InterpreterTests()
     {
@@ -30,12 +34,16 @@ public class InterpreterTests : IDisposable
         _db.SaveChanges();
         _scopeId = scope.Id;
 
-        _db.Accounts.AddRange(
-            new Account { ScopeId = _scopeId, Name = "Cash", Type = AccountType.Cash },
-            new Account { ScopeId = _scopeId, Name = "Mandiri", Type = AccountType.Bank },
-            new Account { ScopeId = _scopeId, Name = "SeaBank", Type = AccountType.EWallet }
-        );
+        var cash = new Account { ScopeId = _scopeId, Name = "Cash", Type = AccountType.Cash };
+        var mandiri = new Account { ScopeId = _scopeId, Name = "Mandiri", Type = AccountType.Bank };
+        var seaBank = new Account { ScopeId = _scopeId, Name = "SeaBank", Type = AccountType.EWallet };
+        _db.Accounts.AddRange(cash, mandiri, seaBank);
         _db.SaveChanges();
+
+        _cashAccount = new AccountLookup(cash.Id, cash.Name);
+        _mandiriAccount = new AccountLookup(mandiri.Id, mandiri.Name);
+        _seaBankAccount = new AccountLookup(seaBank.Id, seaBank.Name);
+        _accounts = [_cashAccount, _mandiriAccount, _seaBankAccount];
     }
 
     public void Dispose()
@@ -68,14 +76,24 @@ public class InterpreterTests : IDisposable
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("Ready", response.State);
         Assert.Equal("CreateTransaction", response.Intent);
+
+        // Preview contains human-readable data
         Assert.NotNull(response.Preview);
         var preview = response.Preview!;
         Assert.Equal("Expense", preview.Type);
         Assert.Equal(18000m, preview.Amount);
         Assert.Equal("Cash", preview.Account);
         Assert.Equal("Jajan", preview.Description);
+
+        // Command is a ready-to-submit CreateTransactionCommand
         Assert.NotNull(response.Command);
-        Assert.Equal(preview.Type, response.Command!.Type);
+        var cmd = response.Command!;
+        Assert.Equal(TransactionType.Expense, cmd.Type);
+        Assert.Equal(18000m, cmd.Amount);
+        Assert.Equal(_scopeId, cmd.ScopeId);
+        Assert.Single(cmd.Entries);
+        Assert.Equal(_cashAccount.Id, cmd.Entries[0].AccountId);
+        Assert.Equal(-18000m, cmd.Entries[0].Amount);
     }
 
     // ───────────────────────── 2. Valid Income ─────────────────────────
@@ -101,10 +119,12 @@ public class InterpreterTests : IDisposable
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("Ready", response.State);
-        Assert.NotNull(response.Preview);
-        Assert.Equal("Income", response.Preview!.Type);
-        Assert.Equal(500000m, response.Preview.Amount);
-        Assert.Equal("Mandiri", response.Preview.Account);
+        Assert.NotNull(response.Command);
+        var cmd = response.Command!;
+        Assert.Equal(TransactionType.Income, cmd.Type);
+        Assert.Equal(500000m, cmd.Amount);
+        Assert.Equal(_mandiriAccount.Id, cmd.Entries[0].AccountId);
+        Assert.Equal(500000m, cmd.Entries[0].Amount);
     }
 
     // ───────────────────────── 3. Valid Transfer ─────────────────────────
@@ -130,9 +150,15 @@ public class InterpreterTests : IDisposable
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("Ready", response.State);
-        Assert.Equal("Transfer", response.Preview!.Type);
-        Assert.Equal("Mandiri", response.Preview.Account);
-        Assert.Equal("SeaBank", response.Preview.ToAccount);
+        Assert.NotNull(response.Command);
+        var cmd = response.Command!;
+        Assert.Equal(TransactionType.Transfer, cmd.Type);
+        Assert.Equal(100000m, cmd.Amount);
+        Assert.Equal(2, cmd.Entries.Count);
+        Assert.Equal(_mandiriAccount.Id, cmd.Entries[0].AccountId);
+        Assert.Equal(-100000m, cmd.Entries[0].Amount);
+        Assert.Equal(_seaBankAccount.Id, cmd.Entries[1].AccountId);
+        Assert.Equal(100000m, cmd.Entries[1].Amount);
     }
 
     // ───────────────────────── 4. Clarification needed ─────────────────────────
@@ -322,17 +348,6 @@ public class InterpreterTests : IDisposable
     [Fact]
     public async Task Interpret_TransferSameAccount_ReturnsNeedsClarification()
     {
-        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
-        {
-            Intent = "CreateTransaction",
-            TransactionType = "Transfer",
-            Amount = 50000,
-            Account = "Cash",
-            ToAccount = "Cash",
-            Date = "2026-09-18",
-            Clarifications = []
-        }));
-
         var response = InterpretEndpoint.Validate(
             new InterpretResult
             {
@@ -344,7 +359,8 @@ public class InterpreterTests : IDisposable
                 Date = "2026-09-18",
                 Clarifications = []
             },
-            ["Cash", "Mandiri"]);
+            _accounts,
+            _scopeId);
 
         Assert.Equal("NeedsClarification", response.State);
         Assert.Contains(response.Clarifications, c => c.Contains("different"));
@@ -377,6 +393,58 @@ public class InterpreterTests : IDisposable
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
         Assert.Contains(response.Clarifications, c => c.Contains("No accounts"));
+    }
+
+    // ───────────────────────── Command: Transfer with fee ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_TransferWithFee_CommandIncludesFee()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Mandiri",
+            ToAccount = "SeaBank",
+            Date = "2026-09-18",
+            FeeAmount = 2500,
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100k mandiri ke seabank fee 2500" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        var cmd = response.Command!;
+        Assert.Equal(2500m, cmd.FeeAmount);
+        Assert.Equal(-102500m, cmd.Entries[0].Amount);
+        Assert.Equal(100000m, cmd.Entries[1].Amount);
+    }
+
+    // ───────────────────────── Command: Account not found ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_AccountNotFound_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Expense",
+            Amount = 50000,
+            Account = "GoPay",
+            Date = "2026-09-18",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "bayar 50k gopay" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("GoPay"));
     }
 
     // ───────────────────────── FakeInterpreter ─────────────────────────

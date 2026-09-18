@@ -17,50 +17,6 @@ function formatDate(dateStr: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-function resolveAccountId(accountName: string | null, accounts: AccountProjection[]): string | null {
-  if (!accountName) return null;
-  const match = accounts.find(
-    a => !a.isArchived && a.name.toLowerCase() === accountName.toLowerCase(),
-  );
-  return match ? match.id : null;
-}
-
-function buildCommand(
-  data: InterpretTransactionData,
-  accounts: AccountProjection[],
-) {
-  const amount = data.amount;
-  const type = data.type as 'Expense' | 'Income' | 'Transfer';
-  const accountId = resolveAccountId(data.account, accounts);
-
-  if (type === 'Transfer') {
-    const destId = resolveAccountId(data.toAccount, accounts);
-    const fee = data.feeAmount ?? 0;
-    return {
-      type: 'Transfer' as const,
-      amount,
-      description: data.description ?? undefined,
-      occurredOn: data.date ?? '',
-      feeAmount: fee || undefined,
-      entries: [
-        { accountId: accountId!, amount: -(amount + fee) },
-        { accountId: destId!, amount },
-      ],
-    };
-  }
-
-  const signedAmount = type === 'Expense' ? -amount : amount;
-  return {
-    type,
-    amount,
-    description: data.description ?? undefined,
-    occurredOn: data.date ?? '',
-    entries: [
-      { accountId: accountId!, amount: signedAmount },
-    ],
-  };
-}
-
 export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps) {
   const [input, setInput] = useState('');
   const [interpreting, setInterpreting] = useState(false);
@@ -95,19 +51,13 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
   };
 
   const handleConfirm = async () => {
-    if (!result?.command || !accounts.length) return;
-
-    const command = buildCommand(result.command, accounts);
-    if (!command.entries.every(e => e.accountId)) {
-      setError('Akun tidak ditemukan. Gunakan form manual.');
-      return;
-    }
+    if (!result?.command) return;
 
     setSubmitting(true);
     setError('');
 
     try {
-      await createTransaction(command);
+      await createTransaction(result.command);
       setInput('');
       setResult(null);
       onSuccess();

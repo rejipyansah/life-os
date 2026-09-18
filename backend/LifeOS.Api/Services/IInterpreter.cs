@@ -39,7 +39,7 @@ public class InterpretResponse
     public InterpretTransactionData? Preview { get; set; }
 
     [JsonPropertyName("command")]
-    public InterpretTransactionData? Command { get; set; }
+    public CreateTransactionCommand? Command { get; set; }
 
     [JsonPropertyName("clarifications")]
     public List<string> Clarifications { get; set; } = [];

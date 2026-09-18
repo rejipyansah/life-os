@@ -87,6 +87,6 @@ export interface InterpretResponse {
   intent: string;
   state: 'Ready' | 'NeedsClarification' | 'Unsupported';
   preview: InterpretTransactionData | null;
-  command: InterpretTransactionData | null;
+  command: CreateTransactionCommand | null;
   clarifications: string[];
 }
