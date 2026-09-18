@@ -21,7 +21,7 @@ public class GeminiInterpreter : IInterpreter
     {
         var apiKey = configuration["Gemini:ApiKey"]
             ?? throw new InvalidOperationException("Gemini:ApiKey is not configured.");
-        _model = configuration["Gemini:Model"] ?? "gemini-2.5-flash";
+        _model = configuration["Gemini:Model"] ?? "gemini-3.6-flash";
         _client = new Client(apiKey: apiKey);
     }
 
