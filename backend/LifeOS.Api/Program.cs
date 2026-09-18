@@ -61,6 +61,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<GuestTokenService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<AllocationService>();
+builder.Services.AddScoped<AccountService>();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -372,6 +373,181 @@ app.MapPatch("/api/finance/allocations/{id:guid}", async (
     }
 })
 .WithName("UpdateAllocation");
+
+// FINANCE - ACCOUNTS
+app.MapPost("/api/finance/accounts", async (
+    HttpContext http,
+    AccountService accountService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var command = await http.Request.ReadFromJsonAsync<CreateAccountCommand>();
+    if (command is null)
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+
+    command.ScopeId = scopeId;
+
+    try
+    {
+        var account = await accountService.CreateAccountAsync(command);
+        return Results.Ok(new
+        {
+            accountId = account.Id,
+            name = account.Name,
+            type = account.Type.ToString(),
+            isArchived = account.IsArchived,
+            createdAt = account.CreatedAt
+        });
+    }
+    catch (ValidationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 422);
+    }
+})
+.WithName("CreateAccount");
+
+app.MapGet("/api/finance/accounts", async (
+    HttpContext http,
+    AccountService accountService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db,
+    bool? includeArchived) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var result = await accountService.GetAccountsAsync(scopeId, includeArchived ?? false);
+    return Results.Ok(result);
+})
+.WithName("GetAccounts");
+
+app.MapGet("/api/finance/accounts/{id:guid}", async (
+    Guid id,
+    HttpContext http,
+    AccountService accountService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    try
+    {
+        var account = await accountService.GetAccountByIdAsync(id, scopeId);
+        return Results.Ok(account);
+    }
+    catch (ValidationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 404);
+    }
+})
+.WithName("GetAccountById");
+
+app.MapPatch("/api/finance/accounts/{id:guid}", async (
+    Guid id,
+    HttpContext http,
+    AccountService accountService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var command = await http.Request.ReadFromJsonAsync<UpdateAccountCommand>();
+    if (command is null)
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+
+    command.ScopeId = scopeId;
+
+    try
+    {
+        var account = await accountService.UpdateAccountAsync(id, command);
+        return Results.Ok(new
+        {
+            accountId = account.Id,
+            name = account.Name,
+            type = account.Type.ToString(),
+            isArchived = account.IsArchived,
+            createdAt = account.CreatedAt
+        });
+    }
+    catch (ValidationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 422);
+    }
+})
+.WithName("UpdateAccount");
 
 app.Run();
 

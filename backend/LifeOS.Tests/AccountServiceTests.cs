@@ -1,0 +1,955 @@
+using LifeOS.Api.Data;
+using LifeOS.Api.Models;
+using LifeOS.Api.Services;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+
+namespace LifeOS.Tests;
+
+public class AccountServiceTests : IDisposable
+{
+    private readonly ApplicationDbContext _db;
+    private readonly SqliteConnection _connection;
+    private readonly AccountService _sut;
+    private readonly TransactionService _txService;
+    private readonly AllocationService _allocService;
+    private readonly Guid _scopeId;
+
+    public AccountServiceTests()
+    {
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(_connection)
+            .Options;
+
+        _db = new ApplicationDbContext(options);
+        _db.Database.EnsureCreated();
+        _sut = new AccountService(_db);
+        _txService = new TransactionService(_db);
+        _allocService = new AllocationService(_db);
+
+        // Seed: Scope
+        var scope = new Scope { Type = ScopeType.Owner };
+        _db.Scopes.Add(scope);
+        _db.SaveChanges();
+        _scopeId = scope.Id;
+    }
+
+    public void Dispose()
+    {
+        _db.Dispose();
+        _connection.Dispose();
+    }
+
+    // ───────────────────────── Creation ─────────────────────────
+
+    [Fact]
+    public async Task Create_ValidAccount_Succeeds()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        };
+
+        var account = await _sut.CreateAccountAsync(command);
+
+        Assert.Equal("Mandiri", account.Name);
+        Assert.Equal(AccountType.Bank, account.Type);
+        Assert.False(account.IsArchived);
+        Assert.Equal(_scopeId, account.ScopeId);
+    }
+
+    [Fact]
+    public async Task Create_CashAccount_Succeeds()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Cash Wallet",
+            Type = AccountType.Cash
+        };
+
+        var account = await _sut.CreateAccountAsync(command);
+
+        Assert.Equal(AccountType.Cash, account.Type);
+    }
+
+    [Fact]
+    public async Task Create_EWalletAccount_Succeeds()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "GoPay",
+            Type = AccountType.EWallet
+        };
+
+        var account = await _sut.CreateAccountAsync(command);
+
+        Assert.Equal(AccountType.EWallet, account.Type);
+    }
+
+    [Fact]
+    public async Task Create_EmptyName_Rejected()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "",
+            Type = AccountType.Bank
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(command));
+    }
+
+    [Fact]
+    public async Task Create_WhitespaceName_Rejected()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "   ",
+            Type = AccountType.Bank
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(command));
+    }
+
+    [Fact]
+    public async Task Create_NullName_Rejected()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = null!,
+            Type = AccountType.Bank
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(command));
+    }
+
+    [Fact]
+    public async Task Create_InvalidType_Rejected()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Test",
+            Type = (AccountType)999
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(command));
+    }
+
+    [Fact]
+    public async Task Create_NameTrimmed()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "  Mandiri  ",
+            Type = AccountType.Bank
+        };
+
+        var account = await _sut.CreateAccountAsync(command);
+
+        Assert.Equal("Mandiri", account.Name);
+    }
+
+    [Fact]
+    public async Task Create_ZeroBalanceAccount()
+    {
+        var command = new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Empty Account",
+            Type = AccountType.Cash
+        };
+
+        var account = await _sut.CreateAccountAsync(command);
+
+        var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
+        Assert.Equal(0m, projection.Balance);
+    }
+
+    // ───────────────────────── Scope isolation ─────────────────────────
+
+    [Fact]
+    public async Task Create_CrossScope_Rejected()
+    {
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var command = new CreateAccountCommand
+        {
+            ScopeId = otherScope.Id,
+            Name = "Foreign Account",
+            Type = AccountType.Bank
+        };
+
+        var account = await _sut.CreateAccountAsync(command);
+
+        // Verify it belongs to the other scope, not ours
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.GetAccountByIdAsync(account.Id, _scopeId));
+    }
+
+    // ───────────────────────── Read ─────────────────────────
+
+    [Fact]
+    public async Task GetAccounts_ReturnsOnlyCurrentScope()
+    {
+        await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Our Account",
+            Type = AccountType.Bank
+        });
+
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = otherScope.Id,
+            Name = "Other Account",
+            Type = AccountType.Bank
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal("Our Account", result.Accounts[0].Name);
+    }
+
+    [Fact]
+    public async Task GetAccounts_HiddenByDefault()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "To Archive",
+            Type = AccountType.Cash
+        });
+
+        await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId, includeArchived: false);
+        Assert.Empty(result.Accounts);
+    }
+
+    [Fact]
+    public async Task GetAccounts_IncludedWithFlag()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "To Archive",
+            Type = AccountType.Cash
+        });
+
+        await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId, includeArchived: true);
+        Assert.Single(result.Accounts);
+        Assert.True(result.Accounts[0].IsArchived);
+    }
+
+    [Fact]
+    public async Task GetAccounts_BalanceDerived()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Seeded Account",
+            Type = AccountType.Bank
+        });
+
+        await SeedBalance(account.Id, 500_000m);
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal(500_000m, result.Accounts[0].Balance);
+    }
+
+    [Fact]
+    public async Task GetAccounts_AllocatedDerived()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Allocation Account",
+            Type = AccountType.Bank
+        });
+
+        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Name = "Vacation Fund",
+            Amount = 300_000m
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal(300_000m, result.Accounts[0].Allocated);
+    }
+
+    [Fact]
+    public async Task GetAccounts_AvailableCalculation()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Calc Account",
+            Type = AccountType.Bank
+        });
+
+        await SeedBalance(account.Id, 500_000m);
+        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Name = "Fund",
+            Amount = 200_000m
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal(500_000m, result.Accounts[0].Balance);
+        Assert.Equal(200_000m, result.Accounts[0].Allocated);
+        Assert.Equal(300_000m, result.Accounts[0].Available);
+    }
+
+    [Fact]
+    public async Task GetAccounts_NegativeAvailablePreserved()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Over-Allocated",
+            Type = AccountType.Bank
+        });
+
+        await SeedBalance(account.Id, 100_000m);
+        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Name = "Big Fund",
+            Amount = 300_000m
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal(-200_000m, result.Accounts[0].Available);
+    }
+
+    [Fact]
+    public async Task GetAccounts_ZeroBalanceAppears()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Zero Balance",
+            Type = AccountType.Cash
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal(0m, result.Accounts[0].Balance);
+    }
+
+    [Fact]
+    public async Task GetAccounts_SummaryMatchesReturnedSet()
+    {
+        var accountA = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Account A",
+            Type = AccountType.Bank
+        });
+        var accountB = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Account B",
+            Type = AccountType.Cash
+        });
+
+        await SeedBalance(accountA.Id, 500_000m);
+        await SeedBalance(accountB.Id, 300_000m);
+        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = accountA.Id,
+            Name = "Fund A",
+            Amount = 100_000m
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+
+        Assert.Equal(2, result.Accounts.Count);
+        Assert.Equal(800_000m, result.TotalBalance);
+        Assert.Equal(100_000m, result.TotalAllocated);
+        Assert.Equal(700_000m, result.TotalAvailable);
+    }
+
+    [Fact]
+    public async Task GetAccounts_ArchivedNotInDefaultSummary()
+    {
+        var accountA = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Active",
+            Type = AccountType.Bank
+        });
+        var accountB = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Archived",
+            Type = AccountType.Cash
+        });
+
+        await SeedBalance(accountA.Id, 500_000m);
+        await SeedBalance(accountB.Id, 300_000m);
+
+        await _sut.UpdateAccountAsync(accountB.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId, includeArchived: false);
+
+        Assert.Single(result.Accounts);
+        Assert.Equal(500_000m, result.TotalBalance);
+    }
+
+    // ───────────────────────── Get by ID ─────────────────────────
+
+    [Fact]
+    public async Task GetById_ExistingAccount_ReturnsProjection()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Detail Account",
+            Type = AccountType.Bank
+        });
+
+        await SeedBalance(account.Id, 250_000m);
+
+        var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
+
+        Assert.Equal(account.Id, projection.Id);
+        Assert.Equal("Detail Account", projection.Name);
+        Assert.Equal(250_000m, projection.Balance);
+    }
+
+    [Fact]
+    public async Task GetById_NonExistentAccount_Throws()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.GetAccountByIdAsync(Guid.NewGuid(), _scopeId));
+    }
+
+    [Fact]
+    public async Task GetById_CrossScopeAccount_Throws()
+    {
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var otherAccount = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = otherScope.Id,
+            Name = "Guest Account",
+            Type = AccountType.Cash
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.GetAccountByIdAsync(otherAccount.Id, _scopeId));
+    }
+
+    // ───────────────────────── Update ─────────────────────────
+
+    [Fact]
+    public async Task Update_ChangeName_Works()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Old Name",
+            Type = AccountType.Bank
+        });
+
+        var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "New Name"
+        });
+
+        Assert.Equal("New Name", updated.Name);
+    }
+
+    [Fact]
+    public async Task Update_NameCanChange_WithTransactionHistory()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Historical Account",
+            Type = AccountType.Bank
+        });
+
+        // Create a transaction
+        await SeedBalance(account.Id, 100_000m);
+
+        // Name change should still work
+        var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Renamed Account"
+        });
+
+        Assert.Equal("Renamed Account", updated.Name);
+    }
+
+    [Fact]
+    public async Task Update_ChangeType_BeforeTransactions_Works()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Flexible Account",
+            Type = AccountType.Cash
+        });
+
+        var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Type = AccountType.Bank
+        });
+
+        Assert.Equal(AccountType.Bank, updated.Type);
+    }
+
+    [Fact]
+    public async Task Update_ChangeType_AfterTransactions_Rejected()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Locked Type Account",
+            Type = AccountType.Cash
+        });
+
+        // Create a transaction
+        await SeedBalance(account.Id, 100_000m);
+
+        // Type change should fail
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+            {
+                ScopeId = _scopeId,
+                Type = AccountType.Bank
+            }));
+    }
+
+    [Fact]
+    public async Task Update_Archive_Works()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "To Archive",
+            Type = AccountType.Cash
+        });
+
+        var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        Assert.True(updated.IsArchived);
+    }
+
+    [Fact]
+    public async Task Update_Unarchive_Works()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "To Unarchive",
+            Type = AccountType.Cash
+        });
+
+        await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var unarchived = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = false
+        });
+
+        Assert.False(unarchived.IsArchived);
+    }
+
+    [Fact]
+    public async Task Update_EmptyName_Rejected()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Valid Name",
+            Type = AccountType.Bank
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+            {
+                ScopeId = _scopeId,
+                Name = ""
+            }));
+    }
+
+    [Fact]
+    public async Task Update_ScopeCannotChange()
+    {
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Our Account",
+            Type = AccountType.Bank
+        });
+
+        // Try to update with wrong scope
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+            {
+                ScopeId = otherScope.Id,
+                Name = "Hijacked"
+            }));
+    }
+
+    [Fact]
+    public async Task Update_CrossScopeAccount_Rejected()
+    {
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var otherAccount = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = otherScope.Id,
+            Name = "Guest Account",
+            Type = AccountType.Cash
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.UpdateAccountAsync(otherAccount.Id, new UpdateAccountCommand
+            {
+                ScopeId = _scopeId,
+                Name = "Hijacked"
+            }));
+    }
+
+    [Fact]
+    public async Task Update_InvalidType_Rejected()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Test",
+            Type = AccountType.Bank
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+            {
+                ScopeId = _scopeId,
+                Type = (AccountType)999
+            }));
+    }
+
+    // ───────────────────────── Archived Account ─────────────────────────
+
+    [Fact]
+    public async Task ArchivedAccount_CannotBeUsedInTransaction()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Archived Account",
+            Type = AccountType.Bank
+        });
+
+        await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = account.Id, Amount = 100_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _txService.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task ArchivedAccount_CannotBeTransferSource()
+    {
+        var accountA = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Source Account",
+            Type = AccountType.Bank
+        });
+        var accountB = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dest Account",
+            Type = AccountType.Cash
+        });
+
+        // Seed balance before archiving
+        await SeedBalance(accountA.Id, 500_000m);
+
+        // Archive the source account
+        await _sut.UpdateAccountAsync(accountA.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = accountA.Id, Amount = -100_000m },
+                new CreateTransactionEntryCommand { AccountId = accountB.Id, Amount = 100_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _txService.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task ArchivedAccount_CannotBeTransferDestination()
+    {
+        var accountA = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Source Account",
+            Type = AccountType.Bank
+        });
+        var accountB = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dest Account",
+            Type = AccountType.Cash
+        });
+
+        // Seed balance
+        await SeedBalance(accountA.Id, 500_000m);
+
+        // Archive the destination account
+        await _sut.UpdateAccountAsync(accountB.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = accountA.Id, Amount = -100_000m },
+                new CreateTransactionEntryCommand { AccountId = accountB.Id, Amount = 100_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _txService.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task UnarchivedAccount_CanBeUsedAgain()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Unarchive Account",
+            Type = AccountType.Bank
+        });
+
+        // Archive
+        await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        // Verify archived - transaction should fail
+        var command1 = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = account.Id, Amount = 100_000m }
+            ]
+        };
+        await Assert.ThrowsAsync<ValidationException>(() => _txService.CreateTransactionAsync(command1));
+
+        // Unarchive
+        await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = false
+        });
+
+        // Verify unarchived - transaction should succeed
+        var (tx, _) = await _txService.CreateTransactionAsync(command1);
+        Assert.Equal(TransactionType.Income, tx.Type);
+    }
+
+    // ───────────────────────── Integrity ─────────────────────────
+
+    [Fact]
+    public async Task NoBalanceColumn_IntegrityCheck()
+    {
+        // Verify that Account entity does not have a Balance property
+        var properties = typeof(Account).GetProperties();
+        Assert.DoesNotContain(properties, p =>
+            p.Name.Equals("Balance", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task NoProviderInstitutionFields_IntegrityCheck()
+    {
+        var properties = typeof(Account).GetProperties().Select(p => p.Name).ToList();
+        Assert.False(properties.Any(p => p.Equals("Provider", StringComparison.OrdinalIgnoreCase)),
+            "Account should not have a Provider field.");
+        Assert.False(properties.Any(p => p.Equals("Institution", StringComparison.OrdinalIgnoreCase)),
+            "Account should not have an Institution field.");
+        Assert.False(properties.Any(p => p.Equals("Currency", StringComparison.OrdinalIgnoreCase)),
+            "Account should not have a Currency field.");
+    }
+
+    [Fact]
+    public async Task NoHardDeleteEndpoint_IntegrityCheck()
+    {
+        var methodNames = typeof(AccountService)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Select(m => m.Name)
+            .ToList();
+
+        Assert.DoesNotContain(methodNames, m =>
+            m.Contains("Delete", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("Remove", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExistingDataRemainsIntact()
+    {
+        // Create account and transaction
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Existing Account",
+            Type = AccountType.Bank
+        });
+
+        await SeedBalance(account.Id, 500_000m);
+
+        // Verify data integrity
+        var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
+        Assert.Equal(500_000m, projection.Balance);
+
+        // Create allocation
+        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Name = "Fund",
+            Amount = 200_000m
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+        Assert.Single(result.Accounts);
+        Assert.Equal(500_000m, result.Accounts[0].Balance);
+        Assert.Equal(200_000m, result.Accounts[0].Allocated);
+    }
+
+    // ───────────────────────── Helpers ─────────────────────────
+
+    private async Task SeedBalance(Guid accountId, decimal amount)
+    {
+        var tx = new Transaction
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = Math.Abs(amount),
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            CreatedAt = DateTime.UtcNow
+        };
+        _db.Transactions.Add(tx);
+        await _db.SaveChangesAsync();
+
+        var entry = new TransactionEntry
+        {
+            TransactionId = tx.Id,
+            AccountId = accountId,
+            Amount = amount
+        };
+        _db.TransactionEntries.Add(entry);
+        await _db.SaveChangesAsync();
+    }
+}

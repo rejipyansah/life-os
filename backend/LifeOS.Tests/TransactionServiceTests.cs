@@ -931,6 +931,119 @@ public class TransactionServiceTests : IDisposable
         Assert.Equal(1, entryCount);
     }
 
+    // ───────────────────────── Archived Account ─────────────────────────
+
+    [Fact]
+    public async Task ArchivedSource_Rejected()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        // Archive the account
+        var account = await _db.Accounts.FindAsync(_accountAId);
+        account!.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        // Expense should fail
+        var expenseCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 10_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -10_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(expenseCommand));
+    }
+
+    [Fact]
+    public async Task ArchivedAccount_CannotBeTransferSource()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        // Archive the source account
+        var account = await _db.Accounts.FindAsync(_accountAId);
+        account!.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 50_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -50_000m },
+                new CreateTransactionEntryCommand { AccountId = _accountBId, Amount = 50_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task ArchivedAccount_CannotBeTransferDestination()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        // Archive the destination account
+        var account = await _db.Accounts.FindAsync(_accountBId);
+        account!.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 50_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -50_000m },
+                new CreateTransactionEntryCommand { AccountId = _accountBId, Amount = 50_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task UnarchivedAccount_CanBeUsedAgain()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        // Archive
+        var account = await _db.Accounts.FindAsync(_accountAId);
+        account!.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        // Verify archived - transaction should fail
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 10_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -10_000m }
+            ]
+        };
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+
+        // Unarchive
+        account.IsArchived = false;
+        await _db.SaveChangesAsync();
+
+        // Verify unarchived - transaction should succeed
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+        Assert.Equal(TransactionType.Expense, tx.Type);
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private async Task SeedBalance(Guid accountId, decimal amount)

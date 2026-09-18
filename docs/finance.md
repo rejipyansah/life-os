@@ -33,6 +33,11 @@ Rules:
 
 - Account belongs to exactly one Scope.
 - Scope is resolved server-side; never trust arbitrary ScopeId from the client.
+- Account Name remains user-defined and may be changed.
+- Account Type may be changed while the Account has no TransactionEntry history.
+- Once the Account has at least one TransactionEntry, Account Type becomes immutable.
+- Do not add a separate HasTransactions field; determine this from ledger history.
+- Archived Accounts retain their historical data and cannot receive new financial transactions.
 - Account may be created with zero balance.
 - Opening balance is optional and is not required for Account creation.
 - Account does not store Balance as source of truth.
@@ -41,6 +46,7 @@ Rules:
 - Accounts are archived instead of hard-deleted so transaction history remains intact.
 - Account name does not need to be globally unique.
 - Preserve Scope isolation.
+- Do not add Provider, Institution, Purpose, Balance, Currency, or other new Account fields.
 
 ---
 
