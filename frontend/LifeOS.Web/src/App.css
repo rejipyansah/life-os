@@ -146,6 +146,7 @@
 /* ─── Finance Screen ─── */
 .finance-screen {
   flex: 1;
+  background: var(--color-surface);
   padding-bottom: 80px;
 }
 
@@ -153,16 +154,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 8px;
+  padding: 20px 20px 12px;
   position: sticky;
   top: 0;
-  background: var(--color-bg);
+  background: var(--color-surface);
   z-index: 10;
 }
 
 .finance-header h1 {
   font-size: 1.5rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.finance-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .back-btn {
@@ -171,115 +179,142 @@
 
 /* ─── Summary ─── */
 .summary-section {
-  display: flex;
-  gap: 12px;
-  padding: 12px 20px 20px;
+  padding: 4px 20px 24px;
 }
 
-.summary-card {
-  flex: 1;
-  background: var(--color-surface);
-  border-radius: var(--radius);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid var(--color-border);
-}
-
-.summary-card.total {
-  background: var(--color-primary);
-  color: var(--color-primary-text);
-  border-color: var(--color-primary);
-}
-
-.summary-card.total .summary-label {
-  color: rgba(255, 255, 255, 0.7);
+.summary-total {
+  margin-bottom: 2px;
 }
 
 .summary-label {
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.65rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
   color: var(--color-text-secondary);
+  display: block;
+  margin-bottom: 2px;
 }
 
 .summary-value {
-  font-size: 1.25rem;
+  font-size: 2rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.summary-secondary {
+  display: flex;
+  gap: 24px;
+  margin-top: 10px;
+}
+
+.summary-secondary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.summary-secondary-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--color-text-secondary);
+}
+
+.summary-secondary-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
 }
 
 /* ─── Sections ─── */
 .section {
-  padding: 0 20px 24px;
+  padding: 0 20px 20px;
+  border-top: 1px solid var(--color-border);
 }
 
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  padding: 16px 0 10px;
 }
 
 .section-header h2 {
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--color-text-secondary);
 }
 
-/* ─── Account Cards ─── */
+/* ─── Account Rows ─── */
 .account-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
-.account-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-
-.account-card-header {
+.account-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border);
+  gap: 12px;
 }
 
-.account-name {
+.account-row:last-child {
+  border-bottom: none;
+}
+
+.account-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.account-row-name {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.account-type {
-  font-size: 0.75rem;
+.account-row-type {
+  font-size: 0.6rem;
+  font-weight: 500;
   color: var(--color-text-secondary);
   background: var(--color-bg);
-  padding: 2px 8px;
-  border-radius: 100px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
 }
 
-.account-card-body {
+.account-row-right {
   display: flex;
-  gap: 20px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex-shrink: 0;
 }
 
-.account-card-body .label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-text-secondary);
-  display: block;
-  margin-bottom: 2px;
-}
-
-.account-card-body .value {
-  font-size: 1rem;
+.account-row-balance {
+  font-size: 0.85rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.account-row-available {
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
 }
 
 /* ─── Transaction List ─── */
@@ -292,9 +327,9 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 14px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--color-border);
-  gap: 12px;
+  gap: 16px;
 }
 
 .transaction-item:last-child {
@@ -309,25 +344,29 @@
   flex: 1;
 }
 
-.transaction-type {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-text-secondary);
-}
-
 .transaction-description {
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.transaction-account {
-  font-size: 0.75rem;
+.transaction-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
   color: var(--color-text-secondary);
+}
+
+.transaction-type {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
 }
 
 .transaction-right {
@@ -340,8 +379,9 @@
 
 .transaction-amount {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .transaction-amount.positive {
@@ -353,12 +393,12 @@
 }
 
 .transaction-fee {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   color: var(--color-text-secondary);
 }
 
 .transaction-date {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   color: var(--color-text-secondary);
 }
 
@@ -370,7 +410,7 @@
 }
 
 .empty-hint {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   margin-top: 4px;
 }
 
@@ -453,35 +493,32 @@
   margin-bottom: 16px;
 }
 
-/* ─── FAB ─── */
-.fab {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  color: var(--color-primary-text);
+/* ─── Manual Entry Link ─── */
+.manual-entry-link {
+  background: none;
   border: none;
-  font-size: 1.75rem;
-  font-weight: 300;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 4px 0;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  transition: transform 0.15s;
-  z-index: 20;
 }
 
-.fab:active {
-  transform: scale(0.92);
+.manual-entry-link:hover {
+  color: var(--color-text);
 }
 
 /* ─── Natural Input ─── */
 .natural-input-section {
-  padding: 12px 20px 16px;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--color-surface);
+  z-index: 10;
+  border-top: 1px solid var(--color-border);
+  padding: 12px 20px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 }
 
 .natural-input-form {
@@ -491,17 +528,18 @@
 
 .natural-input {
   flex: 1;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  font-size: 1rem;
-  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  background: var(--color-bg);
   outline: none;
   transition: border-color 0.15s;
 }
 
 .natural-input:focus {
   border-color: var(--color-primary);
+  background: var(--color-surface);
 }
 
 .natural-input::placeholder {
@@ -513,27 +551,28 @@
 }
 
 .natural-input-btn {
-  padding: 14px 20px;
-  min-width: 56px;
+  padding: 12px 18px;
+  min-width: 52px;
+  font-size: 0.9rem;
 }
 
 .interpret-preview {
-  background: var(--color-surface);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 16px;
-  margin-top: 12px;
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-top: 10px;
 }
 
 .interpret-preview-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .interpret-preview-type {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -541,7 +580,7 @@
 }
 
 .interpret-preview-amount {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -549,9 +588,9 @@
 .interpret-preview-details {
   display: flex;
   gap: 8px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--color-text-secondary);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .interpret-preview-date {
@@ -559,47 +598,62 @@
 }
 
 .interpret-preview-desc {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--color-text-secondary);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .interpret-preview-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 
 .interpret-preview-actions .btn {
   flex: 1;
+  min-height: 40px;
+  font-size: 0.875rem;
 }
 
 .interpret-clarification,
 .interpret-unsupported {
-  margin-top: 12px;
-  background: var(--color-surface);
+  margin-top: 10px;
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 16px;
+  border-radius: var(--radius-sm);
+  padding: 14px;
 }
 
 .interpret-clarification p,
 .interpret-unsupported p {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--color-text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .interpret-clarification-hint {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--color-text-secondary);
-  opacity: 0.7;
+  opacity: 0.6;
   margin-bottom: 4px;
 }
 
 /* ─── Responsive ─── */
 @media (min-width: 640px) {
   .finance-screen {
-    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    max-width: 720px;
     margin: 0 auto;
+    padding-bottom: 40px;
+    border-left: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
+  }
+
+  .natural-input-section {
+    position: static;
+    order: -1;
+    border-top: none;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 12px;
   }
 }

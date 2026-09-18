@@ -114,33 +114,38 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   }
 
   const hasAccounts = accounts && accounts.accounts.length > 0;
+  const totalAllocated = accounts?.totalAllocated ?? 0;
+  const hasAllocations = totalAllocated > 0;
 
   return (
     <div className="finance-screen">
       <header className="finance-header">
         <h1>Finance</h1>
-        {!isGuest && (
-          <button className="btn btn-text" onClick={handleLogout}>Logout</button>
-        )}
+        <div className="finance-header-actions">
+          {!isGuest && (
+            <button className="btn btn-text" onClick={handleLogout}>Logout</button>
+          )}
+        </div>
       </header>
 
       {error && <div className="error-message">{error}</div>}
 
-      {hasAccounts && (
-        <NaturalInput
-          accounts={accounts!.accounts}
-          onSuccess={refresh}
-        />
-      )}
-
       <section className="summary-section">
-        <div className="summary-card total">
+        <div className="summary-total">
           <span className="summary-label">Total Money</span>
           <span className="summary-value">{formatCurrency(accounts?.totalBalance ?? 0)}</span>
         </div>
-        <div className="summary-card available">
-          <span className="summary-label">Available</span>
-          <span className="summary-value">{formatCurrency(accounts?.totalAvailable ?? 0)}</span>
+        <div className="summary-secondary">
+          <div className="summary-secondary-item">
+            <span className="summary-secondary-label">Available</span>
+            <span className="summary-secondary-value">{formatCurrency(accounts?.totalAvailable ?? 0)}</span>
+          </div>
+          {hasAllocations && (
+            <div className="summary-secondary-item">
+              <span className="summary-secondary-label">Reserved</span>
+              <span className="summary-secondary-value">{formatCurrency(totalAllocated)}</span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -170,18 +175,20 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
 
       <section className="section">
         <div className="section-header">
-          <h2>Recent Transactions</h2>
+          <h2>Transactions</h2>
+          <button className="manual-entry-link" onClick={() => setView('add-transaction')}>
+            Manual
+          </button>
         </div>
         <TransactionList transactions={transactions} />
       </section>
 
-      <button
-        className="fab"
-        onClick={() => setView('add-transaction')}
-        aria-label="Add transaction"
-      >
-        +
-      </button>
+      {hasAccounts && (
+        <NaturalInput
+          accounts={accounts!.accounts}
+          onSuccess={refresh}
+        />
+      )}
     </div>
   );
 }

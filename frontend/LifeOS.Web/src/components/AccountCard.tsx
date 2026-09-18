@@ -19,20 +19,14 @@ function accountTypeLabel(type: string): string {
 
 export default function AccountCard({ account }: AccountCardProps) {
   return (
-    <div className="account-card">
-      <div className="account-card-header">
-        <span className="account-name">{account.name}</span>
-        <span className="account-type">{accountTypeLabel(account.type)}</span>
+    <div className="account-row">
+      <div className="account-row-left">
+        <span className="account-row-name">{account.name}</span>
+        <span className="account-row-type">{accountTypeLabel(account.type)}</span>
       </div>
-      <div className="account-card-body">
-        <div className="account-balance">
-          <span className="label">Balance</span>
-          <span className="value">{formatCurrency(account.balance)}</span>
-        </div>
-        <div className="account-available">
-          <span className="label">Available</span>
-          <span className="value">{formatCurrency(account.available)}</span>
-        </div>
+      <div className="account-row-right">
+        <span className="account-row-balance">{formatCurrency(account.balance)}</span>
+        <span className="account-row-available">avail. {formatCurrency(account.available)}</span>
       </div>
     </div>
   );

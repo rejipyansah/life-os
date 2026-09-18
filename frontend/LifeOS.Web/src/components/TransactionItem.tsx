@@ -26,22 +26,22 @@ export default function TransactionItem({ transaction }: TransactionItemProps) {
     : accountNames.join(', ');
 
   return (
-    <div className={`transaction-item ${isPositive ? 'positive' : 'negative'}`}>
+    <div className="transaction-item">
       <div className="transaction-left">
-        <span className="transaction-type">{transaction.type}</span>
         <span className="transaction-description">
           {transaction.description || transaction.type}
         </span>
-        {accountLabel && (
-          <span className="transaction-account">{accountLabel}</span>
-        )}
+        <div className="transaction-meta">
+          <span className="transaction-type">{transaction.type}</span>
+          {accountLabel && <span>{accountLabel}</span>}
+        </div>
       </div>
       <div className="transaction-right">
         <span className={`transaction-amount ${isPositive ? 'positive' : 'negative'}`}>
-          {isPositive ? '+' : '-'} {formatCurrency(transaction.amount)}
+          {isPositive ? '+' : '-'}{formatCurrency(transaction.amount)}
         </span>
         {transaction.feeAmount != null && transaction.feeAmount > 0 && (
-          <span className="transaction-fee">Fee: {formatCurrency(transaction.feeAmount)}</span>
+          <span className="transaction-fee">fee {formatCurrency(transaction.feeAmount)}</span>
         )}
         <span className="transaction-date">{formatDate(transaction.occurredOn)}</span>
       </div>

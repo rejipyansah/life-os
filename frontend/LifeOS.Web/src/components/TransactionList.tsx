@@ -10,7 +10,7 @@ export default function TransactionList({ transactions }: TransactionListProps) 
     return (
       <div className="empty-state">
         <p>No transactions yet.</p>
-        <p className="empty-hint">Tap + Add transaction to get started.</p>
+        <p className="empty-hint">Type what happened above, or use Manual.</p>
       </div>
     );
   }
