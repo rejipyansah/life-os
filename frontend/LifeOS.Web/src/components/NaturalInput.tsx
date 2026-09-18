@@ -118,6 +118,7 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
           {result.clarifications.map((c, i) => (
             <p key={i}>{c}</p>
           ))}
+          <p className="interpret-clarification-hint">Edit input dan tekan Go untuk mencoba lagi.</p>
           <button className="btn btn-text" onClick={handleClear}>Kembali</button>
         </div>
       )}
