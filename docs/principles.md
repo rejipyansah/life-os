@@ -284,3 +284,29 @@ The same core/domain operation should be usable from both natural-input and manu
 Avoid coupling the frontend directly to a specific AI provider.
 
 > **Natural input first. Core validates. AI interprets, never decides.**
+
+---
+
+## 14. AI Provider as a Replaceable Service
+
+Life OS is a personal application and portfolio piece, not a commercial SaaS.
+
+Free-tier AI providers remain acceptable for its personal and demonstration use case.
+
+The AI provider is a replaceable external service, not a core architectural dependency.
+
+AI provider availability or quota exhaustion must never break core Finance functionality.
+
+Manual input must remain available as a fallback when AI is unavailable.
+
+AI payloads should be minimized: send only what is necessary for interpretation.
+
+Do not send unnecessary financial history, balances, or other private data to the AI provider.
+
+AI remains an interpretation layer only.
+
+It must not determine ScopeId, UserId, internal AccountId, database state, balance changes, or other critical domain decisions.
+
+If Life OS evolves into a materially different or commercial product, provider, quota, privacy, and data-handling decisions should be revisited.
+
+> **AI is a helper, not a dependency. Core works without it.**
