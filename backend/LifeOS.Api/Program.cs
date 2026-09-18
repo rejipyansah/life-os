@@ -59,6 +59,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<GuestTokenService>();
+builder.Services.AddScoped<TransactionService>();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -163,6 +164,62 @@ app.MapPost("/api/guest/session", async (HttpContext http) =>
     return Results.Ok(new { isGuest = true });
 })
 .WithName("CreateGuestSession");
+
+// FINANCE - TRANSACTIONS
+app.MapPost("/api/finance/transactions", async (
+    HttpContext http,
+    TransactionService transactionService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        // Authenticated user: resolve Owner Scope
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        // Guest user: resolve Guest Scope from session
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var command = await http.Request.ReadFromJsonAsync<CreateTransactionCommand>();
+    if (command is null)
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+
+    // Override ScopeId with server-resolved value
+    command.ScopeId = scopeId;
+
+    try
+    {
+        var (transaction, entries) = await transactionService.CreateTransactionAsync(command);
+        return Results.Ok(new
+        {
+            transactionId = transaction.Id,
+            type = transaction.Type.ToString(),
+            amount = transaction.Amount,
+            occurredOn = transaction.OccurredOn,
+            createdAt = transaction.CreatedAt,
+            entryCount = entries.Count
+        });
+    }
+    catch (ValidationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 422);
+    }
+})
+.WithName("CreateTransaction");
 
 app.Run();
 

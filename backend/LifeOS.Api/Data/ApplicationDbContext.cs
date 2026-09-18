@@ -14,6 +14,8 @@ public class ApplicationDbContext : IdentityDbContext
     public DbSet<Scope> Scopes => Set<Scope>();
     public DbSet<GuestSession> GuestSessions => Set<GuestSession>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<Transaction> Transactions => Set<Transaction>();
+    public DbSet<TransactionEntry> TransactionEntries => Set<TransactionEntry>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -80,6 +82,68 @@ public class ApplicationDbContext : IdentityDbContext
 
             // Index for querying accounts within a scope
             e.HasIndex(a => a.ScopeId);
+        });
+
+        // Transaction configuration
+        builder.Entity<Transaction>(e =>
+        {
+            e.HasKey(t => t.Id);
+
+            e.Property(t => t.Type)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(t => t.Amount)
+                .HasColumnType("decimal(18,2)");
+
+            e.Property(t => t.FeeAmount)
+                .HasColumnType("decimal(18,2)");
+
+            e.Property(t => t.Description)
+                .HasMaxLength(512);
+
+            e.Property(t => t.CategoryName)
+                .HasMaxLength(128);
+
+            // FK to Scope
+            e.HasOne(t => t.Scope)
+                .WithMany()
+                .HasForeignKey(t => t.ScopeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Self-reference for RelatedTransaction
+            e.HasOne(t => t.RelatedTransaction)
+                .WithMany()
+                .HasForeignKey(t => t.RelatedTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Indexes
+            e.HasIndex(t => t.ScopeId);
+        });
+
+        // TransactionEntry configuration
+        builder.Entity<TransactionEntry>(e =>
+        {
+            e.HasKey(te => te.Id);
+
+            e.Property(te => te.Amount)
+                .HasColumnType("decimal(18,2)");
+
+            // FK to Transaction
+            e.HasOne(te => te.Transaction)
+                .WithMany()
+                .HasForeignKey(te => te.TransactionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // FK to Account
+            e.HasOne(te => te.Account)
+                .WithMany()
+                .HasForeignKey(te => te.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Indexes
+            e.HasIndex(te => te.TransactionId);
+            e.HasIndex(te => te.AccountId);
         });
     }
 }
