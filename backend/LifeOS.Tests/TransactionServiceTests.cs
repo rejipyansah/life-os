@@ -611,6 +611,54 @@ public class TransactionServiceTests : IDisposable
         await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
     }
 
+    [Fact]
+    public async Task Transaction_GuestScopeCannotUseOwnerAccount_Rejected()
+    {
+        // Guest scope tries to use an Owner scope's account
+        var guestScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(guestScope);
+        await _db.SaveChangesAsync();
+
+        // _accountAId belongs to _scopeId (Owner)
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = guestScope.Id,
+            Type = TransactionType.Income,
+            Amount = 10_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 10_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task Transaction_WrongScopeId_AccountsBelongToOtherScope_Rejected()
+    {
+        // Command uses a ScopeId that doesn't match the accounts' actual scope
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = otherScope.Id,
+            Type = TransactionType.Income,
+            Amount = 10_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                // _accountAId belongs to _scopeId, not otherScope
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 10_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
     // ───────────────────────── Atomicity ─────────────────────────
 
     [Fact]
