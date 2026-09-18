@@ -16,6 +16,7 @@ public class ApplicationDbContext : IdentityDbContext
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<TransactionEntry> TransactionEntries => Set<TransactionEntry>();
+    public DbSet<Allocation> Allocations => Set<Allocation>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -144,6 +145,34 @@ public class ApplicationDbContext : IdentityDbContext
             // Indexes
             e.HasIndex(te => te.TransactionId);
             e.HasIndex(te => te.AccountId);
+        });
+
+        // Allocation configuration
+        builder.Entity<Allocation>(e =>
+        {
+            e.HasKey(a => a.Id);
+
+            e.Property(a => a.Name)
+                .HasMaxLength(256);
+
+            e.Property(a => a.Amount)
+                .HasColumnType("decimal(18,2)");
+
+            // FK to Scope
+            e.HasOne(a => a.Scope)
+                .WithMany()
+                .HasForeignKey(a => a.ScopeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // FK to Account
+            e.HasOne(a => a.Account)
+                .WithMany()
+                .HasForeignKey(a => a.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Indexes
+            e.HasIndex(a => a.ScopeId);
+            e.HasIndex(a => a.AccountId);
         });
     }
 }

@@ -60,6 +60,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<GuestTokenService>();
 builder.Services.AddScoped<TransactionService>();
+builder.Services.AddScoped<AllocationService>();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -226,6 +227,151 @@ app.MapPost("/api/finance/transactions", async (
     }
 })
 .WithName("CreateTransaction");
+
+// FINANCE - ALLOCATIONS
+app.MapPost("/api/finance/allocations", async (
+    HttpContext http,
+    AllocationService allocationService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var command = await http.Request.ReadFromJsonAsync<CreateAllocationCommand>();
+    if (command is null)
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+
+    command.ScopeId = scopeId;
+
+    try
+    {
+        var allocation = await allocationService.CreateAllocationAsync(command);
+        return Results.Ok(new
+        {
+            allocationId = allocation.Id,
+            accountId = allocation.AccountId,
+            name = allocation.Name,
+            amount = allocation.Amount,
+            isActive = allocation.IsActive,
+            createdAt = allocation.CreatedAt
+        });
+    }
+    catch (ValidationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 422);
+    }
+})
+.WithName("CreateAllocation");
+
+app.MapGet("/api/finance/allocations", async (
+    HttpContext http,
+    AllocationService allocationService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var allocations = await allocationService.GetAllocationsAsync(scopeId);
+    return Results.Ok(allocations.Select(a => new
+    {
+        allocationId = a.Id,
+        accountId = a.AccountId,
+        name = a.Name,
+        amount = a.Amount,
+        isActive = a.IsActive,
+        createdAt = a.CreatedAt
+    }));
+})
+.WithName("GetAllocations");
+
+app.MapPatch("/api/finance/allocations/{id:guid}", async (
+    Guid id,
+    HttpContext http,
+    AllocationService allocationService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var command = await http.Request.ReadFromJsonAsync<UpdateAllocationCommand>();
+    if (command is null)
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+
+    command.ScopeId = scopeId;
+
+    try
+    {
+        var allocation = await allocationService.UpdateAllocationAsync(id, command);
+        return Results.Ok(new
+        {
+            allocationId = allocation.Id,
+            accountId = allocation.AccountId,
+            name = allocation.Name,
+            amount = allocation.Amount,
+            isActive = allocation.IsActive,
+            createdAt = allocation.CreatedAt
+        });
+    }
+    catch (ValidationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 422);
+    }
+})
+.WithName("UpdateAllocation");
 
 app.Run();
 

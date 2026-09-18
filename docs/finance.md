@@ -136,27 +136,38 @@ These examples describe how each TransactionType translates to TransactionEntry 
 
 ## Allocation
 
-Allocation is a reservation or intention, not a money movement.
+Allocation is a reservation or intention, not a money movement. It represents a user's plan to set aside funds for a purpose.
 
 Fields:
 
-- Id
-- ScopeId
-- AccountId
-- Name
-- Amount
-- IsActive
-- CreatedAt
+- Id: Guid
+- ScopeId: Guid
+- AccountId: Guid
+- Name: string
+- Amount: decimal (strictly greater than 0)
+- IsActive: bool
+- CreatedAt: DateTime UTC
 
 Rules:
 
-- Allocation belongs to one Account.
+- Allocation belongs to exactly one Account.
+- Allocation belongs to the same Scope as its Account. Cross-scope references must be rejected.
+- Amount must be strictly greater than 0.
 - Allocation does not change Account balance.
-- Available amount is conceptually: Actual Balance minus Active Allocations.
-- Over-allocation is allowed as a warning or context signal.
+- Allocation does not create a Transaction or TransactionEntry. It has no TransactionId.
+- New Allocation starts with IsActive = true.
+- Active allocations contribute to the contextual "Allocated" amount.
+- Inactive allocations do not contribute to active allocation totals.
+- Completing an allocation means setting IsActive = false.
+- Allocations are not hard-deleted through the normal API.
+- Available amount is conceptually: Actual Account Balance minus SUM(Active Allocations).
+- Over-allocation is allowed. Over-allocation is a warning/context condition, not a validation failure.
+  Example: Balance = 500,000; Active allocations = 700,000; Available = -200,000.
 - Actual insufficient Account balance remains a hard constraint for financial transactions.
+- Allocation must not prevent or hard-block an otherwise valid financial transaction.
 - No due date, bill, or reminder semantics in v1.
-- Completed allocations become inactive rather than being hard-deleted.
+- No automatic matching to transactions.
+- No category dependency.
 
 ---
 
