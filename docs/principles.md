@@ -260,3 +260,27 @@ We should prefer:
 A boring solution that works well is better than an impressive solution that creates unnecessary problems.
 
 > **Engineering serves the vision. Not the other way around.**
+
+---
+
+## 13. Natural Input and AI
+
+Natural input is the primary interaction model of Life OS.
+
+Manual structured forms remain available as a fallback.
+
+Natural input is interpreted into a structured command before domain execution.
+
+AI is an interpretation layer, not the authority over business rules.
+
+Deterministic core/domain logic validates commands and decides whether state changes are allowed.
+
+AI must not directly mutate financial state.
+
+Financial changes should be presented for user confirmation before being committed.
+
+The same core/domain operation should be usable from both natural-input and manual-input paths.
+
+Avoid coupling the frontend directly to a specific AI provider.
+
+> **Natural input first. Core validates. AI interprets, never decides.**
