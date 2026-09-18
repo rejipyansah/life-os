@@ -38,18 +38,18 @@ public class TransactionService
             }
             catch (Exception ex) when (IsSerializationFailure(ex) && attempt < MaxSerializationRetries)
             {
-                await dbTransaction.RollbackAsync(ct);
+                await SafeRollbackAsync(dbTransaction, ct);
                 // Brief yield to let the winning transaction release its locks
                 await Task.Yield();
             }
             catch (Exception ex) when (IsSerializationFailure(ex))
             {
-                await dbTransaction.RollbackAsync(ct);
+                await SafeRollbackAsync(dbTransaction, ct);
                 throw new SerializationConflictException();
             }
             catch (Exception)
             {
-                await dbTransaction.RollbackAsync(ct);
+                await SafeRollbackAsync(dbTransaction, ct);
                 throw;
             }
         }
@@ -119,8 +119,42 @@ public class TransactionService
     {
         // PostgreSQL serialization failure: SQLSTATE 40001
         // Detected via NpgsqlException which carries the SQLSTATE code.
-        return ex is NpgsqlException npgsqlEx
-            && npgsqlEx.SqlState == PostgresErrorCodes.SerializationFailure;
+        // Check both the exception and its inner exception, because when PostgreSQL
+        // aborts a SERIALIZABLE transaction, the Npgsql driver may wrap the
+        // serialization failure inside an InvalidOperationException.
+        return FindNpgsqlSerializationFailure(ex) is not null;
+    }
+
+    private static NpgsqlException? FindNpgsqlSerializationFailure(Exception ex)
+    {
+        var current = ex;
+        while (current is not null)
+        {
+            if (current is NpgsqlException npgsqlEx
+                && npgsqlEx.SqlState == PostgresErrorCodes.SerializationFailure)
+            {
+                return npgsqlEx;
+            }
+            current = current.InnerException;
+        }
+        return null;
+    }
+
+    private static async Task SafeRollbackAsync(
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction,
+        CancellationToken ct)
+    {
+        // When PostgreSQL aborts a SERIALIZABLE transaction, the transaction
+        // object may already be completed. RollbackAsync would throw
+        // InvalidOperationException. Silently ignore that case.
+        try
+        {
+            await transaction.RollbackAsync(ct);
+        }
+        catch (InvalidOperationException)
+        {
+            // Transaction already completed/aborted by PostgreSQL — nothing to do.
+        }
     }
 
     public async Task<decimal> GetAccountBalanceAsync(Guid accountId, Guid scopeId, CancellationToken ct = default)
