@@ -18,7 +18,7 @@ export interface AuthMe {
 export interface AccountProjection {
   id: string;
   name: string;
-  type: number;
+  type: AccountType;
   isArchived: boolean;
   balance: number;
   allocated: number;
@@ -41,7 +41,7 @@ export interface TransactionEntryProjection {
 
 export interface TransactionProjection {
   id: string;
-  type: number;
+  type: TransactionType;
   amount: number;
   description: string | null;
   categoryName: string | null;
@@ -71,27 +71,4 @@ export interface CreateTransactionCommand {
   relatedTransactionId?: string;
   feeAmount?: number;
   entries: CreateTransactionEntryCommand[];
-}
-
-const ACCOUNT_TYPE_NAMES: Record<number, string> = {
-  0: 'Cash',
-  1: 'Bank',
-  2: 'E-Wallet',
-};
-
-const TRANSACTION_TYPE_NAMES: Record<number, string> = {
-  0: 'Income',
-  1: 'Expense',
-  2: 'Transfer',
-  3: 'Refund',
-  4: 'Reversal',
-  5: 'Adjustment',
-};
-
-export function accountTypeName(type: number): string {
-  return ACCOUNT_TYPE_NAMES[type] ?? 'Unknown';
-}
-
-export function transactionTypeName(type: number): string {
-  return TRANSACTION_TYPE_NAMES[type] ?? 'Unknown';
 }

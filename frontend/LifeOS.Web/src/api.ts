@@ -43,38 +43,23 @@ export async function getAccounts(includeArchived = false): Promise<AccountListP
   return request(`/api/finance/accounts${qs}`);
 }
 
-const ACCOUNT_TYPE_MAP: Record<AccountType, number> = {
-  Cash: 0,
-  Bank: 1,
-  EWallet: 2,
-};
-
 export async function createAccount(command: { name: string; type: AccountType }) {
   return request<{
     accountId: string;
     name: string;
-    type: string;
+    type: AccountType;
     isArchived: boolean;
     createdAt: string;
   }>('/api/finance/accounts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: command.name, type: ACCOUNT_TYPE_MAP[command.type] }),
+    body: JSON.stringify({ name: command.name, type: command.type }),
   });
 }
 
 export async function getTransactions(): Promise<{ items: TransactionProjection[] }> {
   return request('/api/finance/transactions');
 }
-
-const TRANSACTION_TYPE_MAP: Record<TransactionType, number> = {
-  Income: 0,
-  Expense: 1,
-  Transfer: 2,
-  Refund: 3,
-  Reversal: 4,
-  Adjustment: 5,
-};
 
 export async function createTransaction(command: {
   type: TransactionType;
@@ -88,7 +73,7 @@ export async function createTransaction(command: {
 }) {
   return request<{
     transactionId: string;
-    type: string;
+    type: TransactionType;
     amount: number;
     occurredOn: string;
     createdAt: string;
@@ -97,7 +82,7 @@ export async function createTransaction(command: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      type: TRANSACTION_TYPE_MAP[command.type],
+      type: command.type,
       amount: command.amount,
       description: command.description,
       categoryName: command.categoryName,

@@ -1,5 +1,4 @@
 import type { TransactionProjection } from '../types';
-import { transactionTypeName } from '../types';
 
 interface TransactionItemProps {
   transaction: TransactionProjection;
@@ -15,9 +14,8 @@ function formatDate(dateStr: string): string {
 }
 
 export default function TransactionItem({ transaction }: TransactionItemProps) {
-  const typeName = transactionTypeName(transaction.type);
-  const isPositive = transaction.type === 0 || transaction.type === 3;
-  const isTransfer = transaction.type === 2;
+  const isPositive = transaction.type === 'Income' || transaction.type === 'Refund';
+  const isTransfer = transaction.type === 'Transfer';
 
   const sourceEntry = isTransfer ? transaction.entries.find(e => e.amount < 0) : null;
   const destEntry = isTransfer ? transaction.entries.find(e => e.amount > 0) : null;
@@ -30,9 +28,9 @@ export default function TransactionItem({ transaction }: TransactionItemProps) {
   return (
     <div className={`transaction-item ${isPositive ? 'positive' : 'negative'}`}>
       <div className="transaction-left">
-        <span className="transaction-type">{typeName}</span>
+        <span className="transaction-type">{transaction.type}</span>
         <span className="transaction-description">
-          {transaction.description || typeName}
+          {transaction.description || transaction.type}
         </span>
         {accountLabel && (
           <span className="transaction-account">{accountLabel}</span>

@@ -48,6 +48,11 @@ Rules:
 - Preserve Scope isolation.
 - Do not add Provider, Institution, Purpose, Balance, Currency, or other new Account fields.
 
+API JSON contract:
+
+- All enum values (AccountType, TransactionType) are represented as readable strings in JSON requests and responses (e.g. `"Cash"`, `"Income"`).
+- Numeric integer enum values are also accepted for backward compatibility but string values are canonical.
+
 ---
 
 ## Transaction

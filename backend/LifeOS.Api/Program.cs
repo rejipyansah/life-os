@@ -57,6 +57,11 @@ builder.Services.ConfigureApplicationCookie(options =>
     };
 });
 
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+});
+
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<GuestTokenService>();
 builder.Services.AddScoped<TransactionService>();
@@ -196,7 +201,15 @@ app.MapPost("/api/finance/transactions", async (
         scopeId = session.ScopeId;
     }
 
-    var command = await http.Request.ReadFromJsonAsync<CreateTransactionCommand>();
+    CreateTransactionCommand? command;
+    try
+    {
+        command = await http.Request.ReadFromJsonAsync<CreateTransactionCommand>();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+    }
     if (command is null)
         return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
 
@@ -209,7 +222,7 @@ app.MapPost("/api/finance/transactions", async (
         return Results.Ok(new
         {
             transactionId = transaction.Id,
-            type = transaction.Type.ToString(),
+            type = transaction.Type,
             amount = transaction.Amount,
             occurredOn = transaction.OccurredOn,
             createdAt = transaction.CreatedAt,
@@ -322,7 +335,15 @@ app.MapPost("/api/finance/allocations", async (
         scopeId = session.ScopeId;
     }
 
-    var command = await http.Request.ReadFromJsonAsync<CreateAllocationCommand>();
+    CreateAllocationCommand? command;
+    try
+    {
+        command = await http.Request.ReadFromJsonAsync<CreateAllocationCommand>();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+    }
     if (command is null)
         return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
 
@@ -414,7 +435,15 @@ app.MapPatch("/api/finance/allocations/{id:guid}", async (
         scopeId = session.ScopeId;
     }
 
-    var command = await http.Request.ReadFromJsonAsync<UpdateAllocationCommand>();
+    UpdateAllocationCommand? command;
+    try
+    {
+        command = await http.Request.ReadFromJsonAsync<UpdateAllocationCommand>();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+    }
     if (command is null)
         return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
 
@@ -467,7 +496,15 @@ app.MapPost("/api/finance/accounts", async (
         scopeId = session.ScopeId;
     }
 
-    var command = await http.Request.ReadFromJsonAsync<CreateAccountCommand>();
+    CreateAccountCommand? command;
+    try
+    {
+        command = await http.Request.ReadFromJsonAsync<CreateAccountCommand>();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+    }
     if (command is null)
         return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
 
@@ -480,7 +517,7 @@ app.MapPost("/api/finance/accounts", async (
         {
             accountId = account.Id,
             name = account.Name,
-            type = account.Type.ToString(),
+            type = account.Type,
             isArchived = account.IsArchived,
             createdAt = account.CreatedAt
         });
@@ -590,7 +627,15 @@ app.MapPatch("/api/finance/accounts/{id:guid}", async (
         scopeId = session.ScopeId;
     }
 
-    var command = await http.Request.ReadFromJsonAsync<UpdateAccountCommand>();
+    UpdateAccountCommand? command;
+    try
+    {
+        command = await http.Request.ReadFromJsonAsync<UpdateAccountCommand>();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
+    }
     if (command is null)
         return Results.Json(new { error = "Invalid request body." }, statusCode: 400);
 
@@ -603,7 +648,7 @@ app.MapPatch("/api/finance/accounts/{id:guid}", async (
         {
             accountId = account.Id,
             name = account.Name,
-            type = account.Type.ToString(),
+            type = account.Type,
             isArchived = account.IsArchived,
             createdAt = account.CreatedAt
         });
