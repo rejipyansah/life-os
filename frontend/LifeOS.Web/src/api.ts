@@ -4,6 +4,7 @@ import type {
   AccountListProjection,
   TransactionType,
   TransactionProjection,
+  InterpretResponse,
 } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -91,5 +92,13 @@ export async function createTransaction(command: {
       feeAmount: command.feeAmount,
       entries: command.entries,
     }),
+  });
+}
+
+export async function interpret(input: string): Promise<InterpretResponse> {
+  return request<InterpretResponse>('/api/interpret', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input }),
   });
 }

@@ -5,6 +5,7 @@ import AccountCard from './AccountCard';
 import TransactionList from './TransactionList';
 import AddTransactionForm from './AddTransactionForm';
 import CreateAccountForm from './CreateAccountForm';
+import NaturalInput from './NaturalInput';
 
 interface FinanceOverviewProps {
   isGuest: boolean;
@@ -124,6 +125,13 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
       </header>
 
       {error && <div className="error-message">{error}</div>}
+
+      {hasAccounts && (
+        <NaturalInput
+          accounts={accounts!.accounts}
+          onSuccess={refresh}
+        />
+      )}
 
       <section className="summary-section">
         <div className="summary-card total">

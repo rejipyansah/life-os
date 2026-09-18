@@ -479,6 +479,116 @@
   transform: scale(0.92);
 }
 
+/* ─── Natural Input ─── */
+.natural-input-section {
+  padding: 12px 20px 16px;
+}
+
+.natural-input-form {
+  display: flex;
+  gap: 8px;
+}
+
+.natural-input {
+  flex: 1;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  background: var(--color-surface);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.natural-input:focus {
+  border-color: var(--color-primary);
+}
+
+.natural-input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.natural-input:disabled {
+  opacity: 0.6;
+}
+
+.natural-input-btn {
+  padding: 14px 20px;
+  min-width: 56px;
+}
+
+.interpret-preview {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.interpret-preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.interpret-preview-type {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+}
+
+.interpret-preview-amount {
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.interpret-preview-details {
+  display: flex;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.interpret-preview-date {
+  margin-left: auto;
+}
+
+.interpret-preview-desc {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 12px;
+}
+
+.interpret-preview-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.interpret-preview-actions .btn {
+  flex: 1;
+}
+
+.interpret-clarification,
+.interpret-unsupported {
+  margin-top: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.interpret-clarification p,
+.interpret-unsupported p {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
 /* ─── Responsive ─── */
 @media (min-width: 640px) {
   .finance-screen {

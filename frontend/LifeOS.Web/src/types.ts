@@ -72,3 +72,21 @@ export interface CreateTransactionCommand {
   feeAmount?: number;
   entries: CreateTransactionEntryCommand[];
 }
+
+export interface InterpretTransactionData {
+  type: string;
+  amount: number;
+  description: string | null;
+  account: string | null;
+  toAccount: string | null;
+  date: string | null;
+  feeAmount: number | null;
+}
+
+export interface InterpretResponse {
+  intent: string;
+  state: 'Ready' | 'NeedsClarification' | 'Unsupported';
+  preview: InterpretTransactionData | null;
+  command: InterpretTransactionData | null;
+  clarifications: string[];
+}
