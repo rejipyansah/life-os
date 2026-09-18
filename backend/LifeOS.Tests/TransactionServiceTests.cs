@@ -1044,32 +1044,529 @@ public class TransactionServiceTests : IDisposable
         Assert.Equal(TransactionType.Expense, tx.Type);
     }
 
+    // ───────────────────────── Query: List Transactions ─────────────────────────
+
+    [Fact]
+    public async Task GetTransactions_ReturnsOnlyCurrentScope()
+    {
+        // Arrange: create transactions in current scope
+        var command1 = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        var command2 = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 50_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -50_000m }]
+        };
+
+        await _sut.CreateTransactionAsync(command1);
+        await _sut.CreateTransactionAsync(command2);
+
+        // Arrange: create transaction in different scope
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var otherAccount = new Account
+        {
+            ScopeId = otherScope.Id,
+            Name = "Other Cash",
+            Type = AccountType.Cash
+        };
+        _db.Accounts.Add(otherAccount);
+        await _db.SaveChangesAsync();
+
+        var otherCommand = new CreateTransactionCommand
+        {
+            ScopeId = otherScope.Id,
+            Type = TransactionType.Income,
+            Amount = 999_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = otherAccount.Id, Amount = 999_000m }]
+        };
+
+        using var otherDb = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite(_connection).Options);
+        var otherService = new TransactionService(otherDb);
+        await otherService.CreateTransactionAsync(otherCommand);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: only current scope transactions
+        Assert.Equal(2, result.Count);
+        Assert.All(result, t => Assert.Equal(_scopeId, _db.Transactions.First(tx => tx.Id == t.Id).ScopeId));
+    }
+
+    [Fact]
+    public async Task GetTransactions_Ordering_OccurredOnDescThenCreatedAtDesc()
+    {
+        // Arrange: create transactions with different dates
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var yesterday = today.AddDays(-1);
+
+        var tx1 = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = yesterday,
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        var tx2 = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 10_000m,
+            OccurredOn = today,
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -10_000m }]
+        };
+        var tx3 = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 50_000m,
+            OccurredOn = today,
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 50_000m }]
+        };
+
+        await _sut.CreateTransactionAsync(tx1);
+        await _sut.CreateTransactionAsync(tx2);
+        await _sut.CreateTransactionAsync(tx3);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: today's transactions first (by CreatedAt desc), then yesterday
+        Assert.Equal(3, result.Count);
+        Assert.Equal(today, result[0].OccurredOn);
+        Assert.Equal(today, result[1].OccurredOn);
+        Assert.Equal(yesterday, result[2].OccurredOn);
+        // tx3 should come before tx2 (created later)
+        Assert.True(result[0].CreatedAt >= result[1].CreatedAt);
+    }
+
+    [Fact]
+    public async Task GetTransactions_IncludesAccountNameInEntries()
+    {
+        // Arrange
+        await SeedBalance(_accountAId, 100_000m);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 50_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -50_000m },
+                new CreateTransactionEntryCommand { AccountId = _accountBId, Amount = 50_000m }
+            ]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: find our transfer transaction
+        var transfer = result.First(t => t.Id == tx.Id);
+        Assert.Equal(2, transfer.Entries.Count);
+
+        var entryA = transfer.Entries.First(e => e.AccountId == _accountAId);
+        var entryB = transfer.Entries.First(e => e.AccountId == _accountBId);
+
+        Assert.Equal("Cash Wallet", entryA.AccountName);
+        Assert.Equal(-50_000m, entryA.Amount);
+        Assert.Equal("Bank Account", entryB.AccountName);
+        Assert.Equal(50_000m, entryB.Amount);
+    }
+
+    [Fact]
+    public async Task GetTransactions_SignedEntryAmountsPreserved()
+    {
+        // Arrange
+        await SeedBalance(_accountAId, 100_000m);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 18_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -18_000m }]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: find our expense transaction
+        var expense = result.First(t => t.Id == tx.Id);
+        Assert.Equal(-18_000m, expense.Entries[0].Amount);
+    }
+
+    [Fact]
+    public async Task GetTransactions_ArchivedAccountAppearsInHistoricalEntries()
+    {
+        // Arrange: create transaction
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        await _sut.CreateTransactionAsync(command);
+
+        // Act: archive the account
+        var account = await _db.Accounts.FindAsync(_accountAId);
+        account!.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        // Query transactions
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: archived account still appears in historical entries
+        Assert.Single(result);
+        Assert.Equal("Cash Wallet", result[0].Entries[0].AccountName);
+    }
+
+    [Fact]
+    public async Task GetTransactions_EmptyList_ReturnsValidEmptyResponse()
+    {
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetTransactions_DateOnlyPreservedCorrectly()
+    {
+        // Arrange
+        var specificDate = new DateOnly(2026, 9, 18);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = specificDate,
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal(specificDate, result[0].OccurredOn);
+    }
+
+    [Fact]
+    public async Task GetTransactions_AllFieldsProjected()
+    {
+        // Arrange
+        await SeedBalance(_accountAId, 100_000m);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 18_000m,
+            Description = "Jajan",
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -18_000m }]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: find our expense transaction
+        var expense = result.First(t => t.Id == tx.Id);
+        Assert.Equal(tx.Id, expense.Id);
+        Assert.Equal(TransactionType.Expense, expense.Type);
+        Assert.Equal(18_000m, expense.Amount);
+        Assert.Equal("Jajan", expense.Description);
+        Assert.Null(expense.CategoryName);
+        Assert.Null(expense.RelatedTransactionId);
+        Assert.Null(expense.FeeAmount);
+    }
+
+    [Fact]
+    public async Task GetTransactions_WithFeeAmount()
+    {
+        // Arrange
+        await SeedBalance(_accountAId, 700_000m);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 500_000m,
+            FeeAmount = 2_500m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -502_500m },
+                new CreateTransactionEntryCommand { AccountId = _accountBId, Amount = 500_000m }
+            ]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionsAsync(_scopeId);
+
+        // Assert: find our transfer transaction
+        var transfer = result.First(t => t.Id == tx.Id);
+        Assert.Equal(2_500m, transfer.FeeAmount);
+    }
+
+    // ───────────────────────── Query: Get Transaction Detail ─────────────────────────
+
+    [Fact]
+    public async Task GetTransactionById_ReturnsCurrentScopeTransaction()
+    {
+        // Arrange
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionByIdAsync(tx.Id, _scopeId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(tx.Id, result.Id);
+        Assert.Equal(TransactionType.Income, result.Type);
+        Assert.Equal(100_000m, result.Amount);
+        Assert.Single(result.Entries);
+    }
+
+    [Fact]
+    public async Task GetTransactionById_CrossScope_Returns404()
+    {
+        // Arrange: create transaction in different scope
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        var otherAccount = new Account
+        {
+            ScopeId = otherScope.Id,
+            Name = "Other Cash",
+            Type = AccountType.Cash
+        };
+        _db.Accounts.Add(otherAccount);
+        await _db.SaveChangesAsync();
+
+        using var otherDb = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite(_connection).Options);
+        var otherService = new TransactionService(otherDb);
+
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = otherScope.Id,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = otherAccount.Id, Amount = 100_000m }]
+        };
+        var (tx, _) = await otherService.CreateTransactionAsync(command);
+
+        // Act: try to get from different scope
+        var result = await _sut.GetTransactionByIdAsync(tx.Id, _scopeId);
+
+        // Assert: returns null (404 at API layer)
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetTransactionById_Nonexistent_ReturnsNull()
+    {
+        // Act
+        var result = await _sut.GetTransactionByIdAsync(Guid.NewGuid(), _scopeId);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetTransactionById_IncludesEntries()
+    {
+        // Arrange
+        await SeedBalance(_accountAId, 100_000m);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 50_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -50_000m },
+                new CreateTransactionEntryCommand { AccountId = _accountBId, Amount = 50_000m }
+            ]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionByIdAsync(tx.Id, _scopeId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Entries.Count);
+
+        var entryA = result.Entries.First(e => e.AccountId == _accountAId);
+        var entryB = result.Entries.First(e => e.AccountId == _accountBId);
+
+        Assert.Equal("Cash Wallet", entryA.AccountName);
+        Assert.Equal(-50_000m, entryA.Amount);
+        Assert.Equal("Bank Account", entryB.AccountName);
+        Assert.Equal(50_000m, entryB.Amount);
+    }
+
+    [Fact]
+    public async Task GetTransactionById_ArchivedAccountStillVisible()
+    {
+        // Arrange
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Archive the account
+        var account = await _db.Accounts.FindAsync(_accountAId);
+        account!.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _sut.GetTransactionByIdAsync(tx.Id, _scopeId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Cash Wallet", result.Entries[0].AccountName);
+    }
+
+    [Fact]
+    public async Task GetTransactionById_DateOnlyPreserved()
+    {
+        // Arrange
+        var specificDate = new DateOnly(2026, 9, 18);
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 100_000m,
+            OccurredOn = specificDate,
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 100_000m }]
+        };
+        var (tx, _) = await _sut.CreateTransactionAsync(command);
+
+        // Act
+        var result = await _sut.GetTransactionByIdAsync(tx.Id, _scopeId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(specificDate, result.OccurredOn);
+    }
+
+    // ───────────────────────── Immutability: No Update/Delete API ─────────────────────────
+
+    [Fact]
+    public async Task TransactionService_NoUpdateDeleteMethods()
+    {
+        var methodNames = typeof(TransactionService)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Select(m => m.Name)
+            .ToList();
+
+        Assert.DoesNotContain(methodNames, m =>
+            m.Contains("Update", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("Edit", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("Delete", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("Remove", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private async Task SeedBalance(Guid accountId, decimal amount)
     {
         if (amount == 0) return;
 
-        var sign = amount > 0 ? 1 : -1;
-        var absAmount = Math.Abs(amount);
-
         var tx = new Transaction
         {
             ScopeId = _scopeId,
             Type = TransactionType.Income,
-            Amount = absAmount,
+            Amount = Math.Abs(amount),
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
             CreatedAt = DateTime.UtcNow
         };
 
+        _db.Transactions.Add(tx);
+        await _db.SaveChangesAsync();
+
         var entry = new TransactionEntry
         {
+            TransactionId = tx.Id,
             AccountId = accountId,
             Amount = amount
         };
 
+        _db.TransactionEntries.Add(entry);
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Seeds a balance directly without creating a Transaction entity.
+    /// Useful for tests that need to verify query results without the seed transaction.
+    /// </summary>
+    private async Task SeedBalanceDirect(Guid accountId, decimal amount)
+    {
+        if (amount == 0) return;
+
+        // Create a minimal Income transaction just to have a valid TransactionId
+        var tx = new Transaction
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = Math.Abs(amount),
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            CreatedAt = DateTime.UtcNow
+        };
+
         _db.Transactions.Add(tx);
-        entry.TransactionId = tx.Id;
+        await _db.SaveChangesAsync();
+
+        var entry = new TransactionEntry
+        {
+            TransactionId = tx.Id,
+            AccountId = accountId,
+            Amount = amount
+        };
+
         _db.TransactionEntries.Add(entry);
         await _db.SaveChangesAsync();
     }

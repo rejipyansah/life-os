@@ -229,6 +229,72 @@ app.MapPost("/api/finance/transactions", async (
 })
 .WithName("CreateTransaction");
 
+app.MapGet("/api/finance/transactions", async (
+    HttpContext http,
+    TransactionService transactionService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var transactions = await transactionService.GetTransactionsAsync(scopeId);
+    return Results.Ok(new { items = transactions });
+})
+.WithName("GetTransactions");
+
+app.MapGet("/api/finance/transactions/{id:guid}", async (
+    Guid id,
+    HttpContext http,
+    TransactionService transactionService,
+    GuestTokenService guestTokenService,
+    ApplicationDbContext db) =>
+{
+    // Resolve current Scope server-side
+    Guid scopeId;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        var scope = await db.Scopes.FirstOrDefaultAsync(s =>
+            s.Type == ScopeType.Owner && s.OwnerUserId == userId);
+        if (scope is null)
+            return Results.Json(new { error = "Owner Scope not found." }, statusCode: 400);
+        scopeId = scope.Id;
+    }
+    else
+    {
+        var session = await guestTokenService.ResolveAsync(http);
+        if (session is null)
+            return Results.Json(new { error = "Guest session not found." }, statusCode: 401);
+        scopeId = session.ScopeId;
+    }
+
+    var transaction = await transactionService.GetTransactionByIdAsync(id, scopeId);
+    if (transaction is null)
+        return Results.Json(new { error = "Transaction not found." }, statusCode: 404);
+
+    return Results.Ok(transaction);
+})
+.WithName("GetTransactionById");
+
 // FINANCE - ALLOCATIONS
 app.MapPost("/api/finance/allocations", async (
     HttpContext http,

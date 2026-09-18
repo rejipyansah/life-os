@@ -346,6 +346,121 @@ public class TransactionService
             Amount = command.Amount
         };
     }
+
+    // ───────────────────────── Query Methods ─────────────────────────
+
+    public async Task<List<TransactionProjection>> GetTransactionsAsync(
+        Guid scopeId,
+        CancellationToken ct = default)
+    {
+        var result = await _db.Transactions
+            .Where(t => t.ScopeId == scopeId)
+            .OrderByDescending(t => t.OccurredOn)
+            .ThenByDescending(t => t.CreatedAt)
+            .Select(t => new TransactionProjection
+            {
+                Id = t.Id,
+                Type = t.Type,
+                Amount = t.Amount,
+                Description = t.Description,
+                CategoryName = t.CategoryName,
+                OccurredOn = t.OccurredOn,
+                CreatedAt = t.CreatedAt,
+                RelatedTransactionId = t.RelatedTransactionId,
+                FeeAmount = t.FeeAmount
+            })
+            .ToListAsync(ct);
+
+        // Load entries separately to avoid N+1 and use efficient batch query
+        var transactionIds = result.Select(t => t.Id).ToList();
+        var entries = await _db.TransactionEntries
+            .Where(te => transactionIds.Contains(te.TransactionId))
+            .Join(_db.Accounts,
+                te => te.AccountId,
+                a => a.Id,
+                (te, a) => new { te.TransactionId, te.AccountId, AccountName = a.Name, te.Amount })
+            .ToListAsync(ct);
+
+        var entriesByTransaction = entries
+            .GroupBy(e => e.TransactionId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(e => new TransactionEntryProjection
+                {
+                    AccountId = e.AccountId,
+                    AccountName = e.AccountName,
+                    Amount = e.Amount
+                }).ToList());
+
+        foreach (var tx in result)
+        {
+            tx.Entries = entriesByTransaction.GetValueOrDefault(tx.Id, []);
+        }
+
+        return result;
+    }
+
+    public async Task<TransactionProjection?> GetTransactionByIdAsync(
+        Guid transactionId,
+        Guid scopeId,
+        CancellationToken ct = default)
+    {
+        var transaction = await _db.Transactions
+            .Where(t => t.Id == transactionId && t.ScopeId == scopeId)
+            .Select(t => new TransactionProjection
+            {
+                Id = t.Id,
+                Type = t.Type,
+                Amount = t.Amount,
+                Description = t.Description,
+                CategoryName = t.CategoryName,
+                OccurredOn = t.OccurredOn,
+                CreatedAt = t.CreatedAt,
+                RelatedTransactionId = t.RelatedTransactionId,
+                FeeAmount = t.FeeAmount
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (transaction is null)
+            return null;
+
+        // Load entries with Account names
+        transaction.Entries = await _db.TransactionEntries
+            .Where(te => te.TransactionId == transactionId)
+            .Join(_db.Accounts,
+                te => te.AccountId,
+                a => a.Id,
+                (te, a) => new TransactionEntryProjection
+                {
+                    AccountId = te.AccountId,
+                    AccountName = a.Name,
+                    Amount = te.Amount
+                })
+            .ToListAsync(ct);
+
+        return transaction;
+    }
+}
+
+public class TransactionProjection
+{
+    public Guid Id { get; set; }
+    public TransactionType Type { get; set; }
+    public decimal Amount { get; set; }
+    public string? Description { get; set; }
+    public string? CategoryName { get; set; }
+    public DateOnly OccurredOn { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public Guid? RelatedTransactionId { get; set; }
+    public decimal? FeeAmount { get; set; }
+    public List<TransactionEntryProjection> Entries { get; set; } = [];
+}
+
+public class TransactionEntryProjection
+{
+    public Guid AccountId { get; set; }
+    public string AccountName { get; set; } = "";
+    public decimal Amount { get; set; }
 }
 
 public class ValidationException : Exception

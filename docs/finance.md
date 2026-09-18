@@ -207,3 +207,34 @@ The following are intentionally excluded from Finance v1:
 - Purpose on Account
 - Balance on Account
 - Currency on Account
+
+---
+
+## Transaction Query API
+
+The Transaction Query API provides read-only access to transaction history and details.
+
+### Endpoints
+
+**List transactions:**
+- `GET /api/finance/transactions`
+- Returns all transactions belonging to the server-resolved current Scope
+- Ordered by OccurredOn DESC, then CreatedAt DESC
+- Includes TransactionEntry projections with AccountName (read projection, not duplicated persistence)
+- Archived Accounts still appear in historical entries
+- No pagination, no filter query parameters in v1
+
+**Get transaction detail:**
+- `GET /api/finance/transactions/{id}`
+- Returns a single transaction with its entries
+- Only returns transactions from the current Scope
+- Cross-scope lookup returns 404 (does not reveal existence)
+
+### Rules
+
+- Scope is resolved server-side; client never provides ScopeId
+- Archived Accounts remain visible in historical transaction entries
+- DateOnly OccurredOn is returned as ISO date (e.g., "2026-09-18")
+- CreatedAt is returned as UTC timestamp
+- No update, delete, or mutation endpoints exist for transactions
+- Transactions are immutable once posted
