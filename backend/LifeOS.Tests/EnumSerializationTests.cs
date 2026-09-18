@@ -13,7 +13,7 @@ public class EnumSerializationTests
     {
         _options = new JsonSerializerOptions
         {
-            Converters = { new JsonStringEnumConverter() }
+            Converters = { new JsonStringEnumConverter(null, allowIntegerValues: false) }
         };
     }
 
@@ -57,12 +57,14 @@ public class EnumSerializationTests
             JsonSerializer.Deserialize<AccountType>("\"Invalid\"", _options));
     }
 
-    [Fact]
-    public void AccountType_NumericString_AlsoAccepted()
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("2")]
+    public void AccountType_NumericValue_Rejected(string numericValue)
     {
-        // JsonStringEnumConverter accepts numeric values as a fallback
-        var result = JsonSerializer.Deserialize<AccountType>("\"0\"", _options);
-        Assert.Equal(AccountType.Cash, result);
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<AccountType>(numericValue, _options));
     }
 
     // ───────────────────────── TransactionType ─────────────────────────
@@ -129,6 +131,16 @@ public class EnumSerializationTests
             JsonSerializer.Deserialize<TransactionType>("\"Invalid\"", _options));
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("5")]
+    public void TransactionType_NumericValue_Rejected(string numericValue)
+    {
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<TransactionType>(numericValue, _options));
+    }
+
     // ───────────────────────── Round-trip ─────────────────────────
 
     [Fact]
@@ -162,14 +174,11 @@ public class EnumSerializationTests
     }
 
     [Fact]
-    public void CreateAccountCommand_NumericEnum_AlsoAccepted()
+    public void CreateAccountCommand_NumericEnum_Rejected()
     {
-        // JsonStringEnumConverter accepts numeric values as a fallback
         var json = """{"ScopeId":"00000000-0000-0000-0000-000000000001","Name":"Test","Type":1}""";
-        var command = JsonSerializer.Deserialize<CreateAccountCommand>(json, _options);
-
-        Assert.NotNull(command);
-        Assert.Equal(AccountType.Bank, command.Type);
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<CreateAccountCommand>(json, _options));
     }
 
     [Fact]
@@ -186,17 +195,14 @@ public class EnumSerializationTests
     }
 
     [Fact]
-    public void CreateTransactionCommand_NumericEnum_AlsoAccepted()
+    public void CreateTransactionCommand_NumericEnum_Rejected()
     {
-        // JsonStringEnumConverter accepts numeric values as a fallback
         var json = """
         {"ScopeId":"00000000-0000-0000-0000-000000000001","Type":1,"Amount":18000,
          "OccurredOn":"2026-09-18","Entries":[{"AccountId":"00000000-0000-0000-0000-000000000002","Amount":-18000}]}
         """;
-        var command = JsonSerializer.Deserialize<CreateTransactionCommand>(json, _options);
-
-        Assert.NotNull(command);
-        Assert.Equal(TransactionType.Expense, command.Type);
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<CreateTransactionCommand>(json, _options));
     }
 
     [Fact]

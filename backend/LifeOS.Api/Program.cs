@@ -59,7 +59,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(null, allowIntegerValues: false));
 });
 
 builder.Services.AddAuthorization();
