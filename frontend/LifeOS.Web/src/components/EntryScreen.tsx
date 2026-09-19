@@ -45,8 +45,8 @@ export default function EntryScreen({ onEnter }: EntryScreenProps) {
     try {
       await createGuestSession();
       onEnter(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Gagal memulai sesi');
+    } catch {
+      setError('Life OS sedang tidak dapat diakses. Coba lagi.');
     } finally {
       setLoading(false);
     }
@@ -98,6 +98,7 @@ export default function EntryScreen({ onEnter }: EntryScreenProps) {
 
             {mode === 'idle' ? (
               <div className="entry-cta-group">
+                {error && <div className="entry-error">{error}</div>}
                 <button
                   className="entry-cta"
                   onClick={handleTryDemo}
@@ -177,6 +178,7 @@ export default function EntryScreen({ onEnter }: EntryScreenProps) {
             </div>
 
             <div className="entry-mobile-cta">
+              {error && <div className="entry-error">{error}</div>}
               <button
                 className="entry-cta"
                 onClick={handleTryDemo}

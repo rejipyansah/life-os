@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAuthMe, resumeGuestSession, logout } from './api';
+import { getAuthMe, resumeGuestSession, logout, login } from './api';
 import EntryScreen from './components/EntryScreen';
 import FinanceOverview from './components/FinanceOverview';
 import './App.css';
@@ -65,6 +65,11 @@ function App() {
     setState('entry');
   };
 
+  const handleOwnerLogin = async (email: string, password: string) => {
+    await login(email, password);
+    setIsGuest(false);
+  };
+
   if (state === 'checking') {
     return (
       <div className="app loading-screen">
@@ -83,7 +88,7 @@ function App() {
 
   return (
     <div className="app">
-      <FinanceOverview isGuest={isGuest} onLogout={handleLogout} />
+      <FinanceOverview isGuest={isGuest} onLogout={handleLogout} onOwnerLogin={handleOwnerLogin} />
     </div>
   );
 }

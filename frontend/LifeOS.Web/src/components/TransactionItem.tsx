@@ -9,9 +9,9 @@ function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+function formatTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export default function TransactionItem({ transaction, onSelect }: TransactionItemProps) {
@@ -21,14 +21,21 @@ export default function TransactionItem({ transaction, onSelect }: TransactionIt
   const sourceEntry = isTransfer ? transaction.entries.find(e => e.amount < 0) : null;
   const destEntry = isTransfer ? transaction.entries.find(e => e.amount > 0) : null;
 
-  const accountNames = transaction.entries.map(e => e.accountName).filter(Boolean);
-  const accountLabel = isTransfer && sourceEntry && destEntry
-    ? `${sourceEntry.accountName} → ${destEntry.accountName}`
-    : accountNames.join(', ');
+  const metaParts: string[] = [];
+  if (transaction.categoryName) metaParts.push(transaction.categoryName);
+  if (isTransfer && sourceEntry && destEntry) {
+    metaParts.push(`${sourceEntry.accountName} → ${destEntry.accountName}`);
+  } else {
+    const accountNames = transaction.entries.map(e => e.accountName).filter(Boolean);
+    if (accountNames.length > 0) metaParts.push(accountNames.join(', '));
+  }
+
+  const amountClass = isTransfer ? 'transfer' : isPositive ? 'in' : 'out';
+  const amountPrefix = isTransfer ? '' : isPositive ? '+ ' : '– ';
 
   return (
     <div
-      className="transaction-item"
+      className="tx-row"
       onClick={() => onSelect?.(transaction)}
       role={onSelect ? 'button' : undefined}
       tabIndex={onSelect ? 0 : undefined}
@@ -36,24 +43,29 @@ export default function TransactionItem({ transaction, onSelect }: TransactionIt
         if (e.key === 'Enter' || e.key === ' ') onSelect(transaction);
       } : undefined}
     >
-      <div className="transaction-left">
-        <span className="transaction-description">
+      <div className="tx-left">
+        <span className="tx-desc">
           {transaction.description || transaction.type}
         </span>
-        <div className="transaction-meta">
-          <span className="transaction-type">{transaction.type}</span>
-          {transaction.categoryName && <span>{transaction.categoryName}</span>}
-          {accountLabel && <span>{accountLabel}</span>}
-        </div>
+        {metaParts.length > 0 && (
+          <div className="tx-meta">
+            {metaParts.map((part, i) => (
+              <span key={i}>
+                {i > 0 && <span className="tx-meta-sep"> · </span>}
+                {part}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="transaction-right">
-        <span className={`transaction-amount ${isPositive ? 'positive' : 'negative'}`}>
-          {isPositive ? '+' : '-'}{formatCurrency(transaction.amount)}
+      <div className="tx-right">
+        <span className={`tx-amount ${amountClass}`}>
+          {amountPrefix}{formatCurrency(transaction.amount)}
         </span>
         {transaction.feeAmount != null && transaction.feeAmount > 0 && (
-          <span className="transaction-fee">fee {formatCurrency(transaction.feeAmount)}</span>
+          <span className="tx-fee">fee {formatCurrency(transaction.feeAmount)}</span>
         )}
-        <span className="transaction-date">{formatDate(transaction.occurredOn)}</span>
+        <span className="tx-time">{formatTime(transaction.createdAt)}</span>
       </div>
     </div>
   );

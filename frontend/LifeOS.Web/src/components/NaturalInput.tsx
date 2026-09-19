@@ -12,12 +12,6 @@ function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-');
-  return `${d}/${m}/${y}`;
-}
-
 export default function NaturalInput({ accounts, hasTransactions, onSuccess }: NaturalInputProps) {
   const [input, setInput] = useState('');
   const [interpreting, setInterpreting] = useState(false);
@@ -85,60 +79,68 @@ export default function NaturalInput({ accounts, hasTransactions, onSuccess }: N
 
   if (activeAccounts.length === 0) return null;
 
+  const hasResult = result !== null || error !== '';
+
   return (
-    <section className="natural-input-section">
-      <form className="natural-input-form" onSubmit={handleInterpret}>
+    <>
+      <div className="natural-input-row">
         <input
           type="text"
-          className="natural-input"
-          placeholder="What happened?"
+          className="natural-field"
+          placeholder="Misal: jajan 18rb cash, atau transfer 100k ke bca..."
           value={input}
           onChange={e => setInput(e.target.value)}
           disabled={interpreting || submitting}
         />
         <button
-          type="submit"
-          className="btn btn-primary natural-input-btn"
+          type="button"
+          className="btn-natural-submit"
+          onClick={handleInterpret}
           disabled={interpreting || submitting || !input.trim()}
         >
-          {interpreting ? '...' : 'Go'}
+          {interpreting ? '...' : 'Catat'}
         </button>
-      </form>
+      </div>
 
-      {!hasTransactions && !hintDismissed && !result && !error && (
+      {!hasTransactions && !hintDismissed && !hasResult && (
         <div className="natural-input-hint">
           Try: &ldquo;Makan siang 50rb cash&rdquo;
         </div>
       )}
 
-      {error && <div className="error-message" style={{ marginTop: 8 }}>{error}</div>}
+      {hasResult && (
+        <div className="natural-result-zone">
+          {error && <div className="res-error">{error}</div>}
 
-      {result?.state === 'Ready' && result.preview && (
-        <InterpretPreview
-          data={result.preview}
-          onConfirm={handleConfirm}
-          onEdit={handleEdit}
-          submitting={submitting}
-        />
-      )}
+          {result?.state === 'Ready' && result.preview && (
+            <InterpretPreview
+              data={result.preview}
+              onConfirm={handleConfirm}
+              onEdit={handleEdit}
+              submitting={submitting}
+            />
+          )}
 
-      {result?.state === 'NeedsClarification' && result.clarifications.length > 0 && (
-        <div className="interpret-clarification">
-          {result.clarifications.map((c, i) => (
-            <p key={i}>{c}</p>
-          ))}
-          <p className="interpret-clarification-hint">Edit input dan tekan Go untuk mencoba lagi.</p>
-          <button className="btn btn-text" onClick={handleClear}>Kembali</button>
+          {result?.state === 'NeedsClarification' && result.clarifications.length > 0 && (
+            <div className="res-clarify">
+              <div className="res-clarify-title">Perlu sedikit konfirmasi</div>
+              {result.clarifications.map((c, i) => (
+                <div key={i} className="res-clarify-sub">{c}</div>
+              ))}
+              <button className="btn-text" onClick={handleClear} style={{ marginTop: 8, padding: '4px 0', minHeight: 'auto', fontSize: 12 }}>Kembali</button>
+            </div>
+          )}
+
+          {result?.state === 'Unsupported' && !error && (
+            <div className="res-clarify">
+              <div className="res-clarify-title">Belum terbaca</div>
+              <div className="res-clarify-sub">Input ini bukan transaksi keuangan. Coba sebutkan nominal (misal: <em>kopi 22k</em>).</div>
+              <button className="btn-text" onClick={handleClear} style={{ marginTop: 8, padding: '4px 0', minHeight: 'auto', fontSize: 12 }}>Kembali</button>
+            </div>
+          )}
         </div>
       )}
-
-      {result?.state === 'Unsupported' && (
-        <div className="interpret-unsupported">
-          <p>Input ini bukan transaksi keuangan.</p>
-          <button className="btn btn-text" onClick={handleClear}>Kembali</button>
-        </div>
-      )}
-    </section>
+    </>
   );
 }
 
@@ -153,36 +155,27 @@ function InterpretPreview({
   onEdit: () => void;
   submitting: boolean;
 }) {
-  const typeLabel = data.type === 'Transfer' ? 'Transfer'
-    : data.type === 'Income' ? 'Income'
-    : 'Expense';
+  const metaParts: string[] = [];
+  if (data.description) metaParts.push(data.description);
+  if (data.account) metaParts.push(data.account);
+  if (data.type === 'Transfer' && data.toAccount) metaParts.push(`→ ${data.toAccount}`);
 
   return (
-    <div className="interpret-preview">
-      <div className="interpret-preview-row">
-        <span className="interpret-preview-type">{typeLabel}</span>
-        <span className="interpret-preview-amount">{formatCurrency(data.amount)}</span>
-      </div>
-      <div className="interpret-preview-details">
-        {data.account && <span>{data.account}</span>}
-        {data.type === 'Transfer' && data.toAccount && (
-          <span> → {data.toAccount}</span>
+    <div className="res-ready">
+      <div className="res-ready-left">
+        <span className="res-amount">
+          {data.type === 'Income' ? '+' : data.type === 'Transfer' ? '' : '–'} {formatCurrency(data.amount)}
+        </span>
+        {metaParts.length > 0 && (
+          <span className="res-meta">{metaParts.join(' · ')}</span>
         )}
-        {data.date && <span className="interpret-preview-date">{formatDate(data.date)}</span>}
       </div>
-      {data.description && (
-        <div className="interpret-preview-desc">{data.description}</div>
-      )}
-      <div className="interpret-preview-actions">
-        <button
-          className="btn btn-primary"
-          onClick={onConfirm}
-          disabled={submitting}
-        >
-          {submitting ? 'Saving...' : 'Confirm'}
+      <div className="res-actions">
+        <button className="btn-res-cancel" onClick={onEdit} disabled={submitting}>
+          Batal
         </button>
-        <button className="btn btn-secondary" onClick={onEdit} disabled={submitting}>
-          Edit
+        <button className="btn-res-save" onClick={onConfirm} disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan'}
         </button>
       </div>
     </div>

@@ -11,15 +11,16 @@ import NaturalInput from './NaturalInput';
 interface FinanceOverviewProps {
   isGuest: boolean;
   onLogout: () => void;
+  onOwnerLogin: (email: string, password: string) => Promise<void>;
 }
 
 function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail';
+type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail' | 'owner-login';
 
-export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewProps) {
+export default function FinanceOverview({ isGuest, onLogout, onOwnerLogin }: FinanceOverviewProps) {
   const [accounts, setAccounts] = useState<AccountListProjection | null>(null);
   const [transactions, setTransactions] = useState<TransactionProjection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,10 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionProjection | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +80,18 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
     onLogout();
   };
 
+  const handleOwnerLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      await onOwnerLogin(loginEmail, loginPassword);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Login gagal');
+      setLoginLoading(false);
+    }
+  };
+
   if (loading && !accounts) {
     return (
       <div className="finance-loading">
@@ -93,13 +110,70 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
     );
   }
 
+  if (view === 'owner-login') {
+    return (
+      <div className="finance-screen">
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+          </div>
+          <div className="header-right">
+            <button
+              className="btn-header-action"
+              onClick={() => { setView('overview'); setLoginError(''); setLoginEmail(''); setLoginPassword(''); }}
+            >
+              Kembali
+            </button>
+          </div>
+        </header>
+        <div className="owner-login-view">
+          <form className="owner-login-form" onSubmit={handleOwnerLogin}>
+            <h1 className="owner-login-heading">Masuk</h1>
+            <p className="owner-login-sub">Masukkan akun Life OS milikmu.</p>
+            {loginError && <div className="error-message">{loginError}</div>}
+            <input
+              type="email"
+              placeholder="Email"
+              value={loginEmail}
+              onChange={e => setLoginEmail(e.target.value)}
+              required
+              autoFocus
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={loginPassword}
+              onChange={e => setLoginPassword(e.target.value)}
+              required
+            />
+            <button
+              type="submit"
+              className="owner-login-submit"
+              disabled={loginLoading}
+            >
+              {loginLoading ? 'Masuk...' : 'Masuk'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (view === 'add-transaction') {
     return (
       <div className="finance-screen">
-        <header className="finance-header">
-          <button className="btn btn-text back-btn" onClick={() => setView('overview')}>
-            ← Back
-          </button>
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+            <div className="domain-crumb">
+              <span className="active">Keuangan</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="btn-header-action" onClick={handleBackToOverview}>
+              Kembali
+            </button>
+          </div>
         </header>
         <AddTransactionForm
           accounts={accounts?.accounts ?? []}
@@ -113,10 +187,18 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   if (view === 'create-account') {
     return (
       <div className="finance-screen">
-        <header className="finance-header">
-          <button className="btn btn-text back-btn" onClick={() => setView('overview')}>
-            ← Back
-          </button>
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+            <div className="domain-crumb">
+              <span className="active">Keuangan</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="btn-header-action" onClick={handleBackToOverview}>
+              Kembali
+            </button>
+          </div>
         </header>
         <CreateAccountForm
           onSuccess={() => { setView('overview'); refresh(); }}
@@ -132,10 +214,18 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
     );
     return (
       <div className="finance-screen">
-        <header className="finance-header">
-          <button className="btn btn-text back-btn" onClick={handleBackToOverview}>
-            ← Back
-          </button>
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+            <div className="domain-crumb">
+              <span className="active">Keuangan</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="btn-header-action" onClick={handleBackToOverview}>
+              Kembali
+            </button>
+          </div>
         </header>
         <TransactionDetail
           transaction={selectedTransaction}
@@ -150,98 +240,151 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   const hasAccounts = accounts && accounts.accounts.length > 0;
   const totalAllocated = accounts?.totalAllocated ?? 0;
   const hasAllocations = totalAllocated > 0;
+  const activeAccounts = accounts?.accounts.filter(a => !a.isArchived) ?? [];
+  const archivedAccounts = accounts?.accounts.filter(a => a.isArchived) ?? [];
 
   return (
     <div className="finance-screen">
-      <header className="finance-header">
-        <h1>Finance</h1>
-        <div className="finance-header-actions">
+      <header className="app-header">
+        <div className="header-left">
+          <span className="brand-mark">Life OS</span>
+          <div className="domain-crumb">
+            <span className="active">Keuangan</span>
+          </div>
+        </div>
+        <div className="header-right">
           <button
-            className="btn btn-text help-btn"
+            className="btn-header-action"
             onClick={() => setShowHelp(!showHelp)}
           >
-            {showHelp ? 'Close' : 'How it works'}
+            {showHelp ? 'Tutup' : 'Cara Kerja'}
           </button>
+          {isGuest && (
+            <button className="btn-header-action" onClick={() => setView('owner-login')}>Masuk</button>
+          )}
           {!isGuest && (
-            <button className="btn btn-text" onClick={handleLogout}>Logout</button>
+            <button className="btn-header-action" onClick={handleLogout}>Keluar</button>
+          )}
+          {!isGuest && (
+            <span className="user-badge">Ruang Pribadi</span>
           )}
         </div>
       </header>
 
-      {showHelp && (
-        <div className="help-panel">
-          <p>Tell Life OS what happened.</p>
+      <div className={`help-drawer ${showHelp ? 'open' : ''}`}>
+        <div className="help-inner">
+          <div className="help-heading">Cara berinteraksi dengan Keuangan di Life OS</div>
+          <p className="help-text">
+            Cukup ceritakan apa yang terjadi seperti berbicara pada teman. Life OS memetakan nominal, kategori, dan rekening secara otomatis.
+          </p>
           <div className="help-examples">
-            <code>&ldquo;Makan 18rb cash&rdquo;</code>
-            <code>&ldquo;Gaji 5jt masuk Mandiri&rdquo;</code>
-            <code>&ldquo;Transfer 200rb ke SeaBank&rdquo;</code>
+            <span className="help-code-chip">&ldquo;Makan siang 25rb tunai&rdquo;</span>
+            <span className="help-code-chip">&ldquo;Kopi 22k qris bca&rdquo;</span>
+            <span className="help-code-chip">&ldquo;Gaji 12jt masuk mandiri&rdquo;</span>
+            <span className="help-code-chip">&ldquo;Transfer 300rb ke jago&rdquo;</span>
           </div>
-          <p>Need more control?<br />Use Manual.</p>
-          <p>Made a mistake?<br />Open the transaction and Reverse it.</p>
         </div>
-      )}
+      </div>
 
       {error && <div className="error-message">{error}</div>}
 
-      <section className="summary-section">
-        <div className="summary-total">
-          <span className="summary-label">Total Money</span>
-          <span className="summary-value">{formatCurrency(accounts?.totalBalance ?? 0)}</span>
+      <section className="summary-bar">
+        <div className="summary-primary-group">
+          <span className="summary-label">Total Dana</span>
+          <span className="summary-figure">{formatCurrency(accounts?.totalBalance ?? 0)}</span>
         </div>
-        <div className="summary-secondary">
-          <div className="summary-secondary-item">
-            <span className="summary-secondary-label">Available</span>
-            <span className="summary-secondary-value">{formatCurrency(accounts?.totalAvailable ?? 0)}</span>
-          </div>
-          {hasAllocations && (
-            <div className="summary-secondary-item">
-              <span className="summary-secondary-label">Reserved</span>
-              <span className="summary-secondary-value">{formatCurrency(totalAllocated)}</span>
+        {(accounts?.totalAvailable ?? 0) > 0 || hasAllocations ? (
+          <div className="summary-breakdown">
+            <div className="summary-metric">
+              <span className="metric-dot avail" />
+              <span>Tersedia:</span>
+              <span className="metric-val">{formatCurrency(accounts?.totalAvailable ?? 0)}</span>
             </div>
-          )}
-        </div>
+            {hasAllocations && (
+              <div className="summary-metric">
+                <span className="metric-dot alloc" />
+                <span>Dialokasikan:</span>
+                <span className="metric-val">{formatCurrency(totalAllocated)}</span>
+              </div>
+            )}
+          </div>
+        ) : null}
       </section>
 
-      <section className="section">
-        <div className="section-header">
-          <h2>Accounts</h2>
-          <button className="btn btn-text" onClick={() => setView('create-account')}>+ Add</button>
-        </div>
-        {!hasAccounts ? (
-          <div className="empty-state">
-            <p>No accounts yet.</p>
+      {!hasAccounts ? (
+        <div className="empty-view-container">
+          <div className="empty-intro-box">
+            <div className="empty-step-tag">Langkah Pertama</div>
+            <h2 className="empty-title">Tentukan tempat uangmu berada</h2>
+            <p className="empty-desc">
+              Sebelum mencatat transaksi pertama, Life OS perlu tahu wadah keuangan apa saja yang kamu gunakan sehari-hari. Mulai dari yang paling sering kamu pakai, seperti dompet tunai atau rekening bank utama.
+            </p>
             <button
-              className="btn btn-primary"
+              className="btn-empty-action"
               onClick={() => setView('create-account')}
             >
-              Create Account
+              + Buat Akun Pertama
             </button>
           </div>
-        ) : (
-          <div className="account-list">
-            {accounts!.accounts.map(acc => (
-              <AccountCard key={acc.id} account={acc} onUpdate={refresh} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="section">
-        <div className="section-header">
-          <h2>Transactions</h2>
-          <button className="manual-entry-link" onClick={() => setView('add-transaction')}>
-            Manual
-          </button>
         </div>
-        <TransactionList transactions={transactions} onSelect={handleSelectTransaction} />
-      </section>
+      ) : (
+        <div className="finance-body">
+          <section className="stream-column">
+            <div className="natural-module">
+              <div className="natural-box-head">
+                <span className="natural-title">Ceritakan Aktivitasmu</span>
+                <button
+                  className="natural-fallback-link"
+                  onClick={() => setView('add-transaction')}
+                >
+                  Catat Manual
+                </button>
+              </div>
+              <NaturalInput
+                accounts={accounts!.accounts}
+                hasTransactions={transactions.length > 0}
+                onSuccess={refresh}
+              />
+            </div>
 
-      {hasAccounts && (
-        <NaturalInput
-          accounts={accounts!.accounts}
-          hasTransactions={transactions.length > 0}
-          onSuccess={refresh}
-        />
+            <div className="ledger-section">
+              <div className="ledger-head">
+                <span className="section-title">Riwayat Transaksi</span>
+                <span className="ledger-count">{transactions.length} catatan</span>
+              </div>
+              <TransactionList transactions={transactions} onSelect={handleSelectTransaction} />
+            </div>
+          </section>
+
+          <aside className="context-column">
+            <div className="accounts-head">
+              <span className="section-title">Tempat Uangmu</span>
+              <button className="btn-add-account" onClick={() => setView('create-account')}>+ Tambah</button>
+            </div>
+
+            <div className="accounts-register">
+              {activeAccounts.map(acc => (
+                <AccountCard key={acc.id} account={acc} onUpdate={refresh} />
+              ))}
+              {archivedAccounts.map(acc => (
+                <AccountCard key={acc.id} account={acc} onUpdate={refresh} />
+              ))}
+            </div>
+
+            {archivedAccounts.length > 0 && (
+              <div className="archive-toggle-bar">
+                <span>{archivedAccounts.length} akun tersimpan</span>
+              </div>
+            )}
+
+            <div className="context-guidance">
+              <span className="guidance-title">Prinsip Keuangan</span>
+              <p className="guidance-p">
+                Saldo dihitung murni dari riwayat peristiwa. Tiap pengeluaran dan pemasukan tidak merusak catatan masa lalu, melainkan merefleksikan alur hidup yang nyata.
+              </p>
+            </div>
+          </aside>
+        </div>
       )}
     </div>
   );
