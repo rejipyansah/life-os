@@ -3,9 +3,10 @@ import TransactionItem from './TransactionItem';
 
 interface TransactionListProps {
   transactions: TransactionProjection[];
+  onSelect?: (transaction: TransactionProjection) => void;
 }
 
-export default function TransactionList({ transactions }: TransactionListProps) {
+export default function TransactionList({ transactions, onSelect }: TransactionListProps) {
   if (transactions.length === 0) {
     return (
       <div className="empty-state">
@@ -18,7 +19,7 @@ export default function TransactionList({ transactions }: TransactionListProps) 
   return (
     <div className="transaction-list">
       {transactions.map(tx => (
-        <TransactionItem key={tx.id} transaction={tx} />
+        <TransactionItem key={tx.id} transaction={tx} onSelect={onSelect} />
       ))}
     </div>
   );

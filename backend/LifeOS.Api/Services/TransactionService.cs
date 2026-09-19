@@ -306,6 +306,15 @@ public class TransactionService
         if (related is null)
             throw new ValidationException("Related transaction not found in current Scope.");
 
+        var alreadyReversed = await _db.Transactions.AnyAsync(
+            t => t.Type == TransactionType.Reversal
+                && t.RelatedTransactionId == command.RelatedTransactionId.Value
+                && t.ScopeId == scopeId,
+            ct);
+
+        if (alreadyReversed)
+            throw new ValidationException("This transaction has already been reversed.");
+
         if (command.Entries.Count != 1)
             throw new ValidationException("Reversal must have exactly one entry.");
 

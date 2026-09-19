@@ -332,6 +332,16 @@
   gap: 16px;
 }
 
+.transaction-item[role="button"] {
+  cursor: pointer;
+}
+
+.transaction-item[role="button"]:hover {
+  background: var(--color-bg);
+  margin: 0 -20px;
+  padding: 10px 20px;
+}
+
 .transaction-item:last-child {
   border-bottom: none;
 }
@@ -635,6 +645,91 @@
   color: var(--color-text-secondary);
   opacity: 0.6;
   margin-bottom: 4px;
+}
+
+/* ─── Transaction Detail ─── */
+.transaction-detail {
+  padding: 0 20px 20px;
+}
+
+.detail-header {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 16px;
+}
+
+.detail-description {
+  display: block;
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin-bottom: 4px;
+}
+
+.detail-amount {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-amount.positive {
+  color: var(--color-positive);
+}
+
+.detail-amount.negative {
+  color: var(--color-negative);
+}
+
+.detail-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+.detail-value-secondary {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.detail-actions {
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 8px;
+}
+
+.detail-confirm {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+
+.detail-confirm-text {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 12px;
 }
 
 /* ─── Responsive ─── */

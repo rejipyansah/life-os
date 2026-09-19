@@ -3,6 +3,7 @@ import type { AccountListProjection, TransactionProjection } from '../types';
 import { getAccounts, getTransactions, logout } from '../api';
 import AccountCard from './AccountCard';
 import TransactionList from './TransactionList';
+import TransactionDetail from './TransactionDetail';
 import AddTransactionForm from './AddTransactionForm';
 import CreateAccountForm from './CreateAccountForm';
 import NaturalInput from './NaturalInput';
@@ -16,7 +17,7 @@ function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-type View = 'overview' | 'add-transaction' | 'create-account';
+type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail';
 
 export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewProps) {
   const [accounts, setAccounts] = useState<AccountListProjection | null>(null);
@@ -24,6 +25,7 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [view, setView] = useState<View>('overview');
+  const [selectedTransaction, setSelectedTransaction] = useState<TransactionProjection | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -51,6 +53,16 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
     setError('');
     setLoading(true);
     setRefreshKey(k => k + 1);
+  };
+
+  const handleSelectTransaction = (tx: TransactionProjection) => {
+    setSelectedTransaction(tx);
+    setView('transaction-detail');
+  };
+
+  const handleBackToOverview = () => {
+    setSelectedTransaction(null);
+    setView('overview');
   };
 
   const handleLogout = async () => {
@@ -108,6 +120,27 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
         <CreateAccountForm
           onSuccess={() => { setView('overview'); refresh(); }}
           onCancel={() => setView('overview')}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'transaction-detail' && selectedTransaction) {
+    const isAlreadyReversed = transactions.some(
+      t => t.type === 'Reversal' && t.relatedTransactionId === selectedTransaction.id
+    );
+    return (
+      <div className="finance-screen">
+        <header className="finance-header">
+          <button className="btn btn-text back-btn" onClick={handleBackToOverview}>
+            ← Back
+          </button>
+        </header>
+        <TransactionDetail
+          transaction={selectedTransaction}
+          isAlreadyReversed={isAlreadyReversed}
+          allTransactions={transactions}
+          onSuccess={() => { handleBackToOverview(); refresh(); }}
         />
       </div>
     );
@@ -180,7 +213,7 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
             Manual
           </button>
         </div>
-        <TransactionList transactions={transactions} />
+        <TransactionList transactions={transactions} onSelect={handleSelectTransaction} />
       </section>
 
       {hasAccounts && (

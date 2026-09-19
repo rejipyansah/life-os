@@ -513,6 +513,258 @@ public class TransactionServiceTests : IDisposable
         await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
     }
 
+    [Fact]
+    public async Task Reversal_ValidExpense_CreatesCorrectiveEntry()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        // Create an expense
+        var expenseCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 30_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -30_000m }
+            ]
+        };
+        var (expenseTx, _) = await _sut.CreateTransactionAsync(expenseCommand);
+
+        var balanceAfterExpense = await _sut.GetAccountBalanceAsync(_accountAId, _scopeId);
+        Assert.Equal(70_000m, balanceAfterExpense);
+
+        // Reverse it
+        var reversalCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Reversal,
+            Amount = 30_000m,
+            RelatedTransactionId = expenseTx.Id,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 30_000m }
+            ]
+        };
+        var (reversalTx, reversalEntries) = await _sut.CreateTransactionAsync(reversalCommand);
+
+        Assert.Equal(TransactionType.Reversal, reversalTx.Type);
+        Assert.Equal(expenseTx.Id, reversalTx.RelatedTransactionId);
+        Assert.Single(reversalEntries);
+        Assert.Equal(30_000m, reversalEntries[0].Amount);
+
+        // Balance should be restored
+        var balanceAfterReversal = await _sut.GetAccountBalanceAsync(_accountAId, _scopeId);
+        Assert.Equal(100_000m, balanceAfterReversal);
+    }
+
+    [Fact]
+    public async Task Reversal_OriginalTransactionUnchanged()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        var expenseCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 15_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -15_000m }
+            ]
+        };
+        var (expenseTx, _) = await _sut.CreateTransactionAsync(expenseCommand);
+
+        // Record original state
+        var originalAmount = expenseTx.Amount;
+        var originalType = expenseTx.Type;
+        var originalDescription = expenseTx.Description;
+
+        // Reverse it
+        var reversalCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Reversal,
+            Amount = 15_000m,
+            RelatedTransactionId = expenseTx.Id,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 15_000m }
+            ]
+        };
+        await _sut.CreateTransactionAsync(reversalCommand);
+
+        // Reload original transaction from DB and verify unchanged
+        var original = await _sut.GetTransactionByIdAsync(expenseTx.Id, _scopeId);
+        Assert.NotNull(original);
+        Assert.Equal(originalAmount, original.Amount);
+        Assert.Equal(originalType, original.Type);
+        Assert.Equal(originalDescription, original.Description);
+    }
+
+    [Fact]
+    public async Task Reversal_DoubleReversal_Rejected()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        var expenseCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 20_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -20_000m }
+            ]
+        };
+        var (expenseTx, _) = await _sut.CreateTransactionAsync(expenseCommand);
+
+        // First reversal
+        var reversalCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Reversal,
+            Amount = 20_000m,
+            RelatedTransactionId = expenseTx.Id,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 20_000m }
+            ]
+        };
+        await _sut.CreateTransactionAsync(reversalCommand);
+
+        // Second reversal of the same transaction should be rejected
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(reversalCommand));
+    }
+
+    [Fact]
+    public async Task Reversal_OfReversal_Succeeds()
+    {
+        await SeedBalance(_accountAId, 100_000m);
+
+        var expenseCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 25_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -25_000m }
+            ]
+        };
+        var (expenseTx, _) = await _sut.CreateTransactionAsync(expenseCommand);
+
+        // Reverse the expense
+        var reversalCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Reversal,
+            Amount = 25_000m,
+            RelatedTransactionId = expenseTx.Id,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 25_000m }
+            ]
+        };
+        var (reversalTx, _) = await _sut.CreateTransactionAsync(reversalCommand);
+
+        // Reverse the reversal (undo the undo)
+        var undoReversalCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Reversal,
+            Amount = 25_000m,
+            RelatedTransactionId = reversalTx.Id,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -25_000m }
+            ]
+        };
+        var (undoTx, _) = await _sut.CreateTransactionAsync(undoReversalCommand);
+
+        Assert.Equal(TransactionType.Reversal, undoTx.Type);
+        Assert.Equal(reversalTx.Id, undoTx.RelatedTransactionId);
+
+        // Balance should reflect: 100k seed - 25k expense + 25k reversal - 25k undo = 75k
+        var balance = await _sut.GetAccountBalanceAsync(_accountAId, _scopeId);
+        Assert.Equal(75_000m, balance);
+    }
+
+    [Fact]
+    public async Task Reversal_CrossScope_IsRejected_NoEntryCreated()
+    {
+        // Arrange: create an expense in Scope A via the service
+        await SeedBalance(_accountAId, 100_000m);
+
+        var expenseCommand = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 30_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = -30_000m }
+            ]
+        };
+        var (expenseTx, _) = await _sut.CreateTransactionAsync(expenseCommand);
+
+        // Record Scope A state before the cross-scope attempt
+        var txCountBefore = _db.Transactions.Count(t => t.ScopeId == _scopeId);
+        var entryCountBefore = _db.TransactionEntries.Count(te =>
+            _db.Transactions.Any(t => t.Id == te.TransactionId && t.ScopeId == _scopeId));
+        var balanceBefore = await _sut.GetAccountBalanceAsync(_accountAId, _scopeId);
+
+        // Arrange: create Scope B with its own account
+        var scopeB = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(scopeB);
+        await _db.SaveChangesAsync();
+
+        var accountB = new Account
+        {
+            ScopeId = scopeB.Id,
+            Name = "Scope B Account",
+            Type = AccountType.Cash
+        };
+        _db.Accounts.Add(accountB);
+        await _db.SaveChangesAsync();
+
+        // Act: attempt to reverse Scope A's expense using Scope B's scope ID
+        var crossScopeCommand = new CreateTransactionCommand
+        {
+            ScopeId = scopeB.Id,
+            Type = TransactionType.Reversal,
+            Amount = 30_000m,
+            RelatedTransactionId = expenseTx.Id,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = accountB.Id, Amount = 30_000m }
+            ]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(crossScopeCommand));
+
+        // Assert: no corrective transaction or entry was created in Scope A
+        var txCountAfter = _db.Transactions.Count(t => t.ScopeId == _scopeId);
+        var entryCountAfter = _db.TransactionEntries.Count(te =>
+            _db.Transactions.Any(t => t.Id == te.TransactionId && t.ScopeId == _scopeId));
+        var balanceAfter = await _sut.GetAccountBalanceAsync(_accountAId, _scopeId);
+
+        Assert.Equal(txCountBefore, txCountAfter);
+        Assert.Equal(entryCountBefore, entryCountAfter);
+        Assert.Equal(balanceBefore, balanceAfter);
+    }
+
     // ───────────────────────── Adjustment ─────────────────────────
 
     [Fact]

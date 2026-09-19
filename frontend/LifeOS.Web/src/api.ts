@@ -62,6 +62,10 @@ export async function getTransactions(): Promise<{ items: TransactionProjection[
   return request('/api/finance/transactions');
 }
 
+export async function getTransaction(id: string): Promise<TransactionProjection> {
+  return request(`/api/finance/transactions/${id}`);
+}
+
 export async function createTransaction(command: {
   type: TransactionType;
   amount: number;

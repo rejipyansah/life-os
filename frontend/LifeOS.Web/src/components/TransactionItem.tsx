@@ -2,6 +2,7 @@ import type { TransactionProjection } from '../types';
 
 interface TransactionItemProps {
   transaction: TransactionProjection;
+  onSelect?: (transaction: TransactionProjection) => void;
 }
 
 function formatCurrency(amount: number): string {
@@ -13,7 +14,7 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
 }
 
-export default function TransactionItem({ transaction }: TransactionItemProps) {
+export default function TransactionItem({ transaction, onSelect }: TransactionItemProps) {
   const isPositive = transaction.type === 'Income' || transaction.type === 'Refund';
   const isTransfer = transaction.type === 'Transfer';
 
@@ -26,7 +27,15 @@ export default function TransactionItem({ transaction }: TransactionItemProps) {
     : accountNames.join(', ');
 
   return (
-    <div className="transaction-item">
+    <div
+      className="transaction-item"
+      onClick={() => onSelect?.(transaction)}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onKeyDown={onSelect ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') onSelect(transaction);
+      } : undefined}
+    >
       <div className="transaction-left">
         <span className="transaction-description">
           {transaction.description || transaction.type}
