@@ -323,6 +323,21 @@
   flex-direction: column;
 }
 
+.transaction-date-group + .transaction-date-group {
+  border-top: 1px solid var(--color-border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.transaction-date-header {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--color-text-secondary);
+  padding: 0 0 4px;
+}
+
 .transaction-item {
   display: flex;
   justify-content: space-between;
