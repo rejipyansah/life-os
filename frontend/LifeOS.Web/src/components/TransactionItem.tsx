@@ -42,6 +42,7 @@ export default function TransactionItem({ transaction, onSelect }: TransactionIt
         </span>
         <div className="transaction-meta">
           <span className="transaction-type">{transaction.type}</span>
+          {transaction.categoryName && <span>{transaction.categoryName}</span>}
           {accountLabel && <span>{accountLabel}</span>}
         </div>
       </div>
