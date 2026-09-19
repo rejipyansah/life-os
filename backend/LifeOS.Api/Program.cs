@@ -134,6 +134,26 @@ app.MapPost("/api/auth/logout", async (SignInManager<IdentityUser> signInManager
 .WithName("Logout");
 
 // GUEST SESSION
+app.MapGet("/api/guest/session", async (HttpContext http) =>
+{
+    if (http.User.Identity?.IsAuthenticated == true)
+    {
+        return Results.Json(new { error = "Authenticated users do not have guest sessions." }, statusCode: 403);
+    }
+
+    var guestTokenService = http.RequestServices.GetRequiredService<GuestTokenService>();
+
+    var existingSession = await guestTokenService.ResolveAsync(http);
+    if (existingSession is null)
+    {
+        return Results.Json(new { error = "No existing guest session." }, statusCode: 401);
+    }
+
+    await guestTokenService.UpdateActivityAsync(existingSession);
+    return Results.Ok(new { isGuest = true });
+})
+.WithName("ResumeGuestSession");
+
 app.MapPost("/api/guest/session", async (HttpContext http) =>
 {
     if (http.User.Identity?.IsAuthenticated == true)

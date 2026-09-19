@@ -39,6 +39,10 @@ export async function createGuestSession(): Promise<{ isGuest: boolean }> {
   return request('/api/guest/session', { method: 'POST' });
 }
 
+export async function resumeGuestSession(): Promise<{ isGuest: boolean }> {
+  return request('/api/guest/session');
+}
+
 export async function getAccounts(includeArchived = false): Promise<AccountListProjection> {
   const qs = includeArchived ? '?includeArchived=true' : '';
   return request(`/api/finance/accounts${qs}`);

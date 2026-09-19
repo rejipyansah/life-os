@@ -4,6 +4,7 @@ import { interpret, createTransaction } from '../api';
 
 interface NaturalInputProps {
   accounts: AccountProjection[];
+  hasTransactions: boolean;
   onSuccess: () => void;
 }
 
@@ -17,12 +18,13 @@ function formatDate(dateStr: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps) {
+export default function NaturalInput({ accounts, hasTransactions, onSuccess }: NaturalInputProps) {
   const [input, setInput] = useState('');
   const [interpreting, setInterpreting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<InterpretResponse | null>(null);
   const [error, setError] = useState('');
+  const [hintDismissed, setHintDismissed] = useState(false);
 
   const activeAccounts = accounts.filter(a => !a.isArchived);
 
@@ -60,6 +62,7 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
       await createTransaction(result.command);
       setInput('');
       setResult(null);
+      setHintDismissed(true);
       onSuccess();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Gagal membuat transaksi';
@@ -101,6 +104,12 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
           {interpreting ? '...' : 'Go'}
         </button>
       </form>
+
+      {!hasTransactions && !hintDismissed && !result && !error && (
+        <div className="natural-input-hint">
+          Try: &ldquo;Makan siang 50rb cash&rdquo;
+        </div>
+      )}
 
       {error && <div className="error-message" style={{ marginTop: 8 }}>{error}</div>}
 

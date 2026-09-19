@@ -27,6 +27,7 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   const [view, setView] = useState<View>('overview');
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionProjection | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,11 +156,30 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
       <header className="finance-header">
         <h1>Finance</h1>
         <div className="finance-header-actions">
+          <button
+            className="btn btn-text help-btn"
+            onClick={() => setShowHelp(!showHelp)}
+          >
+            {showHelp ? 'Close' : 'How it works'}
+          </button>
           {!isGuest && (
             <button className="btn btn-text" onClick={handleLogout}>Logout</button>
           )}
         </div>
       </header>
+
+      {showHelp && (
+        <div className="help-panel">
+          <p>Tell Life OS what happened.</p>
+          <div className="help-examples">
+            <code>&ldquo;Makan 18rb cash&rdquo;</code>
+            <code>&ldquo;Gaji 5jt masuk Mandiri&rdquo;</code>
+            <code>&ldquo;Transfer 200rb ke SeaBank&rdquo;</code>
+          </div>
+          <p>Need more control?<br />Use Manual.</p>
+          <p>Made a mistake?<br />Open the transaction and Reverse it.</p>
+        </div>
+      )}
 
       {error && <div className="error-message">{error}</div>}
 
@@ -219,6 +239,7 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
       {hasAccounts && (
         <NaturalInput
           accounts={accounts!.accounts}
+          hasTransactions={transactions.length > 0}
           onSuccess={refresh}
         />
       )}
