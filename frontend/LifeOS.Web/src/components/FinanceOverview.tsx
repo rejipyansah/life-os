@@ -31,7 +31,7 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([getAccounts(), getTransactions()])
+    Promise.all([getAccounts(true), getTransactions()])
       .then(([acctResult, txResult]) => {
         if (!cancelled) {
           setAccounts(acctResult);
@@ -200,7 +200,7 @@ export default function FinanceOverview({ isGuest, onLogout }: FinanceOverviewPr
         ) : (
           <div className="account-list">
             {accounts!.accounts.map(acc => (
-              <AccountCard key={acc.id} account={acc} />
+              <AccountCard key={acc.id} account={acc} onUpdate={refresh} />
             ))}
           </div>
         )}

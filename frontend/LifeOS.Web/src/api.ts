@@ -58,6 +58,20 @@ export async function createAccount(command: { name: string; type: AccountType }
   });
 }
 
+export async function updateAccount(id: string, command: { name?: string; isArchived?: boolean }) {
+  return request<{
+    accountId: string;
+    name: string;
+    type: AccountType;
+    isArchived: boolean;
+    createdAt: string;
+  }>(`/api/finance/accounts/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(command),
+  });
+}
+
 export async function getTransactions(): Promise<{ items: TransactionProjection[] }> {
   return request('/api/finance/transactions');
 }
