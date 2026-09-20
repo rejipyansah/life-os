@@ -234,12 +234,12 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
     );
   }
 
+  const activeAccounts = accounts?.accounts.filter(a => !a.isArchived) ?? [];
+  const archivedAccounts = accounts?.accounts.filter(a => a.isArchived) ?? [];
   const hasAccounts = accounts && accounts.accounts.length > 0;
   const hasActiveAccounts = activeAccounts.length > 0;
   const totalAllocated = accounts?.totalAllocated ?? 0;
   const hasAllocations = totalAllocated > 0;
-  const activeAccounts = accounts?.accounts.filter(a => !a.isArchived) ?? [];
-  const archivedAccounts = accounts?.accounts.filter(a => a.isArchived) ?? [];
 
   return (
     <div className="finance-screen">
