@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { AccountProjection, AccountType } from '../types';
 import { updateAccount } from '../api';
 
@@ -32,6 +32,24 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
   const [editType, setEditType] = useState<AccountType>(account.type);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
+  const clearError = () => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    setError('');
+  };
+
+  const setErrorWithAutoClear = (msg: string) => {
+    setError(msg);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setError(''), 5000);
+  };
 
   const handleSaveName = async () => {
     const trimmed = editName.trim();
@@ -42,13 +60,13 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
     }
 
     setLoading(true);
-    setError('');
+    clearError();
     try {
       await updateAccount(account.id, { name: trimmed });
       setEditing(false);
       onUpdate();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Gagal mengubah nama');
+      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengubah nama');
       setEditName(account.name);
     } finally {
       setLoading(false);
@@ -59,18 +77,18 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
     setEditing(false);
     setEditName(account.name);
     setEditType(account.type);
-    setError('');
+    clearError();
   };
 
   const handleSaveEdit = async () => {
     const trimmed = editName.trim();
     if (!trimmed) {
-      setError('Nama akun tidak boleh kosong.');
+      setErrorWithAutoClear('Nama akun tidak boleh kosong.');
       return;
     }
 
     setLoading(true);
-    setError('');
+    clearError();
     try {
       const patch: { name?: string; type?: AccountType } = {};
       if (trimmed !== account.name) patch.name = trimmed;
@@ -85,7 +103,7 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
       setEditing(false);
       onUpdate();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Gagal menyimpan perubahan');
+      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal menyimpan perubahan');
     } finally {
       setLoading(false);
     }
@@ -93,12 +111,12 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
 
   const handleToggleArchive = async () => {
     setLoading(true);
-    setError('');
+    clearError();
     try {
       await updateAccount(account.id, { isArchived: !account.isArchived });
       onUpdate();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Gagal mengubah status');
+      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengubah status');
     } finally {
       setLoading(false);
     }
@@ -144,14 +162,14 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
           </div>
           <div className="account-edit-actions">
             <button
-              className="account-action-btn"
+              className="account-edit-save-btn"
               onClick={handleSaveEdit}
               disabled={loading}
             >
               {loading ? '...' : 'Simpan'}
             </button>
             <button
-              className="account-action-btn"
+              className="account-edit-cancel-btn"
               onClick={handleCancelEdit}
               disabled={loading}
             >
@@ -159,7 +177,7 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
             </button>
           </div>
         </div>
-        {error && <div className="account-edit-error">{error}</div>}
+        {error && <div className="account-card-error">{error}</div>}
       </div>
     );
   }
@@ -170,7 +188,7 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
         <div className="account-name-row">
           <span
             className="account-name"
-            onClick={() => { setEditing(true); setEditName(account.name); setEditType(account.type); }}
+            onClick={() => { setEditing(true); setEditName(account.name); setEditType(account.type); clearError(); }}
             title="Klik untuk mengedit"
           >
             {account.name}
@@ -189,24 +207,22 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
         )}
         <div className="account-actions">
           <button
-            className="account-action-btn"
-            onClick={() => { setEditing(true); setEditName(account.name); setEditType(account.type); }}
+            className="account-action-edit"
+            onClick={() => { setEditing(true); setEditName(account.name); setEditType(account.type); clearError(); }}
             disabled={loading}
-            title="Edit akun"
           >
             Edit
           </button>
           <button
-            className="account-action-btn"
+            className="account-action-archive"
             onClick={handleToggleArchive}
             disabled={loading}
-            title={account.isArchived ? 'Unarchive akun' : 'Arsipkan akun'}
           >
-            {account.isArchived ? 'Unarchive' : 'Archive'}
+            {account.isArchived ? 'Aktifkan' : 'Arsipkan'}
           </button>
         </div>
       </div>
-      {error && <div className="account-edit-error">{error}</div>}
+      {error && <div className="account-card-error">{error}</div>}
     </div>
   );
 }

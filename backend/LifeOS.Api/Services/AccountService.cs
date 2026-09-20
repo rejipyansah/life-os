@@ -187,7 +187,7 @@ public class AccountService
 
                 if (balance != 0)
                     throw new ValidationException(
-                        "Cannot archive an Account with a non-zero balance. Settle the balance to zero first.");
+                        "Saldo belum nol. Selesaikan semua transaksi terlebih dahulu.");
 
                 var activeAllocated = await _db.Allocations
                     .Where(a => a.AccountId == accountId && a.IsActive)
@@ -195,7 +195,7 @@ public class AccountService
 
                 if (activeAllocated != 0)
                     throw new ValidationException(
-                        "Cannot archive an Account with active Allocations. Remove or reassign allocations first.");
+                        "Masih ada alokasi aktif. Hapus atau pindahkan alokasi terlebih dahulu.");
             }
 
             account.IsArchived = command.IsArchived.Value;

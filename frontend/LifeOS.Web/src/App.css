@@ -1076,22 +1076,54 @@
 /* Account Actions */
 .account-actions {
   display: flex;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 8px;
+  margin-top: 6px;
 }
 
-.account-action-btn {
+.account-action-edit {
+  background: none;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.account-action-edit:hover {
+  background: var(--color-subtle);
+  border-color: var(--color-text-muted);
+}
+
+.account-action-edit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.account-action-archive {
   background: none;
   border: none;
   color: var(--color-text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 500;
-  padding: 1px 4px;
+  padding: 5px 12px;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 }
 
-.account-action-btn:hover {
-  color: var(--color-text);
+.account-action-archive:hover {
+  color: var(--color-negative);
+  background: #faf2f0;
+}
+
+.account-action-archive:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Account Name Edit Input */
@@ -1138,17 +1170,61 @@
 
 .account-edit-actions {
   display: flex;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
-.account-edit-error {
-  position: absolute;
-  bottom: 2px;
-  left: 16px;
-  right: 16px;
-  font-size: 10px;
+.account-edit-save-btn {
+  background: var(--color-text);
+  color: #ffffff;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.account-edit-save-btn:hover {
+  background: #2b2925;
+}
+
+.account-edit-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.account-edit-cancel-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.account-edit-cancel-btn:hover {
+  border-color: var(--color-text-muted);
+  color: var(--color-text);
+}
+
+.account-edit-cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.account-card-error {
+  margin-top: 8px;
+  font-size: 12px;
   color: var(--color-error);
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 /* Archived Account */
@@ -2006,6 +2082,55 @@
 
   .account-balance {
     font-size: 14.5px;
+  }
+
+  .account-actions {
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .account-action-edit {
+    padding: 7px 14px;
+    min-height: 36px;
+    font-size: 12.5px;
+  }
+
+  .account-action-archive {
+    padding: 7px 14px;
+    min-height: 36px;
+    font-size: 12.5px;
+  }
+
+  .account-type-edit {
+    gap: 6px;
+  }
+
+  .account-type-option {
+    padding: 6px 10px;
+    font-size: 12px;
+    min-height: 36px;
+  }
+
+  .account-edit-actions {
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .account-edit-save-btn {
+    padding: 7px 16px;
+    min-height: 36px;
+    font-size: 12.5px;
+  }
+
+  .account-edit-cancel-btn {
+    padding: 7px 14px;
+    min-height: 36px;
+    font-size: 12.5px;
+  }
+
+  .account-card-error {
+    font-size: 12.5px;
+    margin-top: 10px;
   }
 
   .empty-view-container {
