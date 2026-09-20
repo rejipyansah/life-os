@@ -1,24 +1,33 @@
 import { useState, useEffect } from 'react';
+
 import { getAuthMe, resumeGuestSession, logout } from './api';
+
 import EntryScreen from './components/EntryScreen';
 import LoginScreen from './components/LoginScreen';
 import FinanceOverview from './components/FinanceOverview';
+
 import './App.css';
 
 type AppState = 'checking' | 'entry' | 'login' | 'finance';
 
 function getInitialState(): AppState {
-  if (typeof window !== 'undefined' && sessionStorage.getItem('just_logged_out') === '1') {
+  if (
+    typeof window !== 'undefined' &&
+    sessionStorage.getItem('just_logged_out') === '1'
+  ) {
     sessionStorage.removeItem('just_logged_out');
     return 'entry';
   }
+
   return 'checking';
 }
 
 function App() {
   const [state, setState] = useState<AppState>(getInitialState);
   const [isGuest, setIsGuest] = useState(false);
-  const [loginOrigin, setLoginOrigin] = useState<'entry' | 'finance'>('entry');
+  const [loginOrigin, setLoginOrigin] = useState<'entry' | 'finance'>(
+    'entry'
+  );
 
   useEffect(() => {
     if (state !== 'checking') return;
@@ -26,29 +35,37 @@ function App() {
     let cancelled = false;
 
     getAuthMe()
-      .then(() => {
-        if (!cancelled) {
+      .then((auth) => {
+        if (cancelled) return;
+
+        if (auth) {
           setState('finance');
           setIsGuest(false);
+          return;
+        }
+
+        return resumeGuestSession();
+      })
+      .then((guestResult) => {
+        if (cancelled || !guestResult) return;
+
+        setIsGuest(true);
+
+        if (guestResult.isNew) {
+          setState('entry');
+        } else {
+          setState('finance');
         }
       })
       .catch(() => {
-        if (cancelled) return;
-        resumeGuestSession()
-          .then(() => {
-            if (!cancelled) {
-              setState('finance');
-              setIsGuest(true);
-            }
-          })
-          .catch(() => {
-            if (!cancelled) {
-              setState('entry');
-            }
-          });
+        if (!cancelled) {
+          setState('entry');
+        }
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [state]);
 
   const handleEnter = (guest: boolean) => {
@@ -62,7 +79,9 @@ function App() {
     } catch {
       // proceed with local logout even if server call fails
     }
+
     sessionStorage.setItem('just_logged_out', '1');
+
     setIsGuest(false);
     setState('entry');
   };
@@ -111,7 +130,11 @@ function App() {
 
   return (
     <div className="app">
-      <FinanceOverview isGuest={isGuest} onLogout={handleLogout} onRequestLogin={() => handleRequestLogin('finance')} />
+      <FinanceOverview
+        isGuest={isGuest}
+        onLogout={handleLogout}
+        onRequestLogin={() => handleRequestLogin('finance')}
+      />
     </div>
   );
 }

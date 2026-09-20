@@ -9,48 +9,130 @@ import type {
   UpdateAllocationCommand,
 } from './types';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+
+async function request<T>(
+  path: string,
+  init?: RequestInit
+): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    credentials: 'include',
+  });
+
   const body = await res.json();
+
   if (!res.ok) {
-    const msg = (body && typeof body === 'object' && 'error' in body)
-      ? (body as { error: string }).error
-      : `Request failed (${res.status})`;
+    const msg =
+      body &&
+      typeof body === 'object' &&
+      'error' in body
+        ? (body as { error: string }).error
+        : `Request failed (${res.status})`;
+
     throw new Error(msg);
   }
+
   return body as T;
 }
 
-export async function getAuthMe(): Promise<AuthMe> {
-  return request<AuthMe>('/api/auth/me');
+export async function getAuthMe(): Promise<AuthMe | null> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+    credentials: 'include',
+  });
+
+  if (res.status === 401) {
+    return null;
+  }
+
+  if (!res.ok) {
+    throw new Error(`Request failed (${res.status})`);
+  }
+
+  return res.json() as Promise<AuthMe>;
 }
 
-export async function login(email: string, password: string): Promise<{ isAuthenticated: boolean }> {
+export async function login(
+  email: string,
+  password: string
+): Promise<{ isAuthenticated: boolean }> {
   return request('/api/auth/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email,
+      password,
+    }),
   });
 }
 
 export async function logout(): Promise<void> {
-  await fetch('/api/auth/logout', { method: 'POST' });
+  await fetch(`${API_BASE_URL}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+  });
 }
 
-export async function createGuestSession(): Promise<{ isGuest: boolean }> {
-  return request('/api/guest/session', { method: 'POST' });
+export async function createGuestSession(): Promise<{
+  isGuest: boolean;
+}> {
+  return request('/api/guest/session', {
+    method: 'POST',
+  });
 }
 
-export async function resumeGuestSession(): Promise<{ isGuest: boolean }> {
-  return request('/api/guest/session');
+export async function resumeGuestSession(): Promise<{
+  isGuest: boolean;
+  isNew: boolean;
+}> {
+  const res = await fetch(`${API_BASE_URL}/api/guest/session`, {
+    credentials: 'include',
+  });
+
+  if (res.ok) {
+    return {
+      ...(await res.json()),
+      isNew: false,
+    };
+  }
+
+  if (res.status === 401) {
+    const result = await createGuestSession();
+
+    return {
+      ...result,
+      isNew: true,
+    };
+  }
+
+  const body = await res.json().catch(() => null);
+
+  const msg =
+    body &&
+    typeof body === 'object' &&
+    'error' in body
+      ? (body as { error: string }).error
+      : `Request failed (${res.status})`;
+
+  throw new Error(msg);
 }
 
-export async function getAccounts(includeArchived = false): Promise<AccountListProjection> {
-  const qs = includeArchived ? '?includeArchived=true' : '';
+export async function getAccounts(
+  includeArchived = false
+): Promise<AccountListProjection> {
+  const qs = includeArchived
+    ? '?includeArchived=true'
+    : '';
+
   return request(`/api/finance/accounts${qs}`);
 }
 
-export async function createAccount(command: { name: string; type: AccountType }) {
+export async function createAccount(command: {
+  name: string;
+  type: AccountType;
+}) {
   return request<{
     accountId: string;
     name: string;
@@ -59,12 +141,24 @@ export async function createAccount(command: { name: string; type: AccountType }
     createdAt: string;
   }>('/api/finance/accounts', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: command.name, type: command.type }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: command.name,
+      type: command.type,
+    }),
   });
 }
 
-export async function updateAccount(id: string, command: { name?: string; type?: AccountType; isArchived?: boolean }) {
+export async function updateAccount(
+  id: string,
+  command: {
+    name?: string;
+    type?: AccountType;
+    isArchived?: boolean;
+  }
+) {
   return request<{
     accountId: string;
     name: string;
@@ -73,17 +167,25 @@ export async function updateAccount(id: string, command: { name?: string; type?:
     createdAt: string;
   }>(`/api/finance/accounts/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(command),
   });
 }
 
-export async function getTransactions(): Promise<{ items: TransactionProjection[] }> {
+export async function getTransactions(): Promise<{
+  items: TransactionProjection[];
+}> {
   return request('/api/finance/transactions');
 }
 
-export async function getTransaction(id: string): Promise<TransactionProjection> {
-  return request(`/api/finance/transactions/${id}`);
+export async function getTransaction(
+  id: string
+): Promise<TransactionProjection> {
+  return request(
+    `/api/finance/transactions/${id}`
+  );
 }
 
 export async function createTransaction(command: {
@@ -94,7 +196,10 @@ export async function createTransaction(command: {
   occurredOn: string;
   relatedTransactionId?: string;
   feeAmount?: number;
-  entries: { accountId: string; amount: number }[];
+  entries: {
+    accountId: string;
+    amount: number;
+  }[];
 }) {
   return request<{
     transactionId: string;
@@ -105,7 +210,9 @@ export async function createTransaction(command: {
     entryCount: number;
   }>('/api/finance/transactions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       type: command.type,
       amount: command.amount,
@@ -119,12 +226,21 @@ export async function createTransaction(command: {
   });
 }
 
-export async function interpret(input: string): Promise<InterpretResponse> {
-  return request<InterpretResponse>('/api/interpret', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ input }),
-  });
+export async function interpret(
+  input: string
+): Promise<InterpretResponse> {
+  return request<InterpretResponse>(
+    '/api/interpret',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input,
+      }),
+    }
+  );
 }
 
 export async function createAllocation(command: {
@@ -141,7 +257,9 @@ export async function createAllocation(command: {
     createdAt: string;
   }>('/api/finance/allocations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       name: command.name,
       amount: command.amount,
@@ -150,11 +268,18 @@ export async function createAllocation(command: {
   });
 }
 
-export async function getAllocations(): Promise<AllocationProjection[]> {
-  return request<AllocationProjection[]>('/api/finance/allocations');
+export async function getAllocations(): Promise<
+  AllocationProjection[]
+> {
+  return request<AllocationProjection[]>(
+    '/api/finance/allocations'
+  );
 }
 
-export async function updateAllocation(id: string, command: UpdateAllocationCommand) {
+export async function updateAllocation(
+  id: string,
+  command: UpdateAllocationCommand
+) {
   return request<{
     allocationId: string;
     accountId: string;
@@ -164,7 +289,9 @@ export async function updateAllocation(id: string, command: UpdateAllocationComm
     createdAt: string;
   }>(`/api/finance/allocations/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(command),
   });
 }
