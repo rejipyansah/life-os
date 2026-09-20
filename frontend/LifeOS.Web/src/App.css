@@ -713,14 +713,6 @@
   cursor: not-allowed;
 }
 
-/* Natural Input Hint */
-.natural-input-hint {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  padding: 6px 0 0;
-  opacity: 0.7;
-}
-
 /* Natural Result Zone */
 .natural-result-zone {
   border-top: 1px solid var(--color-border);
@@ -1076,18 +1068,18 @@
 /* Account Actions */
 .account-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .account-action-edit {
   background: none;
   border: 1px solid var(--color-border-strong);
   color: var(--color-text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 5px 12px;
-  min-height: 32px;
+  padding: 8px 16px;
+  min-height: 40px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
@@ -1105,19 +1097,20 @@
 
 .account-action-archive {
   background: none;
-  border: none;
+  border: 1px solid var(--color-border);
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 5px 12px;
-  min-height: 32px;
+  padding: 8px 16px;
+  min-height: 40px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .account-action-archive:hover {
   color: var(--color-negative);
+  border-color: var(--color-negative);
   background: #faf2f0;
 }
 
@@ -1126,105 +1119,37 @@
   cursor: not-allowed;
 }
 
-/* Account Name Edit Input */
-.account-name-input {
-  font-weight: 600;
-  font-size: 14px;
-  padding: 1px 4px;
-  border: 1px solid var(--color-text);
-  border-radius: 3px;
-  background: var(--color-surface);
-  outline: none;
-  min-width: 80px;
-  max-width: 200px;
-}
-
-/* Account Type Edit */
-.account-type-edit {
-  display: flex;
-  gap: 4px;
-}
-
-.account-type-option {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 10.5px;
-  font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.account-type-option:hover {
-  border-color: var(--color-text-muted);
-  color: var(--color-text);
-}
-
-.account-type-option.selected {
-  background: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-surface);
-}
-
-.account-edit-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.account-edit-save-btn {
-  background: var(--color-text);
-  color: #ffffff;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 14px;
-  min-height: 32px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.account-edit-save-btn:hover {
-  background: #2b2925;
-}
-
-.account-edit-save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.account-edit-cancel-btn {
+.account-action-unarchive {
   background: none;
   border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 5px 12px;
-  min-height: 32px;
+  padding: 8px 16px;
+  min-height: 40px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
-.account-edit-cancel-btn:hover {
-  border-color: var(--color-text-muted);
+.account-action-unarchive:hover {
   color: var(--color-text);
+  border-color: var(--color-text-muted);
+  background: var(--color-subtle);
 }
 
-.account-edit-cancel-btn:disabled {
+.account-action-unarchive:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .account-card-error {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--color-error);
-  line-height: 1.4;
+  line-height: 1.5;
   word-break: break-word;
+  width: 100%;
 }
 
 /* Archived Account */
@@ -1255,6 +1180,13 @@
   border-radius: var(--radius-sm);
   padding: 24px 20px;
   text-align: center;
+}
+
+.empty-active-accounts-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 6px 0;
 }
 
 .empty-active-accounts-text {
@@ -1371,7 +1303,7 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SHARED FORMS (used by AddTransactionForm, CreateAccountForm, AllocationForm)
+   SHARED FORMS (used by AddTransactionForm, AccountForm, AllocationForm)
    ═══════════════════════════════════════════════════════════════ */
 
 .transaction-form,
@@ -2090,42 +2022,16 @@
   }
 
   .account-action-edit {
-    padding: 7px 14px;
-    min-height: 36px;
-    font-size: 12.5px;
+    padding: 8px 16px;
+    min-height: 40px;
+    font-size: 13px;
   }
 
-  .account-action-archive {
-    padding: 7px 14px;
-    min-height: 36px;
-    font-size: 12.5px;
-  }
-
-  .account-type-edit {
-    gap: 6px;
-  }
-
-  .account-type-option {
-    padding: 6px 10px;
-    font-size: 12px;
-    min-height: 36px;
-  }
-
-  .account-edit-actions {
-    gap: 8px;
-    margin-top: 8px;
-  }
-
-  .account-edit-save-btn {
-    padding: 7px 16px;
-    min-height: 36px;
-    font-size: 12.5px;
-  }
-
-  .account-edit-cancel-btn {
-    padding: 7px 14px;
-    min-height: 36px;
-    font-size: 12.5px;
+  .account-action-archive,
+  .account-action-unarchive {
+    padding: 8px 16px;
+    min-height: 40px;
+    font-size: 13px;
   }
 
   .account-card-error {

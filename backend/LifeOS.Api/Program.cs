@@ -187,6 +187,8 @@ app.MapPost("/api/guest/session", async (HttpContext http) =>
     db.GuestSessions.Add(session);
     await db.SaveChangesAsync();
 
+    await ScopeInitializer.EnsureDefaultAccountAsync(db, scope.Id);
+
     GuestTokenService.SetGuestCookie(http, token);
 
     return Results.Ok(new { isGuest = true });
@@ -786,6 +788,8 @@ static async Task<int> RunEnsureOwnerScopeAsync()
     db.Scopes.Add(ownerScope);
     await db.SaveChangesAsync();
 
+    await ScopeInitializer.EnsureDefaultAccountAsync(db, ownerScope.Id);
+
     Console.WriteLine($"Owner Scope created (Id: {ownerScope.Id}).");
     return 0;
 }
@@ -865,6 +869,8 @@ static async Task<int> RunProvisioningAsync(string[] args)
     };
     db.Scopes.Add(ownerScope);
     await db.SaveChangesAsync();
+
+    await ScopeInitializer.EnsureDefaultAccountAsync(db, ownerScope.Id);
 
     Console.WriteLine($"Owner created successfully (Id: {user.Id}).");
     Console.WriteLine($"Owner Scope created (Id: {ownerScope.Id}).");

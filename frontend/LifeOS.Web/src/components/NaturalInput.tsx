@@ -4,7 +4,6 @@ import { interpret, createTransaction, createAllocation } from '../api';
 
 interface NaturalInputProps {
   accounts: AccountProjection[];
-  hasTransactions: boolean;
   onSuccess: () => void;
 }
 
@@ -12,13 +11,12 @@ function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-export default function NaturalInput({ accounts, hasTransactions, onSuccess }: NaturalInputProps) {
+export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps) {
   const [input, setInput] = useState('');
   const [interpreting, setInterpreting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<InterpretResponse | null>(null);
   const [error, setError] = useState('');
-  const [hintDismissed, setHintDismissed] = useState(false);
 
   const activeAccounts = accounts.filter(a => !a.isArchived);
 
@@ -56,7 +54,6 @@ export default function NaturalInput({ accounts, hasTransactions, onSuccess }: N
       await createTransaction(result.command);
       setInput('');
       setResult(null);
-      setHintDismissed(true);
       onSuccess();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Gagal membuat transaksi';
@@ -76,7 +73,6 @@ export default function NaturalInput({ accounts, hasTransactions, onSuccess }: N
       await createAllocation(result.allocationCommand);
       setInput('');
       setResult(null);
-      setHintDismissed(true);
       onSuccess();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Gagal membuat alokasi';
@@ -121,12 +117,6 @@ export default function NaturalInput({ accounts, hasTransactions, onSuccess }: N
           {interpreting ? '...' : 'Catat'}
         </button>
       </div>
-
-      {!hasTransactions && !hintDismissed && !hasResult && (
-        <div className="natural-input-hint">
-          Try: &ldquo;Makan siang 50rb cash&rdquo;
-        </div>
-      )}
 
       {hasResult && (
         <div className="natural-result-zone">

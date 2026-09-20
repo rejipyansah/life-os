@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import type { AccountListProjection, TransactionProjection, AllocationProjection } from '../types';
+import type { AccountListProjection, AccountProjection, TransactionProjection, AllocationProjection } from '../types';
 import { getAccounts, getTransactions, getAllocations, logout } from '../api';
 import AccountCard from './AccountCard';
 import TransactionList from './TransactionList';
 import TransactionDetail from './TransactionDetail';
 import AddTransactionForm from './AddTransactionForm';
-import CreateAccountForm from './CreateAccountForm';
+import AccountForm from './AccountForm';
 import AllocationForm from './AllocationForm';
 import AllocationList from './AllocationList';
 import NaturalInput from './NaturalInput';
@@ -20,7 +20,7 @@ function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail' | 'add-allocation' | 'edit-allocation';
+type View = 'overview' | 'add-transaction' | 'create-account' | 'edit-account' | 'transaction-detail' | 'add-allocation' | 'edit-allocation';
 
 export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: FinanceOverviewProps) {
   const [accounts, setAccounts] = useState<AccountListProjection | null>(null);
@@ -31,6 +31,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
   const [view, setView] = useState<View>('overview');
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionProjection | null>(null);
   const [editingAllocation, setEditingAllocation] = useState<AllocationProjection | null>(null);
+  const [editingAccount, setEditingAccount] = useState<AccountProjection | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -70,12 +71,18 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
   const handleBackToOverview = () => {
     setSelectedTransaction(null);
     setEditingAllocation(null);
+    setEditingAccount(null);
     setView('overview');
   };
 
   const handleEditAllocation = (allocation: AllocationProjection) => {
     setEditingAllocation(allocation);
     setView('edit-allocation');
+  };
+
+  const handleEditAccount = (account: AccountProjection) => {
+    setEditingAccount(account);
+    setView('edit-account');
   };
 
   const handleLogout = async () => {
@@ -146,7 +153,32 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
             </button>
           </div>
         </header>
-        <CreateAccountForm
+        <AccountForm
+          onSuccess={() => { setView('overview'); refresh(); }}
+          onCancel={() => setView('overview')}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'edit-account' && editingAccount) {
+    return (
+      <div className="finance-screen">
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+            <div className="domain-crumb">
+              <span className="active">Keuangan</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="btn-header-action" onClick={handleBackToOverview}>
+              Kembali
+            </button>
+          </div>
+        </header>
+        <AccountForm
+          editAccount={editingAccount}
           onSuccess={() => { setView('overview'); refresh(); }}
           onCancel={() => setView('overview')}
         />
@@ -342,18 +374,18 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
                 </div>
                 <NaturalInput
                   accounts={accounts!.accounts}
-                  hasTransactions={transactions.length > 0}
                   onSuccess={refresh}
                 />
               </div>
             ) : (
               <div className="empty-active-accounts-notice">
+                <p className="empty-active-accounts-title">Belum ada akun aktif</p>
                 <p className="empty-active-accounts-text">
-                  Tidak ada akun aktif. Buat akun baru atau aktifkan kembali akun yang tersimpan untuk mulai mencatat transaksi.
+                  Tambah akun untuk mulai mencatat.
                 </p>
                 <div className="empty-active-accounts-actions">
                   <button className="btn-empty-action" onClick={() => setView('create-account')}>
-                    + Buat Akun Baru
+                    + Tambah Akun
                   </button>
                 </div>
               </div>
@@ -399,10 +431,10 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
 
             <div className="accounts-register">
               {activeAccounts.map(acc => (
-                <AccountCard key={acc.id} account={acc} onUpdate={refresh} />
+                <AccountCard key={acc.id} account={acc} onUpdate={refresh} onEdit={handleEditAccount} />
               ))}
               {archivedAccounts.map(acc => (
-                <AccountCard key={acc.id} account={acc} onUpdate={refresh} />
+                <AccountCard key={acc.id} account={acc} onUpdate={refresh} onEdit={handleEditAccount} />
               ))}
             </div>
 

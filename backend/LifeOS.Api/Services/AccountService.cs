@@ -187,7 +187,7 @@ public class AccountService
 
                 if (balance != 0)
                     throw new ValidationException(
-                        "Saldo belum nol. Selesaikan semua transaksi terlebih dahulu.");
+                        $"Akun belum bisa diarsipkan karena saldonya masih Rp{balance:N0}. Kosongkan saldo terlebih dahulu.");
 
                 var activeAllocated = await _db.Allocations
                     .Where(a => a.AccountId == accountId && a.IsActive)
@@ -195,7 +195,7 @@ public class AccountService
 
                 if (activeAllocated != 0)
                     throw new ValidationException(
-                        "Masih ada alokasi aktif. Hapus atau pindahkan alokasi terlebih dahulu.");
+                        $"Akun belum bisa diarsipkan karena masih ada alokasi aktif sebesar Rp{activeAllocated:N0}. Hapus atau pindahkan alokasi terlebih dahulu.");
             }
 
             account.IsArchived = command.IsArchived.Value;

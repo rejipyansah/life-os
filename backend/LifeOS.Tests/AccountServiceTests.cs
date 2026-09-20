@@ -1217,6 +1217,115 @@ public class AccountServiceTests : IDisposable
         Assert.Equal(200_000m, result.Accounts[0].Allocated);
     }
 
+    // ───────────────────────── Scope Initialization ─────────────────────────
+
+    [Fact]
+    public async Task InitializeScope_OwnerScope_GetsExactlyOneTunaiAccount()
+    {
+        var scope = new Scope { Type = ScopeType.Owner };
+        _db.Scopes.Add(scope);
+        await _db.SaveChangesAsync();
+
+        await ScopeInitializer.EnsureDefaultAccountAsync(_db, scope.Id);
+
+        var accounts = await _db.Accounts.Where(a => a.ScopeId == scope.Id).ToListAsync();
+        Assert.Single(accounts);
+        Assert.Equal("Tunai", accounts[0].Name);
+        Assert.Equal(AccountType.Cash, accounts[0].Type);
+        Assert.False(accounts[0].IsArchived);
+
+        var balance = await _db.TransactionEntries
+            .Where(te => te.AccountId == accounts[0].Id)
+            .SumAsync(te => te.Amount);
+        Assert.Equal(0m, balance);
+    }
+
+    [Fact]
+    public async Task InitializeScope_GuestScope_GetsExactlyOneTunaiAccount()
+    {
+        var scope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(scope);
+        await _db.SaveChangesAsync();
+
+        await ScopeInitializer.EnsureDefaultAccountAsync(_db, scope.Id);
+
+        var accounts = await _db.Accounts.Where(a => a.ScopeId == scope.Id).ToListAsync();
+        Assert.Single(accounts);
+        Assert.Equal("Tunai", accounts[0].Name);
+        Assert.Equal(AccountType.Cash, accounts[0].Type);
+        Assert.False(accounts[0].IsArchived);
+
+        var balance = await _db.TransactionEntries
+            .Where(te => te.AccountId == accounts[0].Id)
+            .SumAsync(te => te.Amount);
+        Assert.Equal(0m, balance);
+    }
+
+    [Fact]
+    public async Task InitializeScope_RepeatedInitialization_DoesNotCreateDuplicates()
+    {
+        var scope = new Scope { Type = ScopeType.Owner };
+        _db.Scopes.Add(scope);
+        await _db.SaveChangesAsync();
+
+        await ScopeInitializer.EnsureDefaultAccountAsync(_db, scope.Id);
+        await ScopeInitializer.EnsureDefaultAccountAsync(_db, scope.Id);
+
+        var accounts = await _db.Accounts.Where(a => a.ScopeId == scope.Id).ToListAsync();
+        Assert.Single(accounts);
+        Assert.Equal("Tunai", accounts[0].Name);
+    }
+
+    [Fact]
+    public async Task InitializeScope_ExistingScopeWithZeroActiveAccounts_DoesNotRecreateTunai()
+    {
+        // Simulate: existing scope had Mandiri, which was archived
+        var scope = new Scope { Type = ScopeType.Owner };
+        _db.Scopes.Add(scope);
+        await _db.SaveChangesAsync();
+
+        var mandiri = new Account
+        {
+            ScopeId = scope.Id,
+            Name = "Mandiri",
+            Type = AccountType.Bank,
+            IsArchived = true
+        };
+        _db.Accounts.Add(mandiri);
+        await _db.SaveChangesAsync();
+
+        // Scope already has an account (even if archived), so EnsureDefaultAccount should not create Tunai
+        await ScopeInitializer.EnsureDefaultAccountAsync(_db, scope.Id);
+
+        var accounts = await _db.Accounts.Where(a => a.ScopeId == scope.Id).ToListAsync();
+        Assert.Single(accounts);
+        Assert.Equal("Mandiri", accounts[0].Name);
+        Assert.True(accounts[0].IsArchived);
+    }
+
+    [Fact]
+    public async Task InitializeScope_DefaultAccount_HasCorrectProperties()
+    {
+        var scope = new Scope { Type = ScopeType.Owner };
+        _db.Scopes.Add(scope);
+        await _db.SaveChangesAsync();
+
+        await ScopeInitializer.EnsureDefaultAccountAsync(_db, scope.Id);
+
+        var account = await _db.Accounts.SingleAsync(a => a.ScopeId == scope.Id);
+        Assert.Equal("Tunai", account.Name);
+        Assert.Equal(AccountType.Cash, account.Type);
+        Assert.False(account.IsArchived);
+        Assert.NotEqual(Guid.Empty, account.Id);
+        Assert.True(account.CreatedAt <= DateTime.UtcNow);
+
+        // Balance must be 0 (no transaction entries)
+        var balance = await _db.TransactionEntries
+            .Where(te => te.AccountId == account.Id)
+            .SumAsync(te => te.Amount);
+        Assert.Equal(0m, balance);
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private async Task SeedBalance(Guid accountId, decimal amount)

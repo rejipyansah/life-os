@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import type { AccountProjection, AccountType } from '../types';
+import type { AccountProjection } from '../types';
 import { updateAccount } from '../api';
 
 interface AccountCardProps {
   account: AccountProjection;
   onUpdate: () => void;
+  onEdit: (account: AccountProjection) => void;
 }
 
 function formatCurrency(amount: number): string {
@@ -13,24 +14,14 @@ function formatCurrency(amount: number): string {
 
 function accountTypeLabel(type: string): string {
   switch (type) {
-    case 'Cash': return 'Tunai';
+    case 'Cash': return 'Cash';
     case 'Bank': return 'Bank';
     case 'EWallet': return 'E-Wallet';
     default: return type;
   }
 }
 
-const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
-  { value: 'Cash', label: 'Tunai' },
-  { value: 'Bank', label: 'Bank' },
-  { value: 'EWallet', label: 'E-Wallet' },
-];
-
-export default function AccountCard({ account, onUpdate }: AccountCardProps) {
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(account.name);
-  const [editType, setEditType] = useState<AccountType>(account.type);
-  const [loading, setLoading] = useState(false);
+export default function AccountCard({ account, onUpdate, onEdit }: AccountCardProps) {
   const [error, setError] = useState('');
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -40,157 +31,37 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
     };
   }, []);
 
-  const clearError = () => {
-    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-    setError('');
-  };
-
   const setErrorWithAutoClear = (msg: string) => {
     setError(msg);
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-    errorTimerRef.current = setTimeout(() => setError(''), 5000);
+    errorTimerRef.current = setTimeout(() => setError(''), 8000);
   };
 
-  const handleSaveName = async () => {
-    const trimmed = editName.trim();
-    if (!trimmed || trimmed === account.name) {
-      setEditing(false);
-      setEditName(account.name);
-      return;
-    }
-
-    setLoading(true);
-    clearError();
+  const handleArchive = async () => {
     try {
-      await updateAccount(account.id, { name: trimmed });
-      setEditing(false);
+      await updateAccount(account.id, { isArchived: true });
       onUpdate();
     } catch (e: unknown) {
-      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengubah nama');
-      setEditName(account.name);
-    } finally {
-      setLoading(false);
+      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengarsipkan akun');
     }
   };
 
-  const handleCancelEdit = () => {
-    setEditing(false);
-    setEditName(account.name);
-    setEditType(account.type);
-    clearError();
-  };
-
-  const handleSaveEdit = async () => {
-    const trimmed = editName.trim();
-    if (!trimmed) {
-      setErrorWithAutoClear('Nama akun tidak boleh kosong.');
-      return;
-    }
-
-    setLoading(true);
-    clearError();
+  const handleUnarchive = async () => {
     try {
-      const patch: { name?: string; type?: AccountType } = {};
-      if (trimmed !== account.name) patch.name = trimmed;
-      if (editType !== account.type) patch.type = editType;
-
-      if (Object.keys(patch).length === 0) {
-        setEditing(false);
-        return;
-      }
-
-      await updateAccount(account.id, patch);
-      setEditing(false);
+      await updateAccount(account.id, { isArchived: false });
       onUpdate();
     } catch (e: unknown) {
-      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal menyimpan perubahan');
-    } finally {
-      setLoading(false);
+      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengaktifkan akun');
     }
-  };
-
-  const handleToggleArchive = async () => {
-    setLoading(true);
-    clearError();
-    try {
-      await updateAccount(account.id, { isArchived: !account.isArchived });
-      onUpdate();
-    } catch (e: unknown) {
-      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengubah status');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (editing) handleSaveEdit();
-      else handleSaveName();
-    }
-    if (e.key === 'Escape') handleCancelEdit();
   };
 
   const hasAllocation = account.allocated > 0;
-
-  if (editing) {
-    return (
-      <div className={`account-item ${account.isArchived ? 'archived' : ''}`}>
-        <div className="account-left" style={{ gap: 6 }}>
-          <input
-            className="account-name-input"
-            type="text"
-            value={editName}
-            onChange={e => setEditName(e.target.value)}
-            onKeyDown={handleKeyDown}
-            maxLength={256}
-            autoFocus
-            disabled={loading}
-            placeholder="Nama akun"
-          />
-          <div className="account-type-edit">
-            {ACCOUNT_TYPES.map(t => (
-              <button
-                key={t.value}
-                type="button"
-                className={`account-type-option ${editType === t.value ? 'selected' : ''}`}
-                onClick={() => setEditType(t.value)}
-                disabled={loading}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className="account-edit-actions">
-            <button
-              className="account-edit-save-btn"
-              onClick={handleSaveEdit}
-              disabled={loading}
-            >
-              {loading ? '...' : 'Simpan'}
-            </button>
-            <button
-              className="account-edit-cancel-btn"
-              onClick={handleCancelEdit}
-              disabled={loading}
-            >
-              Batal
-            </button>
-          </div>
-        </div>
-        {error && <div className="account-card-error">{error}</div>}
-      </div>
-    );
-  }
 
   return (
     <div className={`account-item ${account.isArchived ? 'archived' : ''}`}>
       <div className="account-left">
         <div className="account-name-row">
-          <span
-            className="account-name"
-            onClick={() => { setEditing(true); setEditName(account.name); setEditType(account.type); clearError(); }}
-            title="Klik untuk mengedit"
-          >
+          <span className="account-name" title={account.name}>
             {account.name}
           </span>
           <span className="account-type-tag">{accountTypeLabel(account.type)}</span>
@@ -208,18 +79,25 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
         <div className="account-actions">
           <button
             className="account-action-edit"
-            onClick={() => { setEditing(true); setEditName(account.name); setEditType(account.type); clearError(); }}
-            disabled={loading}
+            onClick={() => onEdit(account)}
           >
             Edit
           </button>
-          <button
-            className="account-action-archive"
-            onClick={handleToggleArchive}
-            disabled={loading}
-          >
-            {account.isArchived ? 'Aktifkan' : 'Arsipkan'}
-          </button>
+          {account.isArchived ? (
+            <button
+              className="account-action-unarchive"
+              onClick={handleUnarchive}
+            >
+              Aktifkan
+            </button>
+          ) : (
+            <button
+              className="account-action-archive"
+              onClick={handleArchive}
+            >
+              Arsipkan
+            </button>
+          )}
         </div>
       </div>
       {error && <div className="account-card-error">{error}</div>}
