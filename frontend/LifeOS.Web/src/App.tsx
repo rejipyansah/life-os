@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { getAuthMe, resumeGuestSession, logout, login } from './api';
+import { getAuthMe, resumeGuestSession, logout } from './api';
 import EntryScreen from './components/EntryScreen';
+import LoginScreen from './components/LoginScreen';
 import FinanceOverview from './components/FinanceOverview';
 import './App.css';
 
-type AppState = 'checking' | 'entry' | 'finance';
+type AppState = 'checking' | 'entry' | 'login' | 'finance';
 
 function getInitialState(): AppState {
   if (typeof window !== 'undefined' && sessionStorage.getItem('just_logged_out') === '1') {
@@ -17,6 +18,7 @@ function getInitialState(): AppState {
 function App() {
   const [state, setState] = useState<AppState>(getInitialState);
   const [isGuest, setIsGuest] = useState(false);
+  const [loginOrigin, setLoginOrigin] = useState<'entry' | 'finance'>('entry');
 
   useEffect(() => {
     if (state !== 'checking') return;
@@ -65,9 +67,9 @@ function App() {
     setState('entry');
   };
 
-  const handleOwnerLogin = async (email: string, password: string) => {
-    await login(email, password);
-    setIsGuest(false);
+  const handleRequestLogin = (origin: 'entry' | 'finance') => {
+    setLoginOrigin(origin);
+    setState('login');
   };
 
   if (state === 'checking') {
@@ -81,14 +83,35 @@ function App() {
   if (state === 'entry') {
     return (
       <div className="app">
-        <EntryScreen onEnter={(guest) => handleEnter(guest)} />
+        <EntryScreen
+          onEnter={(guest) => handleEnter(guest)}
+          onRequestLogin={() => handleRequestLogin('entry')}
+        />
+      </div>
+    );
+  }
+
+  if (state === 'login') {
+    return (
+      <div className="app">
+        <LoginScreen
+          onLogin={() => handleEnter(false)}
+          onBack={() => {
+            if (loginOrigin === 'entry') {
+              setState('entry');
+            } else {
+              setIsGuest(true);
+              setState('finance');
+            }
+          }}
+        />
       </div>
     );
   }
 
   return (
     <div className="app">
-      <FinanceOverview isGuest={isGuest} onLogout={handleLogout} onOwnerLogin={handleOwnerLogin} />
+      <FinanceOverview isGuest={isGuest} onLogout={handleLogout} onRequestLogin={() => handleRequestLogin('finance')} />
     </div>
   );
 }

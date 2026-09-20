@@ -11,16 +11,16 @@ import NaturalInput from './NaturalInput';
 interface FinanceOverviewProps {
   isGuest: boolean;
   onLogout: () => void;
-  onOwnerLogin: (email: string, password: string) => Promise<void>;
+  onRequestLogin: () => void;
 }
 
 function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail' | 'owner-login';
+type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail';
 
-export default function FinanceOverview({ isGuest, onLogout, onOwnerLogin }: FinanceOverviewProps) {
+export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: FinanceOverviewProps) {
   const [accounts, setAccounts] = useState<AccountListProjection | null>(null);
   const [transactions, setTransactions] = useState<TransactionProjection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,10 +29,6 @@ export default function FinanceOverview({ isGuest, onLogout, onOwnerLogin }: Fin
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionProjection | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -80,18 +76,6 @@ export default function FinanceOverview({ isGuest, onLogout, onOwnerLogin }: Fin
     onLogout();
   };
 
-  const handleOwnerLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginLoading(true);
-    setLoginError('');
-    try {
-      await onOwnerLogin(loginEmail, loginPassword);
-    } catch (err) {
-      setLoginError(err instanceof Error ? err.message : 'Login gagal');
-      setLoginLoading(false);
-    }
-  };
-
   if (loading && !accounts) {
     return (
       <div className="finance-loading">
@@ -106,55 +90,6 @@ export default function FinanceOverview({ isGuest, onLogout, onOwnerLogin }: Fin
       <div className="finance-error">
         <p>{error}</p>
         <button className="btn btn-primary" onClick={refresh}>Retry</button>
-      </div>
-    );
-  }
-
-  if (view === 'owner-login') {
-    return (
-      <div className="finance-screen">
-        <header className="app-header">
-          <div className="header-left">
-            <span className="brand-mark">Life OS</span>
-          </div>
-          <div className="header-right">
-            <button
-              className="btn-header-action"
-              onClick={() => { setView('overview'); setLoginError(''); setLoginEmail(''); setLoginPassword(''); }}
-            >
-              Kembali
-            </button>
-          </div>
-        </header>
-        <div className="owner-login-view">
-          <form className="owner-login-form" onSubmit={handleOwnerLogin}>
-            <h1 className="owner-login-heading">Masuk</h1>
-            <p className="owner-login-sub">Masukkan akun Life OS milikmu.</p>
-            {loginError && <div className="error-message">{loginError}</div>}
-            <input
-              type="email"
-              placeholder="Email"
-              value={loginEmail}
-              onChange={e => setLoginEmail(e.target.value)}
-              required
-              autoFocus
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={loginPassword}
-              onChange={e => setLoginPassword(e.target.value)}
-              required
-            />
-            <button
-              type="submit"
-              className="owner-login-submit"
-              disabled={loginLoading}
-            >
-              {loginLoading ? 'Masuk...' : 'Masuk'}
-            </button>
-          </form>
-        </div>
       </div>
     );
   }
@@ -260,7 +195,7 @@ export default function FinanceOverview({ isGuest, onLogout, onOwnerLogin }: Fin
             {showHelp ? 'Tutup' : 'Cara Kerja'}
           </button>
           {isGuest && (
-            <button className="btn-header-action" onClick={() => setView('owner-login')}>Masuk</button>
+            <button className="btn-header-action" onClick={onRequestLogin}>Masuk</button>
           )}
           {!isGuest && (
             <button className="btn-header-action" onClick={handleLogout}>Keluar</button>

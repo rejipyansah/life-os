@@ -1,18 +1,16 @@
 import { useState, useEffect } from 'react';
-import { createGuestSession, login } from '../api';
+import { createGuestSession } from '../api';
 
 interface EntryScreenProps {
   onEnter: (isGuest: boolean) => void;
+  onRequestLogin: () => void;
 }
 
 const TYPING_TEXT = 'jajan 18rb cash';
 const TYPING_SPEED = 70;
 const TYPING_DELAY = 1200;
 
-export default function EntryScreen({ onEnter }: EntryScreenProps) {
-  const [mode, setMode] = useState<'idle' | 'login'>('idle');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export default function EntryScreen({ onEnter, onRequestLogin }: EntryScreenProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -52,20 +50,6 @@ export default function EntryScreen({ onEnter }: EntryScreenProps) {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    try {
-      await login(email, password);
-      onEnter(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Login gagal');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="entry-screen">
       <header className="entry-header">
@@ -75,8 +59,7 @@ export default function EntryScreen({ onEnter }: EntryScreenProps) {
         </div>
         <button
           className="entry-login-link"
-          onClick={() => { setMode('login'); setError(''); }}
-          disabled={loading}
+          onClick={onRequestLogin}
         >
           Masuk
         </button>
@@ -96,60 +79,24 @@ export default function EntryScreen({ onEnter }: EntryScreenProps) {
               dan jalurnya secara otomatis.
             </p>
 
-            {mode === 'idle' ? (
-              <div className="entry-cta-group">
-                {error && <div className="entry-error">{error}</div>}
-                <button
-                  className="entry-cta"
-                  onClick={handleTryDemo}
-                  disabled={loading}
-                >
-                  {loading ? 'Memulai...' : 'Coba Life OS'}
-                </button>
-                <span className="entry-cta-note">Tanpa registrasi atau formulir panjang.</span>
-              </div>
-            ) : (
-              <form className="entry-login-form" onSubmit={handleLogin}>
-                {error && <div className="entry-error">{error}</div>}
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoFocus
-                />
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="submit"
-                  className="entry-cta"
-                  disabled={loading}
-                >
-                  {loading ? 'Masuk...' : 'Masuk'}
-                </button>
-                <button
-                  type="button"
-                  className="entry-back-link"
-                  onClick={() => { setMode('idle'); setError(''); }}
-                  disabled={loading}
-                >
-                  Kembali
-                </button>
-              </form>
-            )}
+            <div className="entry-cta-group">
+              {error && <div className="entry-error">{error}</div>}
+              <button
+                className="entry-cta"
+                onClick={handleTryDemo}
+                disabled={loading}
+              >
+                {loading ? 'Memulai...' : 'Coba Life OS'}
+              </button>
+              <span className="entry-cta-note">Tanpa registrasi atau formulir panjang.</span>
+            </div>
           </div>
         </section>
 
         <section className="entry-stage">
           <div className="entry-stage-inner">
             <div className="entry-stage-label">
-              <span>Interaksi Natural</span>
+              <span>Natural Input</span>
               <span className="entry-stage-hint">
                 {typingDone ? 'Dipahami otomatis' : 'Demonstrasi'}
               </span>

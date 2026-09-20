@@ -539,74 +539,6 @@
   color: var(--color-text);
 }
 
-/* ─── Owner Login View (replaces Finance content) ─── */
-.owner-login-view {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 36px;
-}
-
-.owner-login-form {
-  width: 100%;
-  max-width: 340px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.owner-login-heading {
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--color-text);
-  margin-bottom: 4px;
-}
-
-.owner-login-sub {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  margin-bottom: 8px;
-}
-
-.owner-login-form input {
-  padding: 12px 14px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  background: var(--color-surface);
-  outline: none;
-  font-family: inherit;
-  transition: border-color 0.15s;
-}
-
-.owner-login-form input:focus {
-  border-color: var(--color-text);
-}
-
-.owner-login-submit {
-  background: var(--color-text);
-  color: #ffffff;
-  border: none;
-  padding: 12px 20px;
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background 0.15s;
-  margin-top: 4px;
-}
-
-.owner-login-submit:hover {
-  background: #2b2925;
-}
-
-.owner-login-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* ─── Summary Bar ─── */
 .summary-bar {
   padding: 24px 36px 20px;
@@ -1605,10 +1537,6 @@
 
   .help-drawer {
     padding: 14px 20px;
-  }
-
-  .owner-login-view {
-    padding: 32px 20px;
   }
 
   .summary-bar {
