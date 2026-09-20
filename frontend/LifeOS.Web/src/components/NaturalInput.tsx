@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { AccountProjection, InterpretResponse, InterpretTransactionData } from '../types';
-import { interpret, createTransaction } from '../api';
+import type { AccountProjection, InterpretResponse, InterpretTransactionData, InterpretAllocationData } from '../types';
+import { interpret, createTransaction, createAllocation } from '../api';
 
 interface NaturalInputProps {
   accounts: AccountProjection[];
@@ -66,6 +66,26 @@ export default function NaturalInput({ accounts, hasTransactions, onSuccess }: N
     }
   };
 
+  const handleConfirmAllocation = async () => {
+    if (!result?.allocationCommand) return;
+
+    setSubmitting(true);
+    setError('');
+
+    try {
+      await createAllocation(result.allocationCommand);
+      setInput('');
+      setResult(null);
+      setHintDismissed(true);
+      onSuccess();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal membuat alokasi';
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleEdit = () => {
     setResult(null);
     setError('');
@@ -121,6 +141,15 @@ export default function NaturalInput({ accounts, hasTransactions, onSuccess }: N
             />
           )}
 
+          {result?.state === 'Ready' && result.allocationPreview && (
+            <AllocationPreview
+              data={result.allocationPreview}
+              onConfirm={handleConfirmAllocation}
+              onEdit={handleEdit}
+              submitting={submitting}
+            />
+          )}
+
           {result?.state === 'NeedsClarification' && result.clarifications.length > 0 && (
             <div className="res-clarify">
               <div className="res-clarify-title">Perlu sedikit konfirmasi</div>
@@ -169,6 +198,36 @@ function InterpretPreview({
         {metaParts.length > 0 && (
           <span className="res-meta">{metaParts.join(' · ')}</span>
         )}
+      </div>
+      <div className="res-actions">
+        <button className="btn-res-cancel" onClick={onEdit} disabled={submitting}>
+          Batal
+        </button>
+        <button className="btn-res-save" onClick={onConfirm} disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AllocationPreview({
+  data,
+  onConfirm,
+  onEdit,
+  submitting,
+}: {
+  data: InterpretAllocationData;
+  onConfirm: () => void;
+  onEdit: () => void;
+  submitting: boolean;
+}) {
+  return (
+    <div className="res-ready">
+      <div className="res-ready-left">
+        <span className="res-meta" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Alokasi</span>
+        <span className="res-amount">{data.name}</span>
+        <span className="res-meta">{formatCurrency(data.amount)}{data.account ? ` · ${data.account}` : ''}</span>
       </div>
       <div className="res-actions">
         <button className="btn-res-cancel" onClick={onEdit} disabled={submitting}>

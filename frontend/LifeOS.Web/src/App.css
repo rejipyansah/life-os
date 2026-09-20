@@ -417,6 +417,7 @@
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
 }
 
 /* ─── App Header ─── */
@@ -1228,16 +1229,65 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SHARED FORMS (used by AddTransactionForm, CreateAccountForm)
+   SHARED FORMS (used by AddTransactionForm, CreateAccountForm, AllocationForm)
    ═══════════════════════════════════════════════════════════════ */
 
 .transaction-form,
-.account-form {
+.account-form,
+.allocation-form {
   padding: 20px;
+  overflow: hidden;
+}
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  letter-spacing: 0.01em;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  margin-bottom: 12px;
+  transition: border-color 0.15s;
+}
+
+.input-group:focus-within {
+  border-color: var(--color-primary);
+}
+
+.input-prefix {
+  padding: 14px 0 14px 14px;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.input-group input {
+  flex: 1;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  margin-bottom: 0 !important;
+  padding-left: 4px !important;
+}
+
+.input-group input:focus {
+  border: none !important;
+  outline: none;
 }
 
 .transaction-form h2,
-.account-form h2 {
+.account-form h2,
+.allocation-form h2 {
   font-size: 1.25rem;
   font-weight: 700;
   margin-bottom: 20px;
@@ -1246,8 +1296,12 @@
 .transaction-form input,
 .transaction-form select,
 .account-form input,
-.account-form select {
+.account-form select,
+.allocation-form input,
+.allocation-form select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 14px 16px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1261,7 +1315,9 @@
 .transaction-form input:focus,
 .transaction-form select:focus,
 .account-form input:focus,
-.account-form select:focus {
+.account-form select:focus,
+.allocation-form input:focus,
+.allocation-form select:focus {
   border-color: var(--color-primary);
 }
 
@@ -1307,6 +1363,228 @@
 
 .form-notice p {
   margin-bottom: 16px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ALLOCATION SECTION
+   ═══════════════════════════════════════════════════════════════ */
+
+.allocation-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.allocation-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.allocation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.allocation-item {
+  background: var(--color-surface);
+  padding: 12px 16px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.allocation-item.completed {
+  background: #faf9f6;
+  opacity: 0.7;
+}
+
+.allocation-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.allocation-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+}
+
+.allocation-item.completed .allocation-name {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.allocation-meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.allocation-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.allocation-action-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.allocation-action-btn:hover {
+  color: var(--color-text);
+  background: var(--color-subtle);
+}
+
+.allocation-status-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: #e2ded5;
+  color: var(--color-text-secondary);
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.allocation-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.allocation-history-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.allocation-add-hint {
+  padding: 0;
+}
+
+.btn-add-allocation {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.btn-add-allocation:hover {
+  text-decoration: underline;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ACCOUNT PICKER (custom select replacement)
+   ═══════════════════════════════════════════════════════════════ */
+
+.account-picker {
+  position: relative;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.account-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 1rem;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.account-picker-trigger.placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.account-picker-trigger:focus {
+  border-color: var(--color-primary);
+}
+
+.account-picker.open .account-picker-trigger {
+  border-color: var(--color-primary);
+}
+
+.account-picker-chevron {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--color-text-muted);
+  margin-left: 8px;
+}
+
+.account-picker-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  max-height: 200px;
+  overflow-y: auto;
+  outline: none;
+}
+
+.account-picker-option {
+  padding: 10px 16px;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.account-picker-option:hover,
+.account-picker-option.highlighted {
+  background: var(--color-subtle);
+}
+
+.account-picker-option.selected {
+  font-weight: 600;
+  background: var(--color-subtle);
+}
+
+.account-picker-option.selected::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text);
+  margin-right: 8px;
+  vertical-align: middle;
 }
 
 /* ═══════════════════════════════════════════════════════════════

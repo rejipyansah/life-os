@@ -80,8 +80,9 @@ public class GeminiInterpreter : IInterpreter
             - For Expense: spending money from an account. Amount is positive. Account is the source.
             - For Income: receiving money into an account. Amount is positive. Account is the destination.
             - For Transfer: moving money between accounts. Amount is positive. Account is source, toAccount is destination.
+            - For CreateAllocation: setting aside money for a purpose (a reservation/intention, NOT a transaction). Amount is positive. Account is where the funds are reserved. allocationName is the purpose/name (e.g., "WiFi", "Vacation", "Emergency Fund").
             - Never fabricate account names. Only use names from the provided list.
-            - Return intent="Unsupported" if the input is not a financial transaction.
+            - Return intent="Unsupported" if the input is not a financial action.
             - If you need more information (e.g., which account, how much), add a clarification message and leave the missing field null.
             - Use today's date as the default date if not specified.
             - Date format: YYYY-MM-DD.
@@ -95,7 +96,7 @@ public class GeminiInterpreter : IInterpreter
             Type = Google.GenAI.Types.Type.Object,
             Properties = new Dictionary<string, Schema>
             {
-                { "intent", new Schema { Type = Google.GenAI.Types.Type.String, Enum = ["CreateTransaction", "Unsupported"] } },
+                { "intent", new Schema { Type = Google.GenAI.Types.Type.String, Enum = ["CreateTransaction", "CreateAllocation", "Unsupported"] } },
                 { "transactionType", new Schema { Type = Google.GenAI.Types.Type.String, Enum = ["Expense", "Income", "Transfer"] } },
                 { "amount", new Schema { Type = Google.GenAI.Types.Type.Number } },
                 { "description", new Schema { Type = Google.GenAI.Types.Type.String } },
@@ -103,11 +104,12 @@ public class GeminiInterpreter : IInterpreter
                 { "toAccount", new Schema { Type = Google.GenAI.Types.Type.String } },
                 { "date", new Schema { Type = Google.GenAI.Types.Type.String } },
                 { "feeAmount", new Schema { Type = Google.GenAI.Types.Type.Number } },
+                { "allocationName", new Schema { Type = Google.GenAI.Types.Type.String } },
                 { "clarifications", new Schema { Type = Google.GenAI.Types.Type.Array, Items = new Schema { Type = Google.GenAI.Types.Type.String } } }
             },
             Required = ["intent", "clarifications"],
             Title = "FinanceInterpretation",
-            PropertyOrdering = ["intent", "transactionType", "amount", "description", "account", "toAccount", "date", "feeAmount", "clarifications"]
+            PropertyOrdering = ["intent", "transactionType", "amount", "description", "account", "toAccount", "date", "feeAmount", "allocationName", "clarifications"]
         };
     }
 }

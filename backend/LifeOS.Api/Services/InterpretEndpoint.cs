@@ -78,6 +78,90 @@ public static class InterpretEndpoint
             };
         }
 
+        if (raw.Intent == "CreateAllocation")
+            return ValidateAllocation(raw, eligibleAccounts, scopeId);
+
+        return ValidateTransaction(raw, eligibleAccounts, scopeId);
+    }
+
+    private static InterpretResponse ValidateAllocation(
+        InterpretResult raw,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        Guid scopeId)
+    {
+        if (!raw.Amount.HasValue || raw.Amount <= 0)
+        {
+            return new InterpretResponse
+            {
+                Intent = raw.Intent,
+                State = "NeedsClarification",
+                Clarifications = ["How much do you want to set aside?"]
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(raw.AllocationName))
+        {
+            return new InterpretResponse
+            {
+                Intent = raw.Intent,
+                State = "NeedsClarification",
+                Clarifications = ["What is this allocation for? (e.g., WiFi, Vacation, Emergency Fund)"]
+            };
+        }
+
+        if (string.IsNullOrEmpty(raw.Account))
+        {
+            return new InterpretResponse
+            {
+                Intent = raw.Intent,
+                State = "NeedsClarification",
+                Clarifications = ["Which account? Available: " + string.Join(", ", eligibleAccounts.Select(a => a.Name))]
+            };
+        }
+
+        var accountNameLookup = eligibleAccounts.ToDictionary(
+            a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
+
+        if (!accountNameLookup.TryGetValue(raw.Account, out var accountId))
+        {
+            return new InterpretResponse
+            {
+                Intent = raw.Intent,
+                State = "NeedsClarification",
+                Clarifications = [$"Account '{raw.Account}' not found. Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
+            };
+        }
+
+        var preview = new InterpretAllocationData
+        {
+            Name = raw.AllocationName!,
+            Amount = raw.Amount!.Value,
+            Account = raw.Account
+        };
+
+        var command = new CreateAllocationCommand
+        {
+            ScopeId = scopeId,
+            AccountId = accountId,
+            Name = raw.AllocationName!.Trim(),
+            Amount = raw.Amount!.Value
+        };
+
+        return new InterpretResponse
+        {
+            Intent = raw.Intent,
+            State = "Ready",
+            AllocationPreview = preview,
+            AllocationCommand = command,
+            Clarifications = []
+        };
+    }
+
+    private static InterpretResponse ValidateTransaction(
+        InterpretResult raw,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        Guid scopeId)
+    {
         if (string.IsNullOrEmpty(raw.TransactionType) || !raw.Amount.HasValue || raw.Amount <= 0)
         {
             return new InterpretResponse

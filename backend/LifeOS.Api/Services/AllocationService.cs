@@ -78,6 +78,17 @@ public class AllocationService
             allocation.IsActive = command.IsActive.Value;
         }
 
+        if (command.AccountId.HasValue)
+        {
+            var newAccount = await _db.Accounts
+                .FirstOrDefaultAsync(a => a.Id == command.AccountId.Value && a.ScopeId == command.ScopeId, ct);
+
+            if (newAccount is null)
+                throw new ValidationException("Account not found in current Scope.");
+
+            allocation.AccountId = command.AccountId.Value;
+        }
+
         await _db.SaveChangesAsync(ct);
 
         return allocation;

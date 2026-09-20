@@ -83,10 +83,40 @@ export interface InterpretTransactionData {
   feeAmount: number | null;
 }
 
+export interface InterpretAllocationData {
+  name: string;
+  amount: number;
+  account: string | null;
+}
+
+export interface CreateAllocationCommand {
+  name: string;
+  amount: number;
+  accountId: string;
+}
+
 export interface InterpretResponse {
   intent: string;
   state: 'Ready' | 'NeedsClarification' | 'Unsupported';
   preview: InterpretTransactionData | null;
   command: CreateTransactionCommand | null;
+  allocationPreview: InterpretAllocationData | null;
+  allocationCommand: CreateAllocationCommand | null;
   clarifications: string[];
+}
+
+export interface AllocationProjection {
+  allocationId: string;
+  accountId: string;
+  name: string;
+  amount: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface UpdateAllocationCommand {
+  name?: string;
+  amount?: number;
+  accountId?: string;
+  isActive?: boolean;
 }

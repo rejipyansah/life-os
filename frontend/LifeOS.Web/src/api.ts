@@ -5,6 +5,8 @@ import type {
   TransactionType,
   TransactionProjection,
   InterpretResponse,
+  AllocationProjection,
+  UpdateAllocationCommand,
 } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -122,5 +124,47 @@ export async function interpret(input: string): Promise<InterpretResponse> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ input }),
+  });
+}
+
+export async function createAllocation(command: {
+  name: string;
+  amount: number;
+  accountId: string;
+}) {
+  return request<{
+    allocationId: string;
+    accountId: string;
+    name: string;
+    amount: number;
+    isActive: boolean;
+    createdAt: string;
+  }>('/api/finance/allocations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: command.name,
+      amount: command.amount,
+      accountId: command.accountId,
+    }),
+  });
+}
+
+export async function getAllocations(): Promise<AllocationProjection[]> {
+  return request<AllocationProjection[]>('/api/finance/allocations');
+}
+
+export async function updateAllocation(id: string, command: UpdateAllocationCommand) {
+  return request<{
+    allocationId: string;
+    accountId: string;
+    name: string;
+    amount: number;
+    isActive: boolean;
+    createdAt: string;
+  }>(`/api/finance/allocations/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(command),
   });
 }

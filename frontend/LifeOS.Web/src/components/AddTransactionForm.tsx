@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AccountProjection, TransactionType, CreateTransactionCommand } from '../types';
 import { createTransaction } from '../api';
+import AccountPicker from './AccountPicker';
 
 interface AddTransactionFormProps {
   accounts: AccountProjection[];
@@ -177,26 +178,29 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
       />
 
       {type !== 'Transfer' ? (
-        <select value={accountId} onChange={e => setAccountId(e.target.value)} required>
-          <option value="">Select account</option>
-          {activeAccounts.map(a => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
+        <AccountPicker
+          value={accountId}
+          onChange={setAccountId}
+          accounts={activeAccounts}
+          placeholder="Select account"
+          required
+        />
       ) : (
         <>
-          <select value={sourceAccountId} onChange={e => setSourceAccountId(e.target.value)} required>
-            <option value="">From (source)</option>
-            {activeAccounts.map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-          <select value={destAccountId} onChange={e => setDestAccountId(e.target.value)} required>
-            <option value="">To (destination)</option>
-            {activeAccounts.filter(a => a.id !== sourceAccountId).map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
+          <AccountPicker
+            value={sourceAccountId}
+            onChange={(id) => { setSourceAccountId(id); if (destAccountId === id) setDestAccountId(''); }}
+            accounts={activeAccounts}
+            placeholder="From (source)"
+            required
+          />
+          <AccountPicker
+            value={destAccountId}
+            onChange={setDestAccountId}
+            accounts={activeAccounts.filter(a => a.id !== sourceAccountId)}
+            placeholder="To (destination)"
+            required
+          />
           <input
             type="number"
             placeholder="Fee (optional)"

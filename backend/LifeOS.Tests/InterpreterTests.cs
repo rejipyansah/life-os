@@ -447,6 +447,228 @@ public class InterpreterTests : IDisposable
         Assert.Contains(response.Clarifications, c => c.Contains("GoPay"));
     }
 
+    // ───────────────────────── Allocation: Valid ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_ReturnsReady()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = "WiFi",
+            Account = "Mandiri",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi dari mandiri" },
+            fake, _scopeId, _db);
+
+        Assert.Equal(200, result.StatusCode);
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.Equal("CreateAllocation", response.Intent);
+
+        Assert.NotNull(response.AllocationPreview);
+        Assert.Equal("WiFi", response.AllocationPreview!.Name);
+        Assert.Equal(350000m, response.AllocationPreview.Amount);
+        Assert.Equal("Mandiri", response.AllocationPreview.Account);
+
+        Assert.NotNull(response.AllocationCommand);
+        var cmd = response.AllocationCommand!;
+        Assert.Equal(_scopeId, cmd.ScopeId);
+        Assert.Equal(_mandiriAccount.Id, cmd.AccountId);
+        Assert.Equal("WiFi", cmd.Name);
+        Assert.Equal(350000m, cmd.Amount);
+
+        Assert.Null(response.Preview);
+        Assert.Null(response.Command);
+    }
+
+    // ───────────────────────── Allocation: Missing amount ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_MissingAmount_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = null,
+            AllocationName = "WiFi",
+            Account = "Mandiri",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan buat wifi dari mandiri" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("much"));
+    }
+
+    // ───────────────────────── Allocation: Missing name ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_MissingName_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = null,
+            Account = "Mandiri",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb dari mandiri" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("allocation"));
+    }
+
+    // ───────────────────────── Allocation: Missing account ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_MissingAccount_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = "WiFi",
+            Account = null,
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("account"));
+    }
+
+    // ───────────────────────── Allocation: Invalid account ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_InvalidAccount_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = "WiFi",
+            Account = "GoPay",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi ke gopay" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("GoPay"));
+    }
+
+    // ───────────────────────── Allocation: No persistence ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_DoesNotPersistAllocation()
+    {
+        var allocCountBefore = await _db.Allocations.CountAsync();
+
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = "WiFi",
+            Account = "Mandiri",
+            Clarifications = []
+        }));
+
+        await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi dari mandiri" },
+            fake, _scopeId, _db);
+
+        Assert.Equal(allocCountBefore, await _db.Allocations.CountAsync());
+    }
+
+    // ───────────────────────── Allocation: No ID injection ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_NoIdInjection()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = "WiFi",
+            Account = "Mandiri",
+            Clarifications = []
+        }));
+
+        await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi dari mandiri" },
+            fake, _scopeId, _db);
+
+        Assert.NotNull(fake.LastRequest);
+        Assert.All(fake.LastRequest.EligibleAccounts, account =>
+            Assert.False(Guid.TryParse(account, out _), $"Account should be a name, not a GUID: {account}"));
+    }
+
+    // ───────────────────────── Allocation: AI clarifications pass through ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_AiClarifications_PassThrough()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 350000,
+            AllocationName = "WiFi",
+            Account = "Mandiri",
+            Clarifications = ["How often should this allocation repeat?"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains("How often", response.Clarifications[0]);
+    }
+
+    // ───────────────────────── Allocation: Zero amount ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Allocation_ZeroAmount_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateAllocation",
+            Amount = 0,
+            AllocationName = "WiFi",
+            Account = "Mandiri",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 0 buat wifi dari mandiri" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+    }
+
     // ───────────────────────── FakeInterpreter ─────────────────────────
 
     private class FakeInterpreter : IInterpreter

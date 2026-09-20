@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import type { AccountListProjection, TransactionProjection } from '../types';
-import { getAccounts, getTransactions, logout } from '../api';
+import type { AccountListProjection, TransactionProjection, AllocationProjection } from '../types';
+import { getAccounts, getTransactions, getAllocations, logout } from '../api';
 import AccountCard from './AccountCard';
 import TransactionList from './TransactionList';
 import TransactionDetail from './TransactionDetail';
 import AddTransactionForm from './AddTransactionForm';
 import CreateAccountForm from './CreateAccountForm';
+import AllocationForm from './AllocationForm';
+import AllocationList from './AllocationList';
 import NaturalInput from './NaturalInput';
 
 interface FinanceOverviewProps {
@@ -18,26 +20,29 @@ function formatCurrency(amount: number): string {
   return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail';
+type View = 'overview' | 'add-transaction' | 'create-account' | 'transaction-detail' | 'add-allocation' | 'edit-allocation';
 
 export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: FinanceOverviewProps) {
   const [accounts, setAccounts] = useState<AccountListProjection | null>(null);
   const [transactions, setTransactions] = useState<TransactionProjection[]>([]);
+  const [allocations, setAllocations] = useState<AllocationProjection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [view, setView] = useState<View>('overview');
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionProjection | null>(null);
+  const [editingAllocation, setEditingAllocation] = useState<AllocationProjection | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([getAccounts(true), getTransactions()])
-      .then(([acctResult, txResult]) => {
+    Promise.all([getAccounts(true), getTransactions(), getAllocations()])
+      .then(([acctResult, txResult, allocResult]) => {
         if (!cancelled) {
           setAccounts(acctResult);
           setTransactions(txResult.items);
+          setAllocations(allocResult);
           setLoading(false);
         }
       })
@@ -64,7 +69,13 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
 
   const handleBackToOverview = () => {
     setSelectedTransaction(null);
+    setEditingAllocation(null);
     setView('overview');
+  };
+
+  const handleEditAllocation = (allocation: AllocationProjection) => {
+    setEditingAllocation(allocation);
+    setView('edit-allocation');
   };
 
   const handleLogout = async () => {
@@ -136,6 +147,57 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
           </div>
         </header>
         <CreateAccountForm
+          onSuccess={() => { setView('overview'); refresh(); }}
+          onCancel={() => setView('overview')}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'add-allocation') {
+    return (
+      <div className="finance-screen">
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+            <div className="domain-crumb">
+              <span className="active">Keuangan</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="btn-header-action" onClick={handleBackToOverview}>
+              Kembali
+            </button>
+          </div>
+        </header>
+        <AllocationForm
+          accounts={accounts?.accounts ?? []}
+          onSuccess={() => { setView('overview'); refresh(); }}
+          onCancel={() => setView('overview')}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'edit-allocation' && editingAllocation) {
+    return (
+      <div className="finance-screen">
+        <header className="app-header">
+          <div className="header-left">
+            <span className="brand-mark">Life OS</span>
+            <div className="domain-crumb">
+              <span className="active">Keuangan</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="btn-header-action" onClick={handleBackToOverview}>
+              Kembali
+            </button>
+          </div>
+        </header>
+        <AllocationForm
+          accounts={accounts?.accounts ?? []}
+          editAllocation={editingAllocation}
           onSuccess={() => { setView('overview'); refresh(); }}
           onCancel={() => setView('overview')}
         />
@@ -217,6 +279,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
             <span className="help-code-chip">&ldquo;Kopi 22k qris bca&rdquo;</span>
             <span className="help-code-chip">&ldquo;Gaji 12jt masuk mandiri&rdquo;</span>
             <span className="help-code-chip">&ldquo;Transfer 300rb ke jago&rdquo;</span>
+            <span className="help-code-chip">&ldquo;Sisihkan 350rb buat wifi dari mandiri&rdquo;</span>
           </div>
         </div>
       </div>
@@ -281,6 +344,29 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
                 onSuccess={refresh}
               />
             </div>
+
+            <AllocationList
+              allocations={allocations}
+              accounts={accounts!.accounts}
+              onRefresh={refresh}
+              onEdit={handleEditAllocation}
+            />
+
+            {allocations.length === 0 && (
+              <div className="allocation-add-hint">
+                <button className="btn-add-allocation" onClick={() => setView('add-allocation')}>
+                  + Alokasi
+                </button>
+              </div>
+            )}
+
+            {allocations.length > 0 && (
+              <div className="allocation-add-hint">
+                <button className="btn-add-allocation" onClick={() => setView('add-allocation')}>
+                  + Alokasi Baru
+                </button>
+              </div>
+            )}
 
             <div className="ledger-section">
               <div className="ledger-head">

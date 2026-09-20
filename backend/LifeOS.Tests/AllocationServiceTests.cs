@@ -556,4 +556,342 @@ public class AllocationServiceTests : IDisposable
         _db.TransactionEntries.Add(entry);
         await _db.SaveChangesAsync();
     }
+
+    // ───────────────────────── Lifecycle: Edit ─────────────────────────
+
+    [Fact]
+    public async Task Edit_NameAndAmount_Succeeds()
+    {
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "WiFi",
+            Amount = 350_000m
+        });
+
+        var updated = await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            Name = "WiFi Premium",
+            Amount = 500_000m
+        });
+
+        Assert.Equal("WiFi Premium", updated.Name);
+        Assert.Equal(500_000m, updated.Amount);
+        Assert.True(updated.IsActive);
+    }
+
+    [Fact]
+    public async Task Edit_AccountChange_Succeeds()
+    {
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 100_000m
+        });
+
+        var updated = await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountBId
+        });
+
+        Assert.Equal(_accountBId, updated.AccountId);
+    }
+
+    [Fact]
+    public async Task Edit_AccountChange_ReflectsInAllocated()
+    {
+        // Account A has 100k allocation
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 100_000m
+        });
+
+        var allocatedA = await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        var allocatedB = await _sut.GetAllocatedAmountAsync(_accountBId, _scopeId);
+        Assert.Equal(100_000m, allocatedA);
+        Assert.Equal(0m, allocatedB);
+
+        // Move to Account B
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountBId
+        });
+
+        allocatedA = await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        allocatedB = await _sut.GetAllocatedAmountAsync(_accountBId, _scopeId);
+        Assert.Equal(0m, allocatedA);
+        Assert.Equal(100_000m, allocatedB);
+    }
+
+    [Fact]
+    public async Task Edit_AmountChange_ReflectsInAvailable()
+    {
+        await SeedBalance(_accountAId, 500_000m);
+
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 300_000m
+        });
+
+        var available1 = 500_000m - await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        Assert.Equal(200_000m, available1);
+
+        // Edit to 500k
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            Amount = 500_000m
+        });
+
+        var available2 = 500_000m - await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        Assert.Equal(0m, available2);
+    }
+
+    [Fact]
+    public async Task Edit_DoesNotChangeAccountBalance()
+    {
+        await SeedBalance(_accountAId, 500_000m);
+
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 300_000m
+        });
+
+        var balanceBefore = await _txService.GetAccountBalanceAsync(_accountAId, _scopeId);
+
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            Amount = 500_000m
+        });
+
+        var balanceAfter = await _txService.GetAccountBalanceAsync(_accountAId, _scopeId);
+        Assert.Equal(balanceBefore, balanceAfter);
+    }
+
+    // ───────────────────────── Lifecycle: Complete ─────────────────────────
+
+    [Fact]
+    public async Task Complete_Allocation_SetsInactive()
+    {
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "WiFi",
+            Amount = 350_000m
+        });
+
+        var completed = await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+
+        Assert.False(completed.IsActive);
+    }
+
+    [Fact]
+    public async Task Complete_ExcludedFromActiveTotals()
+    {
+        await SeedBalance(_accountAId, 1_000_000m);
+
+        var a1 = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "WiFi",
+            Amount = 350_000m
+        });
+
+        await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Servis Motor",
+            Amount = 500_000m
+        });
+
+        // Both active: 350k + 500k = 850k
+        var allocated = await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        Assert.Equal(850_000m, allocated);
+
+        // Complete WiFi
+        await _sut.UpdateAllocationAsync(a1.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+
+        // Only 500k active
+        allocated = await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        Assert.Equal(500_000m, allocated);
+    }
+
+    [Fact]
+    public async Task Complete_RemainsInHistory()
+    {
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "WiFi",
+            Amount = 350_000m
+        });
+
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+
+        var all = await _sut.GetAllocationsAsync(_scopeId);
+        Assert.Single(all);
+        Assert.Equal("WiFi", all[0].Name);
+        Assert.False(all[0].IsActive);
+    }
+
+    [Fact]
+    public async Task Complete_DoesNotChangeAccountBalance()
+    {
+        await SeedBalance(_accountAId, 500_000m);
+
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 300_000m
+        });
+
+        var balanceBefore = await _txService.GetAccountBalanceAsync(_accountAId, _scopeId);
+
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+
+        var balanceAfter = await _txService.GetAccountBalanceAsync(_accountAId, _scopeId);
+        Assert.Equal(balanceBefore, balanceAfter);
+    }
+
+    [Fact]
+    public async Task Complete_RestoresAvailableAmount()
+    {
+        await SeedBalance(_accountAId, 500_000m);
+
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 300_000m
+        });
+
+        var available1 = 500_000m - await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        Assert.Equal(200_000m, available1);
+
+        // Complete
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+
+        var available2 = 500_000m - await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId);
+        Assert.Equal(500_000m, available2);
+    }
+
+    [Fact]
+    public async Task Complete_NoTransactionEntryCreated()
+    {
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "Fund",
+            Amount = 100m
+        });
+
+        var entryCountBefore = await _db.TransactionEntries.CountAsync();
+
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+
+        var entryCountAfter = await _db.TransactionEntries.CountAsync();
+        Assert.Equal(entryCountBefore, entryCountAfter);
+    }
+
+    // ───────────────────────── Full Lifecycle ─────────────────────────
+
+    [Fact]
+    public async Task FullLifecycle_Create_Edit_Complete()
+    {
+        await SeedBalance(_accountAId, 1_000_000m);
+
+        // 1. Create
+        var allocation = await _sut.CreateAllocationAsync(new CreateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountAId,
+            Name = "WiFi",
+            Amount = 350_000m
+        });
+        Assert.True(allocation.IsActive);
+        Assert.Equal(350_000m, await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId));
+
+        // 2. Edit amount
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            Amount = 500_000m
+        });
+        Assert.Equal(500_000m, await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId));
+
+        // 3. Edit account
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = _accountBId
+        });
+        Assert.Equal(0m, await _sut.GetAllocatedAmountAsync(_accountAId, _scopeId));
+        Assert.Equal(500_000m, await _sut.GetAllocatedAmountAsync(_accountBId, _scopeId));
+
+        // 4. Complete
+        await _sut.UpdateAllocationAsync(allocation.Id, new UpdateAllocationCommand
+        {
+            ScopeId = _scopeId,
+            IsActive = false
+        });
+        Assert.Equal(0m, await _sut.GetAllocatedAmountAsync(_accountBId, _scopeId));
+
+        // 5. Still in history
+        var all = await _sut.GetAllocationsAsync(_scopeId);
+        Assert.Single(all);
+        Assert.False(all[0].IsActive);
+        Assert.Equal("WiFi", all[0].Name);
+
+        // 6. Balance never changed
+        var balance = await _txService.GetAccountBalanceAsync(_accountAId, _scopeId);
+        Assert.Equal(1_000_000m, balance);
+    }
 }

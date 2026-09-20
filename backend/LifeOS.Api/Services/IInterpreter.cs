@@ -24,6 +24,7 @@ public class InterpretResult
     public string? ToAccount { get; set; }
     public string? Date { get; set; }
     public decimal? FeeAmount { get; set; }
+    public string? AllocationName { get; set; }
     public List<string> Clarifications { get; set; } = [];
 }
 
@@ -40,6 +41,12 @@ public class InterpretResponse
 
     [JsonPropertyName("command")]
     public CreateTransactionCommand? Command { get; set; }
+
+    [JsonPropertyName("allocationPreview")]
+    public InterpretAllocationData? AllocationPreview { get; set; }
+
+    [JsonPropertyName("allocationCommand")]
+    public CreateAllocationCommand? AllocationCommand { get; set; }
 
     [JsonPropertyName("clarifications")]
     public List<string> Clarifications { get; set; } = [];
@@ -67,6 +74,18 @@ public class InterpretTransactionData
 
     [JsonPropertyName("feeAmount")]
     public decimal? FeeAmount { get; set; }
+}
+
+public class InterpretAllocationData
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+
+    [JsonPropertyName("account")]
+    public string? Account { get; set; }
 }
 
 public class InterpretInputRequest

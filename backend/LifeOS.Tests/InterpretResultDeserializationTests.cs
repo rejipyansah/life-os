@@ -189,6 +189,49 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
+    public void Deserialize_CreateAllocation_GeminiOutput()
+    {
+        var json = """
+        {
+            "intent": "CreateAllocation",
+            "amount": 350000,
+            "allocationName": "WiFi",
+            "account": "Mandiri",
+            "clarifications": []
+        }
+        """;
+
+        var result = JsonSerializer.Deserialize<InterpretResult>(json, Options);
+
+        Assert.NotNull(result);
+        Assert.Equal("CreateAllocation", result.Intent);
+        Assert.Equal(350000m, result.Amount);
+        Assert.Equal("WiFi", result.AllocationName);
+        Assert.Equal("Mandiri", result.Account);
+        Assert.Null(result.TransactionType);
+        Assert.Empty(result.Clarifications);
+    }
+
+    [Fact]
+    public void Deserialize_CreateAllocation_MissingName_GeminiOutput()
+    {
+        var json = """
+        {
+            "intent": "CreateAllocation",
+            "amount": 350000,
+            "account": "Mandiri",
+            "clarifications": []
+        }
+        """;
+
+        var result = JsonSerializer.Deserialize<InterpretResult>(json, Options);
+
+        Assert.NotNull(result);
+        Assert.Equal("CreateAllocation", result.Intent);
+        Assert.Null(result.AllocationName);
+    }
+
+    [Fact]
     public void Deserialize_ExtraFields_Ignored()
     {
         var json = """
