@@ -1152,6 +1152,103 @@
   width: 100%;
 }
 
+/* Archive Confirmation Dialog */
+.archive-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.archive-dialog {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  width: 100%;
+  max-width: 380px;
+  padding: 24px;
+}
+
+.archive-dialog-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 4px 0;
+}
+
+.archive-dialog-account-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0 0 12px 0;
+}
+
+.archive-dialog-desc {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  line-height: 1.55;
+  margin: 0 0 20px 0;
+}
+
+.archive-dialog-error {
+  font-size: 13px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid rgba(138, 48, 38, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.archive-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.archive-dialog-btn {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 20px;
+  min-height: 42px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.archive-dialog-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.archive-dialog-btn-cancel {
+  background: none;
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.archive-dialog-btn-cancel:hover:not(:disabled) {
+  background: var(--color-subtle);
+  border-color: var(--color-border-strong);
+}
+
+.archive-dialog-btn-confirm {
+  background: var(--color-negative);
+  color: #fff;
+}
+
+.archive-dialog-btn-confirm:hover:not(:disabled) {
+  background: #8f2a22;
+}
+
 /* Archived Account */
 .account-item.archived {
   background: #f5f4f0;
@@ -2041,6 +2138,24 @@
 
   .empty-view-container {
     padding: 28px 20px;
+  }
+
+  .archive-dialog-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .archive-dialog {
+    max-width: none;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 24px 20px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .archive-dialog-btn {
+    min-height: 48px;
+    flex: 1;
   }
 }
 

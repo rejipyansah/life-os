@@ -23,6 +23,8 @@ function accountTypeLabel(type: string): string {
 
 export default function AccountCard({ account, onUpdate, onEdit }: AccountCardProps) {
   const [error, setError] = useState('');
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -37,12 +39,16 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
     errorTimerRef.current = setTimeout(() => setError(''), 8000);
   };
 
-  const handleArchive = async () => {
+  const handleArchiveConfirm = async () => {
+    setArchiving(true);
     try {
       await updateAccount(account.id, { isArchived: true });
+      setShowArchiveConfirm(false);
       onUpdate();
     } catch (e: unknown) {
-      setErrorWithAutoClear(e instanceof Error ? e.message : 'Gagal mengarsipkan akun');
+      setError(e instanceof Error ? e.message : 'Gagal mengarsipkan akun');
+    } finally {
+      setArchiving(false);
     }
   };
 
@@ -93,7 +99,7 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
           ) : (
             <button
               className="account-action-archive"
-              onClick={handleArchive}
+              onClick={() => setShowArchiveConfirm(true)}
             >
               Arsipkan
             </button>
@@ -101,6 +107,35 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
         </div>
       </div>
       {error && <div className="account-card-error">{error}</div>}
+
+      {showArchiveConfirm && (
+        <div className="archive-dialog-overlay" onClick={() => { setShowArchiveConfirm(false); setError(''); }}>
+          <div className="archive-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3 className="archive-dialog-title">Arsipkan akun?</h3>
+            <p className="archive-dialog-account-name">{account.name}</p>
+            <p className="archive-dialog-desc">
+              Akun yang diarsipkan tidak dapat digunakan untuk transaksi atau alokasi baru.
+            </p>
+            {error && <div className="archive-dialog-error">{error}</div>}
+            <div className="archive-dialog-actions">
+              <button
+                className="archive-dialog-btn archive-dialog-btn-cancel"
+                onClick={() => { setShowArchiveConfirm(false); setError(''); }}
+                disabled={archiving}
+              >
+                Batal
+              </button>
+              <button
+                className="archive-dialog-btn archive-dialog-btn-confirm"
+                onClick={handleArchiveConfirm}
+                disabled={archiving}
+              >
+                {archiving ? 'Mengarsipkan...' : 'Arsipkan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
