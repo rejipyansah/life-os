@@ -38,7 +38,7 @@ public class GuestTokenService
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,
-            Secure = true,
+            Secure = http.Request.IsHttps,
             Expires = DateTimeOffset.UtcNow.AddYears(1),
             Path = "/"
         });
