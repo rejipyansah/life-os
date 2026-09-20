@@ -173,19 +173,31 @@ public class AccountService
             if (!Enum.IsDefined(typeof(AccountType), command.Type.Value))
                 throw new ValidationException($"Invalid AccountType: {command.Type.Value}");
 
-            // Check if account has any TransactionEntries
-            var hasTransactions = await _db.TransactionEntries
-                .AnyAsync(te => te.AccountId == accountId, ct);
-
-            if (hasTransactions)
-                throw new ValidationException(
-                    "Account Type cannot be changed because this Account has transaction history.");
-
             account.Type = command.Type.Value;
         }
 
         if (command.IsArchived.HasValue)
         {
+            if (command.IsArchived.Value)
+            {
+                // Archive validation: balance must be 0 AND no active allocations
+                var balance = await _db.TransactionEntries
+                    .Where(te => te.AccountId == accountId)
+                    .SumAsync(te => te.Amount, ct);
+
+                if (balance != 0)
+                    throw new ValidationException(
+                        "Cannot archive an Account with a non-zero balance. Settle the balance to zero first.");
+
+                var activeAllocated = await _db.Allocations
+                    .Where(a => a.AccountId == accountId && a.IsActive)
+                    .SumAsync(a => a.Amount, ct);
+
+                if (activeAllocated != 0)
+                    throw new ValidationException(
+                        "Cannot archive an Account with active Allocations. Remove or reassign allocations first.");
+            }
+
             account.IsArchived = command.IsArchived.Value;
         }
 

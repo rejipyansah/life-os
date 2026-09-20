@@ -235,6 +235,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
   }
 
   const hasAccounts = accounts && accounts.accounts.length > 0;
+  const hasActiveAccounts = activeAccounts.length > 0;
   const totalAllocated = accounts?.totalAllocated ?? 0;
   const hasAllocations = totalAllocated > 0;
   const activeAccounts = accounts?.accounts.filter(a => !a.isArchived) ?? [];
@@ -328,22 +329,35 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
       ) : (
         <div className="finance-body">
           <section className="stream-column">
-            <div className="natural-module">
-              <div className="natural-box-head">
-                <span className="natural-title">Ceritakan Aktivitasmu</span>
-                <button
-                  className="natural-fallback-link"
-                  onClick={() => setView('add-transaction')}
-                >
-                  Catat Manual
-                </button>
+            {hasActiveAccounts ? (
+              <div className="natural-module">
+                <div className="natural-box-head">
+                  <span className="natural-title">Ceritakan Aktivitasmu</span>
+                  <button
+                    className="natural-fallback-link"
+                    onClick={() => setView('add-transaction')}
+                  >
+                    Catat Manual
+                  </button>
+                </div>
+                <NaturalInput
+                  accounts={accounts!.accounts}
+                  hasTransactions={transactions.length > 0}
+                  onSuccess={refresh}
+                />
               </div>
-              <NaturalInput
-                accounts={accounts!.accounts}
-                hasTransactions={transactions.length > 0}
-                onSuccess={refresh}
-              />
-            </div>
+            ) : (
+              <div className="empty-active-accounts-notice">
+                <p className="empty-active-accounts-text">
+                  Tidak ada akun aktif. Buat akun baru atau aktifkan kembali akun yang tersimpan untuk mulai mencatat transaksi.
+                </p>
+                <div className="empty-active-accounts-actions">
+                  <button className="btn-empty-action" onClick={() => setView('create-account')}>
+                    + Buat Akun Baru
+                  </button>
+                </div>
+              </div>
+            )}
 
             <AllocationList
               allocations={allocations}

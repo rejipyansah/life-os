@@ -64,7 +64,7 @@ export async function createAccount(command: { name: string; type: AccountType }
   });
 }
 
-export async function updateAccount(id: string, command: { name?: string; isArchived?: boolean }) {
+export async function updateAccount(id: string, command: { name?: string; type?: AccountType; isArchived?: boolean }) {
   return request<{
     accountId: string;
     name: string;
