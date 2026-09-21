@@ -3,6 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY backend/LifeOS.Api/LifeOS.Api.csproj backend/LifeOS.Api/
+
 RUN dotnet restore backend/LifeOS.Api/LifeOS.Api.csproj
 
 COPY backend/ backend/
@@ -20,8 +21,8 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_URLS=http://+:5000
 
-EXPOSE 8080
+EXPOSE 5000
 
 ENTRYPOINT ["dotnet", "LifeOS.Api.dll"]
