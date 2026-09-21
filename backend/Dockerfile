@@ -1,28 +1,28 @@
-# Build stage
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 WORKDIR /src
 
-COPY LifeOS.Api/LifeOS.Api.csproj LifeOS.Api/
-RUN dotnet restore LifeOS.Api/LifeOS.Api.csproj
+COPY backend/LifeOS.Api/LifeOS.Api.csproj backend/LifeOS.Api/
 
-COPY LifeOS.Api/ LifeOS.Api/
+RUN dotnet restore backend/LifeOS.Api/LifeOS.Api.csproj
 
-WORKDIR /src/LifeOS.Api
+COPY backend/ backend/
+
+WORKDIR /src/backend/LifeOS.Api
+
 RUN dotnet publish LifeOS.Api.csproj \
     -c Release \
     -o /app/publish \
     /p:UseAppHost=false
 
-# Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 
 WORKDIR /app
 
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_URLS=http://+:5000
 
-EXPOSE 8080
+EXPOSE 5000
 
 ENTRYPOINT ["dotnet", "LifeOS.Api.dll"]
