@@ -50,8 +50,8 @@ builder.Services.AddCors(options =>
     {
         policy
             .WithOrigins(
-                "http://localhost:5173"
-                // Nanti tambahkan domain Cloudflare Pages di sini.
+                "http://localhost:5173",
+                "https://life-os.rejipyansah.workers.dev"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
