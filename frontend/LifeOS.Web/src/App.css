@@ -1407,7 +1407,6 @@
 .account-form,
 .allocation-form {
   padding: 20px;
-  overflow: hidden;
 }
 
 .account-form {
@@ -1758,26 +1757,50 @@
   margin-left: 8px;
 }
 
+.account-picker.open .account-picker-chevron {
+  border-top: none;
+  border-bottom: 5px solid var(--color-text-muted);
+}
+
 .account-picker-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
   z-index: 100;
+  margin-top: 2px;
   background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  max-height: 200px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.account-picker-list {
+  max-height: min(240px, 50vh);
   overflow-y: auto;
   outline: none;
+  border-radius: calc(var(--radius-sm) - 1px);
 }
 
 .account-picker-option {
-  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
   font-size: 0.95rem;
   color: var(--color-text);
   cursor: pointer;
   transition: background 0.1s;
+  min-height: 44px;
+  user-select: none;
+}
+
+.account-picker-option:first-child {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.account-picker-option:last-child {
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 }
 
 .account-picker-option:hover,
@@ -1787,18 +1810,33 @@
 
 .account-picker-option.selected {
   font-weight: 600;
+  color: var(--color-primary);
+}
+
+.account-picker-option.selected.highlighted {
   background: var(--color-subtle);
 }
 
-.account-picker-option.selected::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-text);
-  margin-right: 8px;
-  vertical-align: middle;
+.account-picker-check {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  background: var(--color-primary);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  margin-left: 8px;
+}
+
+.account-picker-dropdown.drop-up {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════
