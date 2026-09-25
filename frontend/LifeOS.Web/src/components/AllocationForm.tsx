@@ -105,7 +105,7 @@ export default function AllocationForm({ accounts, allocations, editAllocation, 
   }
 
   return (
-    <form className="allocation-form" onSubmit={handleSubmit}>
+    <form className="account-form allocation-form" onSubmit={handleSubmit}>
       <h2>{isEdit ? 'Edit Alokasi' : 'Alokasi Baru'}</h2>
 
       {error && <div className="error-message">{error}</div>}
@@ -144,9 +144,9 @@ export default function AllocationForm({ accounts, allocations, editAllocation, 
 
       <div className="form-actions">
         <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? 'Menyimpan...' : isEdit ? 'Simpan perubahan' : 'Simpan'}
+          {loading ? 'Menyimpan...' : (isEdit ? 'Simpan' : 'Buat')}
         </button>
-        <button type="button" className="btn btn-text" onClick={onCancel} disabled={loading}>
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={loading}>
           Batal
         </button>
       </div>

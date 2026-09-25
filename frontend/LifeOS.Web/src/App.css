@@ -1099,9 +1099,9 @@
   background: none;
   border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 7px 14px;
+  padding: 8px 14px;
   min-height: 36px;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -2165,6 +2165,16 @@
   .account-action-archive,
   .account-action-unarchive {
     padding: 8px 16px;
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  .allocation-actions {
+    flex-wrap: wrap;
+  }
+
+  .allocation-action-btn {
+    padding: 8px 14px;
     min-height: 40px;
     font-size: 13px;
   }
