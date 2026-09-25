@@ -194,6 +194,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
         </header>
         <AllocationForm
           accounts={accounts?.accounts ?? []}
+          allocations={allocations}
           onSuccess={() => { setView('overview'); refresh(); }}
           onCancel={() => setView('overview')}
         />
@@ -219,6 +220,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
         </header>
         <AllocationForm
           accounts={accounts?.accounts ?? []}
+          allocations={allocations}
           editAllocation={editingAllocation}
           onSuccess={() => { setView('overview'); refresh(); }}
           onCancel={() => setView('overview')}
@@ -384,25 +386,11 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
             <AllocationList
               allocations={allocations}
               accounts={accounts!.accounts}
+              hasActiveAccounts={hasActiveAccounts}
               onRefresh={refresh}
               onEdit={handleEditAllocation}
+              onAdd={() => setView('add-allocation')}
             />
-
-            {hasActiveAccounts && allocations.length === 0 && (
-              <div className="allocation-add-hint">
-                <button className="btn-add-allocation" onClick={() => setView('add-allocation')}>
-                  + Alokasi
-                </button>
-              </div>
-            )}
-
-            {hasActiveAccounts && allocations.length > 0 && (
-              <div className="allocation-add-hint">
-                <button className="btn-add-allocation" onClick={() => setView('add-allocation')}>
-                  + Alokasi Baru
-                </button>
-              </div>
-            )}
 
             <div className="ledger-section">
               <div className="ledger-head">
@@ -427,12 +415,6 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
                 <AccountCard key={acc.id} account={acc} onUpdate={refresh} onEdit={handleEditAccount} />
               ))}
             </div>
-
-            {archivedAccounts.length > 0 && (
-              <div className="archive-toggle-bar">
-                <span>{archivedAccounts.length} akun tersimpan</span>
-              </div>
-            )}
 
             <div className="context-guidance">
               <span className="guidance-title">Prinsip Keuangan</span>

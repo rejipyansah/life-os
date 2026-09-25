@@ -11,7 +11,7 @@ function formatCurrency(amount: number): string {
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr);
-  return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export default function TransactionItem({ transaction, onSelect }: TransactionItemProps) {

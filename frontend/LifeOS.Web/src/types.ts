@@ -110,7 +110,7 @@ export interface AllocationProjection {
   accountId: string;
   name: string;
   amount: number;
-  isActive: boolean;
+  status: string;
   createdAt: string;
 }
 
@@ -118,5 +118,5 @@ export interface UpdateAllocationCommand {
   name?: string;
   amount?: number;
   accountId?: string;
-  isActive?: boolean;
+  status?: string;
 }

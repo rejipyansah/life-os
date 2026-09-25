@@ -803,7 +803,7 @@ app.MapPost(
                     accountId = allocation.AccountId,
                     name = allocation.Name,
                     amount = allocation.Amount,
-                    isActive = allocation.IsActive,
+                    status = allocation.Status.ToString().ToLowerInvariant(),
                     createdAt = allocation.CreatedAt
                 }
             );
@@ -892,7 +892,7 @@ app.MapGet(
                 accountId = a.AccountId,
                 name = a.Name,
                 amount = a.Amount,
-                isActive = a.IsActive,
+                status = a.Status.ToString().ToLowerInvariant(),
                 createdAt = a.CreatedAt
             })
         );
@@ -996,12 +996,20 @@ app.MapPatch(
 
         try
         {
-            var allocation =
-                await allocationService
-                    .UpdateAllocationAsync(
-                        id,
-                        command
-                    );
+            Allocation allocation;
+
+            if (command.Status?.ToLowerInvariant() == "completed")
+            {
+                allocation = await allocationService.CompleteAllocationAsync(id, scopeId);
+            }
+            else if (command.Status?.ToLowerInvariant() == "cancelled")
+            {
+                allocation = await allocationService.CancelAllocationAsync(id, scopeId);
+            }
+            else
+            {
+                allocation = await allocationService.UpdateAllocationAsync(id, command);
+            }
 
             return Results.Ok(
                 new
@@ -1010,7 +1018,7 @@ app.MapPatch(
                     accountId = allocation.AccountId,
                     name = allocation.Name,
                     amount = allocation.Amount,
-                    isActive = allocation.IsActive,
+                    status = allocation.Status.ToString().ToLowerInvariant(),
                     createdAt = allocation.CreatedAt
                 }
             );

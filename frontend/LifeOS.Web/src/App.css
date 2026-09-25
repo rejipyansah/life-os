@@ -990,11 +990,10 @@
 
 .account-item {
   background: var(--color-surface);
-  padding: 13px 16px;
+  padding: 16px;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   position: relative;
   transition: background 0.15s;
 }
@@ -1003,15 +1002,9 @@
   background: #fdfdfc;
 }
 
-.account-left {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
+/* ── Card Header ── */
 
-.account-name-row {
+.account-card-header {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -1026,6 +1019,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .account-name:hover {
@@ -1039,73 +1033,86 @@
   flex-shrink: 0;
 }
 
-.account-reserved-sub {
-  font-size: 11.5px;
-  color: #9e6417;
-}
+/* ── Card Primary ── */
 
-.account-right {
+.account-card-primary {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   gap: 2px;
-  flex-shrink: 0;
 }
 
-.account-balance {
-  font-size: 14.5px;
+.account-primary-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.01em;
+}
+
+.account-primary-amount {
+  font-size: 20px;
   font-weight: 700;
   color: var(--color-text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
-.account-available {
+/* ── Card Details ── */
+
+.account-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 2px;
+}
+
+.account-detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.account-detail-label {
   font-size: 11px;
   color: var(--color-text-muted);
 }
 
-/* Account Actions */
-.account-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.account-action-edit {
-  background: none;
-  border: 1px solid var(--color-border-strong);
-  color: var(--color-text);
-  font-size: 13px;
+.account-detail-value {
+  font-size: 12px;
+  color: var(--color-text-secondary);
   font-weight: 500;
-  padding: 8px 16px;
-  min-height: 40px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  font-variant-numeric: tabular-nums;
 }
 
-.account-action-edit:hover {
-  background: var(--color-subtle);
-  border-color: var(--color-text-muted);
+/* ── Card Actions ── */
+
+.account-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-.account-action-edit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.account-action-archive {
+.account-action-edit,
+.account-action-archive,
+.account-action-unarchive {
   background: none;
   border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
   font-weight: 500;
-  padding: 8px 16px;
-  min-height: 40px;
+  padding: 7px 14px;
+  min-height: 36px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.account-action-edit:hover,
+.account-action-unarchive:hover {
+  background: var(--color-subtle);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
 }
 
 .account-action-archive:hover {
@@ -1114,30 +1121,8 @@
   background: #faf2f0;
 }
 
-.account-action-archive:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.account-action-unarchive {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 16px;
-  min-height: 40px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
-}
-
-.account-action-unarchive:hover {
-  color: var(--color-text);
-  border-color: var(--color-text-muted);
-  background: var(--color-subtle);
-}
-
+.account-action-edit:disabled,
+.account-action-archive:disabled,
 .account-action-unarchive:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1249,25 +1234,58 @@
   background: #8f2a22;
 }
 
-/* Archived Account */
-.account-item.archived {
-  background: #f5f4f0;
-  opacity: 0.75;
+.archive-dialog-btn-primary {
+  background: var(--color-positive);
+  color: #fff;
 }
 
-.account-item.archived .account-balance {
+.archive-dialog-btn-primary:hover:not(:disabled) {
+  background: #2e7d32;
+}
+
+/* Archived Account */
+.account-item.archived {
+  background: #f9f8f6;
+  opacity: 0.65;
+}
+
+.account-item.archived:hover {
+  opacity: 0.85;
+}
+
+.account-item.archived .account-primary-amount {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 17px;
+}
+
+.account-item.archived .account-name {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.account-item.archived .account-type-tag {
   color: var(--color-text-muted);
-  font-weight: 400;
+}
+
+.account-card-error {
+  font-size: 12.5px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-top: 4px;
 }
 
 .archive-pill {
   font-size: 10px;
-  padding: 1px 5px;
-  background: #e2ded5;
+  padding: 2px 6px;
+  background: #e8e5dd;
   color: var(--color-text-secondary);
   border-radius: 3px;
   text-transform: uppercase;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 /* Empty Active Accounts Notice */
@@ -1299,25 +1317,7 @@
   gap: 8px;
 }
 
-/* Archive Toggle */
-.archive-toggle-bar {
-  margin-top: -12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11.5px;
-  color: var(--color-text-muted);
-}
-
-.btn-toggle-archived {
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 11.5px;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
+/* Empty Active Accounts Notice */
 
 /* Guidance Box */
 .context-guidance {
@@ -1611,23 +1611,58 @@
 
 .allocation-actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .allocation-action-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  padding: 2px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  min-height: 36px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  border-radius: 3px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  font-family: inherit;
 }
 
-.allocation-action-btn:hover {
-  color: var(--color-text);
+.allocation-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.alloc-action-complete {
+  background: var(--color-positive);
+  color: #fff;
+}
+
+.alloc-action-complete:hover:not(:disabled) {
+  background: #2e7d32;
+}
+
+.alloc-action-edit {
+  background: none;
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.alloc-action-edit:hover:not(:disabled) {
   background: var(--color-subtle);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.alloc-action-cancel {
+  background: none;
+  border-color: var(--color-border);
+  color: var(--color-negative);
+}
+
+.alloc-action-cancel:hover:not(:disabled) {
+  background: var(--color-error-bg);
+  border-color: var(--color-negative);
 }
 
 .allocation-status-badge {
@@ -2117,21 +2152,16 @@
     font-size: 14.5px;
   }
 
-  .account-balance {
-    font-size: 14.5px;
+  .account-primary-amount {
+    font-size: 20px;
   }
 
-  .account-actions {
+  .account-card-actions {
     gap: 10px;
-    margin-top: 8px;
+    margin-top: 6px;
   }
 
-  .account-action-edit {
-    padding: 8px 16px;
-    min-height: 40px;
-    font-size: 13px;
-  }
-
+  .account-action-edit,
   .account-action-archive,
   .account-action-unarchive {
     padding: 8px 16px;
@@ -2227,15 +2257,15 @@
   }
 
   .account-item {
-    padding: 10px 14px;
+    padding: 12px 14px;
   }
 
   .account-name {
     font-size: 13.5px;
   }
 
-  .account-balance {
-    font-size: 13.5px;
+  .account-primary-amount {
+    font-size: 15px;
   }
 
   .ledger-section {

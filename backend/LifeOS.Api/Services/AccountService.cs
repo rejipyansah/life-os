@@ -86,7 +86,7 @@ public class AccountService
 
         // Efficient EF Core grouping for allocated calculation
         var allocated = await _db.Allocations
-            .Where(a => accountIds.Contains(a.AccountId) && a.IsActive)
+            .Where(a => accountIds.Contains(a.AccountId) && a.Status == AllocationStatus.Active)
             .GroupBy(a => a.AccountId)
             .Select(g => new { AccountId = g.Key, Allocated = g.Sum(a => a.Amount) })
             .ToListAsync(ct);
@@ -136,7 +136,7 @@ public class AccountService
             .SumAsync(te => te.Amount, ct);
 
         var allocated = await _db.Allocations
-            .Where(a => a.AccountId == accountId && a.IsActive)
+            .Where(a => a.AccountId == accountId && a.Status == AllocationStatus.Active)
             .SumAsync(a => a.Amount, ct);
 
         return new AccountProjection
@@ -203,7 +203,7 @@ public class AccountService
                         $"Akun belum bisa diarsipkan karena saldonya masih Rp{balance:N0}. Kosongkan saldo terlebih dahulu.");
 
                 var activeAllocated = await _db.Allocations
-                    .Where(a => a.AccountId == accountId && a.IsActive)
+                    .Where(a => a.AccountId == accountId && a.Status == AllocationStatus.Active)
                     .SumAsync(a => a.Amount, ct);
 
                 if (activeAllocated != 0)

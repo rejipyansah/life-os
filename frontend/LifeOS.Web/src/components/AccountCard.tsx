@@ -64,50 +64,69 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
   };
 
   const hasAllocation = account.allocated > 0;
+  const showSecondary = !account.isArchived && (hasAllocation || account.available !== account.balance);
 
   return (
     <div className={`account-item ${account.isArchived ? 'archived' : ''}`}>
-      <div className="account-left">
-        <div className="account-name-row">
-          <span className="account-name" title={account.name}>
-            {account.name}
-          </span>
-          <span className="account-type-tag">{accountTypeLabel(account.type)}</span>
-          {account.isArchived && <span className="archive-pill">Arsip</span>}
-        </div>
-        {hasAllocation && !account.isArchived && (
-          <span className="account-reserved-sub">Alokasi: {formatCurrency(account.allocated)}</span>
-        )}
+      <div className="account-card-header">
+        <span className="account-name" title={account.name}>
+          {account.name}
+        </span>
+        <span className="account-type-tag">{accountTypeLabel(account.type)}</span>
+        {account.isArchived && <span className="archive-pill">Arsip</span>}
       </div>
-      <div className="account-right">
-        <span className="account-balance">{formatCurrency(account.balance)}</span>
-        {!account.isArchived && account.available !== account.balance && (
-          <span className="account-available">tersedia {formatCurrency(account.available)}</span>
-        )}
-        <div className="account-actions">
-          <button
-            className="account-action-edit"
-            onClick={() => onEdit(account)}
-          >
-            Edit
-          </button>
-          {account.isArchived ? (
-            <button
-              className="account-action-unarchive"
-              onClick={handleUnarchive}
-            >
-              Aktifkan
-            </button>
-          ) : (
-            <button
-              className="account-action-archive"
-              onClick={() => setShowArchiveConfirm(true)}
-            >
-              Arsipkan
-            </button>
+
+      {!account.isArchived ? (
+        <div className="account-card-primary">
+          <span className="account-primary-label">Bisa dipakai</span>
+          <span className="account-primary-amount">{formatCurrency(account.available)}</span>
+        </div>
+      ) : (
+        <div className="account-card-primary">
+          <span className="account-primary-label">Saldo</span>
+          <span className="account-primary-amount">{formatCurrency(account.balance)}</span>
+        </div>
+      )}
+
+      {showSecondary && (
+        <div className="account-card-details">
+          <div className="account-detail-row">
+            <span className="account-detail-label">Saldo</span>
+            <span className="account-detail-value">{formatCurrency(account.balance)}</span>
+          </div>
+          {hasAllocation && (
+            <div className="account-detail-row">
+              <span className="account-detail-label">Dialokasikan</span>
+              <span className="account-detail-value">{formatCurrency(account.allocated)}</span>
+            </div>
           )}
         </div>
+      )}
+
+      <div className="account-card-actions">
+        <button
+          className="account-action-edit"
+          onClick={() => onEdit(account)}
+        >
+          Edit
+        </button>
+        {account.isArchived ? (
+          <button
+            className="account-action-unarchive"
+            onClick={handleUnarchive}
+          >
+            Aktifkan
+          </button>
+        ) : (
+          <button
+            className="account-action-archive"
+            onClick={() => setShowArchiveConfirm(true)}
+          >
+            Arsipkan
+          </button>
+        )}
       </div>
+
       {unarchiveError && <div className="account-card-error">{unarchiveError}</div>}
 
       {showArchiveConfirm && (

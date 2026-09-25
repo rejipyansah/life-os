@@ -212,6 +212,14 @@ public class TransactionService
         if (balance + command.Entries[0].Amount < 0)
             throw new ValidationException("Insufficient balance.");
 
+        var allocated = await _db.Allocations
+            .Where(a => a.AccountId == accountId && a.Status == AllocationStatus.Active)
+            .SumAsync(a => a.Amount, ct);
+
+        var available = balance - allocated;
+        if (available + command.Entries[0].Amount < 0)
+            throw new ValidationException("Insufficient available balance. Funds are reserved by active allocations.");
+
         return [BuildEntry(command.Entries[0], transaction.Id)];
     }
 
@@ -254,6 +262,14 @@ public class TransactionService
         var sourceBalance = await GetAccountBalanceAsync(source.AccountId, command.ScopeId, ct);
         if (sourceBalance + source.Amount < 0)
             throw new ValidationException("Insufficient balance in source Account.");
+
+        var sourceAllocated = await _db.Allocations
+            .Where(a => a.AccountId == source.AccountId && a.Status == AllocationStatus.Active)
+            .SumAsync(a => a.Amount, ct);
+
+        var sourceAvailable = sourceBalance - sourceAllocated;
+        if (sourceAvailable + source.Amount < 0)
+            throw new ValidationException("Insufficient available balance in source Account. Funds are reserved by active allocations.");
 
         return [BuildEntry(source, transaction.Id), BuildEntry(destination, transaction.Id)];
     }

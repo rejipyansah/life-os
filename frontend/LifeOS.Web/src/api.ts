@@ -248,7 +248,7 @@ export async function createAllocation(command: {
     accountId: string;
     name: string;
     amount: number;
-    isActive: boolean;
+    status: string;
     createdAt: string;
   }>('/api/finance/allocations', {
     method: 'POST',
@@ -280,7 +280,7 @@ export async function updateAllocation(
     accountId: string;
     name: string;
     amount: number;
-    isActive: boolean;
+    status: string;
     createdAt: string;
   }>(`/api/finance/allocations/${id}`, {
     method: 'PATCH',

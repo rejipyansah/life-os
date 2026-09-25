@@ -14,5 +14,5 @@ public class UpdateAllocationCommand
     public Guid? AccountId { get; set; }
     public string? Name { get; set; }
     public decimal? Amount { get; set; }
-    public bool? IsActive { get; set; }
+    public string? Status { get; set; }
 }

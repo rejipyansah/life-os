@@ -25,7 +25,7 @@ public class Allocation
     [Column(TypeName = "decimal(18,2)")]
     public decimal Amount { get; set; }
 
-    public bool IsActive { get; set; } = true;
+    public AllocationStatus Status { get; set; } = AllocationStatus.Active;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
