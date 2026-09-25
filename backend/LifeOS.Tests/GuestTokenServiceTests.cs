@@ -87,7 +87,7 @@ public class GuestTokenServiceTests : IDisposable
         var context = new DefaultHttpContext();
         context.Request.IsHttps = false;
 
-        GuestTokenService.SetGuestCookie(context, "test-token");
+        _sut.SetGuestCookie(context, "test-token");
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("guest_session=test-token", cookie);
@@ -100,7 +100,7 @@ public class GuestTokenServiceTests : IDisposable
         var context = new DefaultHttpContext();
         context.Request.IsHttps = true;
 
-        GuestTokenService.SetGuestCookie(context, "test-token");
+        _sut.SetGuestCookie(context, "test-token");
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("secure", cookie);
@@ -111,7 +111,7 @@ public class GuestTokenServiceTests : IDisposable
     {
         var context = new DefaultHttpContext();
 
-        GuestTokenService.SetGuestCookie(context, "test-token");
+        _sut.SetGuestCookie(context, "test-token");
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("httponly", cookie);
@@ -122,7 +122,7 @@ public class GuestTokenServiceTests : IDisposable
     {
         var context = new DefaultHttpContext();
 
-        GuestTokenService.SetGuestCookie(context, "test-token");
+        _sut.SetGuestCookie(context, "test-token");
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("samesite=strict", cookie);
@@ -133,7 +133,7 @@ public class GuestTokenServiceTests : IDisposable
     {
         var context = new DefaultHttpContext();
 
-        GuestTokenService.SetGuestCookie(context, "test-token");
+        _sut.SetGuestCookie(context, "test-token");
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("path=/", cookie);
@@ -144,7 +144,7 @@ public class GuestTokenServiceTests : IDisposable
     {
         var context = new DefaultHttpContext();
 
-        GuestTokenService.SetGuestCookie(context, "test-token");
+        _sut.SetGuestCookie(context, "test-token");
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("expires=", cookie);
@@ -181,7 +181,7 @@ public class GuestTokenServiceTests : IDisposable
         var context = new DefaultHttpContext();
         context.Request.Headers.Cookie = "guest_session=old-token";
 
-        GuestTokenService.ClearGuestCookie(context);
+        _sut.ClearGuestCookie(context);
 
         var cookie = context.Response.Headers.SetCookie.ToString();
         Assert.Contains("guest_session=; expires=", cookie.ToLowerInvariant());
@@ -241,7 +241,7 @@ public class GuestTokenServiceTests : IDisposable
         createContext.Request.IsHttps = false;
         var token = GuestTokenService.GenerateToken();
 
-        GuestTokenService.SetGuestCookie(createContext, token);
+        _sut.SetGuestCookie(createContext, token);
 
         var readContext = new DefaultHttpContext();
         readContext.Request.IsHttps = false;
@@ -260,7 +260,7 @@ public class GuestTokenServiceTests : IDisposable
         createContext.Request.IsHttps = true;
         var token = GuestTokenService.GenerateToken();
 
-        GuestTokenService.SetGuestCookie(createContext, token);
+        _sut.SetGuestCookie(createContext, token);
 
         var setCookie = createContext.Response.Headers.SetCookie.ToString();
         Assert.Contains("secure", setCookie);

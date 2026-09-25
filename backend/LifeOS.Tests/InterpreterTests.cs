@@ -669,6 +669,226 @@ public class InterpreterTests : IDisposable
         Assert.Equal("NeedsClarification", response.State);
     }
 
+    // ───────────────────────── Transfer: AI-guessed account not in input ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Transfer_SourceNotInInput_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Cash",
+            ToAccount = "SeaBank",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb ke SeaBank" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("transferring from"));
+        Assert.Null(response.Command);
+    }
+
+    [Fact]
+    public async Task Interpret_Transfer_DestinationNotInInput_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Mandiri",
+            ToAccount = "SeaBank",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb dari Mandiri" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("transferring to"));
+        Assert.Null(response.Command);
+    }
+
+    [Fact]
+    public async Task Interpret_Transfer_NoAccountsInInput_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Cash",
+            ToAccount = "Mandiri",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("transferring from"));
+        Assert.Null(response.Command);
+    }
+
+    [Fact]
+    public async Task Interpret_Transfer_BothAccountsInInput_ReturnsReady()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Mandiri",
+            ToAccount = "SeaBank",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb dari Mandiri ke SeaBank" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.NotNull(response.Command);
+        Assert.Equal(TransactionType.Transfer, response.Command!.Type);
+    }
+
+    // ───────────────────────── Transfer: Mention check is case-insensitive ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Transfer_CaseInsensitiveMention_ReturnsReady()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Mandiri",
+            ToAccount = "SeaBank",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb dari mandiri ke seabank" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.NotNull(response.Command);
+    }
+
+    // ───────────────────────── Transfer: Account valid in eligible but not in input ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Transfer_AccountValidButNotInInput_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 50000,
+            Account = "SeaBank",
+            ToAccount = "Mandiri",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 50k ke Mandiri" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains(response.Clarifications, c => c.Contains("transferring from"));
+        Assert.Null(response.Command);
+    }
+
+    // ───────────────────────── Expense/Income: Not affected by mention check ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Expense_AccountNotInInput_StillReturnsReady()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Expense",
+            Amount = 18000,
+            Account = "Cash",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "jajan 18rb" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.NotNull(response.Command);
+    }
+
+    [Fact]
+    public async Task Interpret_Income_AccountNotInInput_StillReturnsReady()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Income",
+            Amount = 5000000,
+            Account = "Mandiri",
+            Date = "2026-09-25",
+            Clarifications = []
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "gaji 5jt" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.NotNull(response.Command);
+    }
+
+    // ───────────────────────── Placeholder clarification filtering ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_PlaceholderClarification_FallsThroughToValidation()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = "Mandiri",
+            ToAccount = "SeaBank",
+            Date = "2026-09-25",
+            Clarifications = ["string"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb dari Mandiri ke SeaBank" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.NotNull(response.Command);
+    }
+
     // ───────────────────────── FakeInterpreter ─────────────────────────
 
     private class FakeInterpreter : IInterpreter

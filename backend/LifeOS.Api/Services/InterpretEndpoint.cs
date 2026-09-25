@@ -50,13 +50,14 @@ public static class InterpretEndpoint
             return new HandlerResult(503, new { error = "AI provider is temporarily unavailable. Please try again." });
         }
 
-        return new HandlerResult(200, Validate(raw, accounts, scopeId));
+        return new HandlerResult(200, Validate(raw, accounts, scopeId, body.Input.Trim()));
     }
 
     public static InterpretResponse Validate(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
-        Guid scopeId)
+        Guid scopeId,
+        string userInput = "")
     {
         if (raw.Intent == "Unsupported")
         {
@@ -72,18 +73,25 @@ public static class InterpretEndpoint
 
         if (raw.Clarifications.Count > 0)
         {
-            return new InterpretResponse
+            var cleanClarifications = raw.Clarifications
+                .Where(c => !string.IsNullOrWhiteSpace(c) && c.Trim().Length > 1 && c.Trim() != "string")
+                .ToList();
+
+            if (cleanClarifications.Count > 0)
             {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = raw.Clarifications
-            };
+                return new InterpretResponse
+                {
+                    Intent = raw.Intent,
+                    State = "NeedsClarification",
+                    Clarifications = cleanClarifications
+                };
+            }
         }
 
         if (raw.Intent == "CreateAllocation")
             return ValidateAllocation(raw, eligibleAccounts, scopeId);
 
-        return ValidateTransaction(raw, eligibleAccounts, scopeId);
+        return ValidateTransaction(raw, eligibleAccounts, scopeId, userInput);
     }
 
     private static InterpretResponse ValidateAllocation(
@@ -162,7 +170,8 @@ public static class InterpretEndpoint
     private static InterpretResponse ValidateTransaction(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
-        Guid scopeId)
+        Guid scopeId,
+        string userInput = "")
     {
         if (string.IsNullOrEmpty(raw.TransactionType) || !raw.Amount.HasValue || raw.Amount <= 0)
         {
@@ -238,6 +247,29 @@ public static class InterpretEndpoint
                     Clarifications = ["Source and destination accounts must be different."]
                 };
             }
+
+            if (!string.IsNullOrEmpty(userInput))
+            {
+                if (!IsAccountMentionedInInput(raw.Account!, userInput))
+                {
+                    return new InterpretResponse
+                    {
+                        Intent = raw.Intent,
+                        State = "NeedsClarification",
+                        Clarifications = [$"Which account are you transferring from? Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
+                    };
+                }
+
+                if (!IsAccountMentionedInInput(raw.ToAccount!, userInput))
+                {
+                    return new InterpretResponse
+                    {
+                        Intent = raw.Intent,
+                        State = "NeedsClarification",
+                        Clarifications = [$"Which account are you transferring to? Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
+                    };
+                }
+            }
         }
 
         var txData = new InterpretTransactionData
@@ -308,6 +340,18 @@ public static class InterpretEndpoint
                 new CreateTransactionEntryCommand { AccountId = accountId, Amount = signedAmount }
             ]
         };
+    }
+
+    internal static bool IsAccountMentionedInInput(string accountName, string userInput)
+    {
+        var normalizedInput = userInput.ToLowerInvariant();
+        var inputTokens = normalizedInput
+            .Split([' ', '\t', ',', '.', '!', '?', ';', ':', '/', '-'], StringSplitOptions.RemoveEmptyEntries);
+
+        var accountTokens = accountName.ToLowerInvariant()
+            .Split([' ', '\t', ',', '.', '!', '?', ';', ':', '/', '-'], StringSplitOptions.RemoveEmptyEntries);
+
+        return accountTokens.All(token => inputTokens.Contains(token));
     }
 }
 

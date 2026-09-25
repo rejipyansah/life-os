@@ -440,6 +440,8 @@ public class AccountServiceTests : IDisposable
             Type = AccountType.Bank
         });
 
+        await SeedBalance(account.Id, 500_000m);
+
         await _allocService.CreateAllocationAsync(new CreateAllocationCommand
         {
             ScopeId = _scopeId,
@@ -492,18 +494,17 @@ public class AccountServiceTests : IDisposable
         });
 
         await SeedBalance(account.Id, 100_000m);
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
-        {
-            ScopeId = _scopeId,
-            AccountId = account.Id,
-            Name = "Big Fund",
-            Amount = 300_000m
-        });
 
-        var result = await _sut.GetAccountsAsync(_scopeId);
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            _allocService.CreateAllocationAsync(new CreateAllocationCommand
+            {
+                ScopeId = _scopeId,
+                AccountId = account.Id,
+                Name = "Big Fund",
+                Amount = 300_000m
+            }));
 
-        Assert.Single(result.Accounts);
-        Assert.Equal(-200_000m, result.Accounts[0].Available);
+        Assert.Contains("Dana tidak mencukupi", ex.Message);
     }
 
     [Fact]
