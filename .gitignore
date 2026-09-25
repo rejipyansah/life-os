@@ -20,3 +20,5 @@ dist/
 # OS/editor temporary files
 .DS_Store
 Thumbs.db
+
+.wrangler/

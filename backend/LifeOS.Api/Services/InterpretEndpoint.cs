@@ -19,6 +19,8 @@ public static class InterpretEndpoint
             .Where(a => a.ScopeId == scopeId && !a.IsArchived)
             .Select(a => new AccountLookup(a.Id, a.Name))
             .ToListAsync(ct))
+            .GroupBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
             .ToList();
 
         if (accounts.Count == 0)

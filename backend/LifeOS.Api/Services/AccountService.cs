@@ -19,8 +19,8 @@ public class AccountService
             throw new ValidationException("Account Name is required.");
 
         var trimmedName = command.Name.Trim();
-        if (trimmedName.Length > 256)
-            throw new ValidationException("Account Name must not exceed 256 characters.");
+        if (trimmedName.Length > 50)
+            throw new ValidationException("Account Name must not exceed 50 characters.");
 
         if (!Enum.IsDefined(typeof(AccountType), command.Type))
             throw new ValidationException($"Invalid AccountType: {command.Type}");
@@ -29,6 +29,11 @@ public class AccountService
         var scopeExists = await _db.Scopes.AnyAsync(s => s.Id == command.ScopeId, ct);
         if (!scopeExists)
             throw new ValidationException("Scope not found.");
+
+        var duplicateExists = await _db.Accounts.AnyAsync(
+            a => a.ScopeId == command.ScopeId && a.Name.ToLower() == trimmedName.ToLower(), ct);
+        if (duplicateExists)
+            throw new ValidationException($"Akun dengan nama '{trimmedName}' sudah ada dalam scope ini.");
 
         var account = new Account
         {
@@ -163,8 +168,16 @@ public class AccountService
             var trimmedName = command.Name.Trim();
             if (string.IsNullOrWhiteSpace(trimmedName))
                 throw new ValidationException("Account Name cannot be empty.");
-            if (trimmedName.Length > 256)
-                throw new ValidationException("Account Name must not exceed 256 characters.");
+            if (trimmedName.Length > 50)
+                throw new ValidationException("Account Name must not exceed 50 characters.");
+
+            var duplicateExists = await _db.Accounts.AnyAsync(
+                a => a.ScopeId == command.ScopeId
+                    && a.Id != accountId
+                    && a.Name.ToLower() == trimmedName.ToLower(), ct);
+            if (duplicateExists)
+                throw new ValidationException($"Akun dengan nama '{trimmedName}' sudah ada dalam scope ini.");
+
             account.Name = trimmedName;
         }
 

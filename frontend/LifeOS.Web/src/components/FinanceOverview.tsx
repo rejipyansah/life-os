@@ -147,11 +147,6 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
               <span className="active">Keuangan</span>
             </div>
           </div>
-          <div className="header-right">
-            <button className="btn-header-action" onClick={handleBackToOverview}>
-              Kembali
-            </button>
-          </div>
         </header>
         <AccountForm
           onSuccess={() => { setView('overview'); refresh(); }}
@@ -170,11 +165,6 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
             <div className="domain-crumb">
               <span className="active">Keuangan</span>
             </div>
-          </div>
-          <div className="header-right">
-            <button className="btn-header-action" onClick={handleBackToOverview}>
-              Kembali
-            </button>
           </div>
         </header>
         <AccountForm
@@ -346,7 +336,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
         <div className="empty-view-container">
           <div className="empty-intro-box">
             <div className="empty-step-tag">Langkah Pertama</div>
-            <h2 className="empty-title">Tentukan tempat uangmu berada</h2>
+            <h2 className="empty-title">Akun</h2>
             <p className="empty-desc">
               Sebelum mencatat transaksi pertama, Life OS perlu tahu wadah keuangan apa saja yang kamu gunakan sehari-hari. Mulai dari yang paling sering kamu pakai, seperti dompet tunai atau rekening bank utama.
             </p>
@@ -398,7 +388,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
               onEdit={handleEditAllocation}
             />
 
-            {allocations.length === 0 && (
+            {hasActiveAccounts && allocations.length === 0 && (
               <div className="allocation-add-hint">
                 <button className="btn-add-allocation" onClick={() => setView('add-allocation')}>
                   + Alokasi
@@ -406,7 +396,7 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
               </div>
             )}
 
-            {allocations.length > 0 && (
+            {hasActiveAccounts && allocations.length > 0 && (
               <div className="allocation-add-hint">
                 <button className="btn-add-allocation" onClick={() => setView('add-allocation')}>
                   + Alokasi Baru
@@ -425,8 +415,8 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
 
           <aside className="context-column">
             <div className="accounts-head">
-              <span className="section-title">Tempat Uangmu</span>
-              <button className="btn-add-account" onClick={() => setView('create-account')}>+ Tambah</button>
+              <span className="section-title">Akun</span>
+              <button className="btn-add-account" onClick={() => setView('create-account')}>+ Tambah Akun</button>
             </div>
 
             <div className="accounts-register">

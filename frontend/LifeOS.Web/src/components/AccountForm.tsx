@@ -28,6 +28,10 @@ export default function AccountForm({ editAccount, onSuccess, onCancel }: Accoun
       setError('Nama akun tidak boleh kosong.');
       return;
     }
+    if (trimmed.length > 50) {
+      setError('Nama akun maksimal 50 karakter.');
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -61,9 +65,8 @@ export default function AccountForm({ editAccount, onSuccess, onCancel }: Accoun
         placeholder="Nama akun"
         value={name}
         onChange={e => setName(e.target.value)}
-        maxLength={256}
+        maxLength={50}
         autoFocus
-        required
       />
       <div className="type-tabs">
         {ACCOUNT_TYPES.map(t => (
@@ -81,7 +84,7 @@ export default function AccountForm({ editAccount, onSuccess, onCancel }: Accoun
         <button type="submit" className="btn btn-primary" disabled={loading}>
           {loading ? 'Menyimpan...' : (isEdit ? 'Simpan' : 'Buat')}
         </button>
-        <button type="button" className="btn btn-text" onClick={onCancel} disabled={loading}>
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={loading}>
           Batal
         </button>
       </div>

@@ -22,7 +22,8 @@ function accountTypeLabel(type: string): string {
 }
 
 export default function AccountCard({ account, onUpdate, onEdit }: AccountCardProps) {
-  const [error, setError] = useState('');
+  const [unarchiveError, setUnarchiveError] = useState('');
+  const [archiveError, setArchiveError] = useState('');
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,9 +35,9 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
   }, []);
 
   const setErrorWithAutoClear = (msg: string) => {
-    setError(msg);
+    setUnarchiveError(msg);
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-    errorTimerRef.current = setTimeout(() => setError(''), 8000);
+    errorTimerRef.current = setTimeout(() => setUnarchiveError(''), 8000);
   };
 
   const handleArchiveConfirm = async () => {
@@ -44,9 +45,10 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
     try {
       await updateAccount(account.id, { isArchived: true });
       setShowArchiveConfirm(false);
+      setArchiveError('');
       onUpdate();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Gagal mengarsipkan akun');
+      setArchiveError(e instanceof Error ? e.message : 'Gagal mengarsipkan akun');
     } finally {
       setArchiving(false);
     }
@@ -106,21 +108,21 @@ export default function AccountCard({ account, onUpdate, onEdit }: AccountCardPr
           )}
         </div>
       </div>
-      {error && <div className="account-card-error">{error}</div>}
+      {unarchiveError && <div className="account-card-error">{unarchiveError}</div>}
 
       {showArchiveConfirm && (
-        <div className="archive-dialog-overlay" onClick={() => { setShowArchiveConfirm(false); setError(''); }}>
+        <div className="archive-dialog-overlay" onClick={() => { setShowArchiveConfirm(false); setArchiveError(''); }}>
           <div className="archive-dialog" onClick={(e) => e.stopPropagation()}>
             <h3 className="archive-dialog-title">Arsipkan akun?</h3>
             <p className="archive-dialog-account-name">{account.name}</p>
             <p className="archive-dialog-desc">
               Akun yang diarsipkan tidak dapat digunakan untuk transaksi atau alokasi baru.
             </p>
-            {error && <div className="archive-dialog-error">{error}</div>}
+            {archiveError && <div className="archive-dialog-error">{archiveError}</div>}
             <div className="archive-dialog-actions">
               <button
                 className="archive-dialog-btn archive-dialog-btn-cancel"
-                onClick={() => { setShowArchiveConfirm(false); setError(''); }}
+                onClick={() => { setShowArchiveConfirm(false); setArchiveError(''); }}
                 disabled={archiving}
               >
                 Batal

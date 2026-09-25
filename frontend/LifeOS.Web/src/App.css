@@ -1410,6 +1410,14 @@
   overflow: hidden;
 }
 
+.account-form {
+  max-width: 480px;
+  margin: 0 auto;
+  padding-top: 40px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .form-label {
   display: block;
   font-size: 12px;

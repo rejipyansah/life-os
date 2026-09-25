@@ -176,6 +176,149 @@ public class AccountServiceTests : IDisposable
         Assert.Equal(0m, projection.Balance);
     }
 
+    // ───────────────────────── Duplicate Name Rejection ─────────────────────────
+
+    [Fact]
+    public async Task Create_DuplicateName_Rejected()
+    {
+        await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Cash
+        }));
+    }
+
+    [Fact]
+    public async Task Create_CaseInsensitiveDuplicate_Rejected()
+    {
+        await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "mandiri",
+            Type = AccountType.Cash
+        }));
+    }
+
+    [Fact]
+    public async Task Create_WhitespaceNormalizedDuplicate_Rejected()
+    {
+        await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "  Mandiri  ",
+            Type = AccountType.Cash
+        }));
+    }
+
+    [Fact]
+    public async Task Rename_DuplicateName_Rejected()
+    {
+        var accountA = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+        var accountB = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "BRI",
+            Type = AccountType.Bank
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.UpdateAccountAsync(accountB.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri"
+        }));
+    }
+
+    [Fact]
+    public async Task Rename_SameName_NoError()
+    {
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+
+        var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri"
+        });
+
+        Assert.Equal("Mandiri", updated.Name);
+    }
+
+    [Fact]
+    public async Task Create_DistinctNames_Succeeds()
+    {
+        var accountA = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+        var accountB = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "BRI",
+            Type = AccountType.Bank
+        });
+
+        Assert.Equal("Mandiri", accountA.Name);
+        Assert.Equal("BRI", accountB.Name);
+    }
+
+    [Fact]
+    public async Task Create_DuplicateName_DifferentScopes_Succeeds()
+    {
+        var otherScope = new Scope { Type = ScopeType.Guest };
+        _db.Scopes.Add(otherScope);
+        await _db.SaveChangesAsync();
+
+        await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+
+        var otherAccount = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = otherScope.Id,
+            Name = "Mandiri",
+            Type = AccountType.Bank
+        });
+
+        Assert.Equal("Mandiri", otherAccount.Name);
+        Assert.Equal(otherScope.Id, otherAccount.ScopeId);
+    }
+
     // ───────────────────────── Scope isolation ─────────────────────────
 
     [Fact]

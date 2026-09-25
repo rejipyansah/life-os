@@ -8,17 +8,14 @@ namespace LifeOS.Api.Services;
 public class GuestTokenService
 {
     private readonly ApplicationDbContext _db;
-    private readonly IWebHostEnvironment _environment;
 
     private const string CookieName = "guest_session";
     private const int TokenSizeBytes = 32;
 
     public GuestTokenService(
-        ApplicationDbContext db,
-        IWebHostEnvironment environment)
+        ApplicationDbContext db)
     {
         _db = db;
-        _environment = environment;
     }
 
     public static string GenerateToken()
@@ -58,12 +55,17 @@ public class GuestTokenService
             {
                 HttpOnly = true,
 
-                // Needed for frontend/backend on different origins.
-                SameSite = SameSiteMode.None,
+                // HTTP: Strict (no cross-origin needed).
+                // HTTPS: None (cross-origin frontend
+                // needs cookie attachment).
+                SameSite =
+                    http.Request.IsHttps
+                        ? SameSiteMode.None
+                        : SameSiteMode.Strict,
 
-                // Local HTTP works in Development.
-                // Production requires HTTPS.
-                Secure = _environment.IsProduction(),
+                // Follows request protocol:
+                // HTTP → false, HTTPS → true.
+                Secure = http.Request.IsHttps,
 
                 Expires =
                     DateTimeOffset.UtcNow.AddYears(1),
@@ -92,8 +94,11 @@ public class GuestTokenService
             new CookieOptions
             {
                 HttpOnly = true,
-                SameSite = SameSiteMode.None,
-                Secure = _environment.IsProduction(),
+                SameSite =
+                    http.Request.IsHttps
+                        ? SameSiteMode.None
+                        : SameSiteMode.Strict,
+                Secure = http.Request.IsHttps,
                 Path = "/"
             }
         );

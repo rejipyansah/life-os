@@ -99,12 +99,7 @@ export async function resumeGuestSession(): Promise<{
   }
 
   if (res.status === 401) {
-    const result = await createGuestSession();
-
-    return {
-      ...result,
-      isNew: true,
-    };
+    throw new Error('No guest session');
   }
 
   const body = await res.json().catch(() => null);
