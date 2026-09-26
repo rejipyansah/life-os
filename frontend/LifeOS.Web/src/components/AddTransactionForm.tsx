@@ -11,6 +11,12 @@ interface AddTransactionFormProps {
 
 const TYPES: TransactionType[] = ['Expense', 'Income', 'Transfer'];
 
+const TYPE_LABELS: Record<TransactionType, string> = {
+  Expense: 'Pengeluaran',
+  Income: 'Pemasukan',
+  Transfer: 'Transfer',
+};
+
 function today(): string {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -30,9 +36,65 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
   const [destAccountId, setDestAccountId] = useState('');
   const [feeAmount, setFeeAmount] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
   const activeAccounts = accounts.filter(a => !a.isArchived);
+
+  const clearFieldError = (field: string) => {
+    setFieldErrors(prev => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validate = (): Record<string, string> => {
+    const errors: Record<string, string> = {};
+
+    const trimmedAmount = amount.trim();
+    if (!trimmedAmount) {
+      errors.amount = 'Nominal harus diisi.';
+    } else {
+      const parsedAmount = parseFloat(trimmedAmount);
+      if (isNaN(parsedAmount) || !isFinite(parsedAmount)) {
+        errors.amount = 'Nominal harus berupa angka yang valid.';
+      } else if (parsedAmount <= 0) {
+        errors.amount = 'Nominal harus lebih dari 0.';
+      }
+    }
+
+    if (!occurredOn) {
+      errors.occurredOn = 'Tanggal harus diisi.';
+    }
+
+    if (type === 'Transfer') {
+      if (!sourceAccountId) {
+        errors.sourceAccountId = 'Akun sumber harus dipilih.';
+      }
+      if (!destAccountId) {
+        errors.destAccountId = 'Akun tujuan harus dipilih.';
+      }
+      if (sourceAccountId && destAccountId && sourceAccountId === destAccountId) {
+        errors.destAccountId = 'Akun tujuan harus berbeda dari akun sumber.';
+      }
+      const trimmedFee = feeAmount.trim();
+      if (trimmedFee) {
+        const parsedFee = parseFloat(trimmedFee);
+        if (isNaN(parsedFee) || !isFinite(parsedFee)) {
+          errors.feeAmount = 'Biaya transfer harus berupa angka yang valid.';
+        } else if (parsedFee < 0) {
+          errors.feeAmount = 'Biaya transfer tidak boleh negatif.';
+        }
+      }
+    } else {
+      if (!accountId) {
+        errors.accountId = 'Akun harus dipilih.';
+      }
+    }
+
+    return errors;
+  };
 
   const reset = () => {
     setAmount('');
@@ -44,38 +106,30 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
     setDestAccountId('');
     setFeeAmount('');
     setError('');
+    setFieldErrors({});
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedAmount = parseFloat(amount);
-    if (!parsedAmount || parsedAmount <= 0) {
-      setError('Amount must be a positive number.');
+
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
       return;
     }
 
-    if (!occurredOn) {
-      setError('Date is required.');
-      return;
-    }
+    setFieldErrors({});
 
+    const parsedAmount = parseFloat(amount.trim());
     let command: CreateTransactionCommand;
 
     if (type === 'Transfer') {
-      if (!sourceAccountId || !destAccountId) {
-        setError('Source and destination accounts are required.');
-        return;
-      }
-      if (sourceAccountId === destAccountId) {
-        setError('Source and destination accounts must differ.');
-        return;
-      }
-      const parsedFee = feeAmount ? parseFloat(feeAmount) : undefined;
+      const parsedFee = feeAmount.trim() ? parseFloat(feeAmount.trim()) : undefined;
       const sourceAmount = parsedFee ? -(parsedAmount + parsedFee) : -parsedAmount;
       command = {
         type: 'Transfer',
         amount: parsedAmount,
-        description: description || undefined,
+        description: description.trim() || undefined,
         occurredOn,
         feeAmount: parsedFee,
         entries: [
@@ -84,16 +138,12 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
         ],
       };
     } else {
-      if (!accountId) {
-        setError('Account is required.');
-        return;
-      }
       const signedAmount = type === 'Expense' ? -parsedAmount : parsedAmount;
       command = {
         type,
         amount: parsedAmount,
-        description: description || undefined,
-        categoryName: categoryName || undefined,
+        description: description.trim() || undefined,
+        categoryName: categoryName.trim() || undefined,
         occurredOn,
         entries: [
           { accountId, amount: signedAmount },
@@ -108,7 +158,7 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
       reset();
       onSuccess();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create transaction');
+      setError(e instanceof Error ? e.message : 'Gagal membuat transaksi.');
     } finally {
       setLoading(false);
     }
@@ -117,15 +167,15 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
   if (activeAccounts.length === 0) {
     return (
       <div className="form-notice">
-        <p>Create an account first before adding a transaction.</p>
-        <button className="btn btn-text" onClick={onCancel}>Back</button>
+        <p>Buat akun terlebih dahulu sebelum menambah transaksi.</p>
+        <button className="btn btn-text" onClick={onCancel}>Kembali</button>
       </div>
     );
   }
 
   return (
-    <form className="transaction-form" onSubmit={handleSubmit}>
-      <h2>New Transaction</h2>
+    <form className="account-form transaction-form" onSubmit={handleSubmit}>
+      <h2>Transaksi Baru</h2>
 
       {error && <div className="error-message">{error}</div>}
 
@@ -135,89 +185,114 @@ export default function AddTransactionForm({ accounts, onSuccess, onCancel }: Ad
             key={t}
             type="button"
             className={`type-tab ${type === t ? 'active' : ''}`}
-            onClick={() => { setType(t); setError(''); }}
+            onClick={() => { setType(t); setError(''); setFieldErrors({}); }}
           >
-            {t}
+            {TYPE_LABELS[t]}
           </button>
         ))}
       </div>
 
-      <input
-        type="number"
-        placeholder="Amount"
-        value={amount}
-        onChange={e => setAmount(e.target.value)}
-        min="0.01"
-        step="any"
-        required
-      />
+      <label className="form-label">Nominal</label>
+      <div className="input-group">
+        <span className="input-prefix">Rp</span>
+        <input
+          type="number"
+          placeholder="0"
+          value={amount}
+          onChange={e => { setAmount(e.target.value); clearFieldError('amount'); }}
+          min="0.01"
+          step="any"
+        />
+      </div>
+      {fieldErrors.amount && <div className="field-error">{fieldErrors.amount}</div>}
 
+      <label className="form-label">Deskripsi</label>
       <input
         type="text"
-        placeholder="Description (optional)"
+        placeholder="Opsional"
         value={description}
         onChange={e => setDescription(e.target.value)}
         maxLength={512}
       />
 
       {type !== 'Transfer' && (
-        <input
-          type="text"
-          placeholder="Category (optional)"
-          value={categoryName}
-          onChange={e => setCategoryName(e.target.value)}
-          maxLength={128}
-        />
-      )}
-
-      <input
-        type="date"
-        value={occurredOn}
-        onChange={e => setOccurredOn(e.target.value)}
-        required
-      />
-
-      {type !== 'Transfer' ? (
-        <AccountPicker
-          value={accountId}
-          onChange={setAccountId}
-          accounts={activeAccounts}
-          placeholder="Select account"
-          required
-        />
-      ) : (
         <>
-          <AccountPicker
-            value={sourceAccountId}
-            onChange={(id) => { setSourceAccountId(id); if (destAccountId === id) setDestAccountId(''); }}
-            accounts={activeAccounts}
-            placeholder="From (source)"
-            required
-          />
-          <AccountPicker
-            value={destAccountId}
-            onChange={setDestAccountId}
-            accounts={activeAccounts.filter(a => a.id !== sourceAccountId)}
-            placeholder="To (destination)"
-            required
-          />
+          <label className="form-label">Kategori</label>
           <input
-            type="number"
-            placeholder="Fee (optional)"
-            value={feeAmount}
-            onChange={e => setFeeAmount(e.target.value)}
-            min="0"
-            step="any"
+            type="text"
+            placeholder="Opsional"
+            value={categoryName}
+            onChange={e => setCategoryName(e.target.value)}
+            maxLength={128}
           />
         </>
       )}
 
+      {type !== 'Transfer' ? (
+        <>
+          <label className="form-label">Akun</label>
+          <AccountPicker
+            value={accountId}
+            onChange={(id) => { setAccountId(id); clearFieldError('accountId'); }}
+            accounts={activeAccounts}
+            placeholder="Pilih akun"
+          />
+          {fieldErrors.accountId && <div className="field-error">{fieldErrors.accountId}</div>}
+        </>
+      ) : (
+        <>
+          <label className="form-label">Dari Akun</label>
+          <AccountPicker
+            value={sourceAccountId}
+            onChange={(id) => {
+              setSourceAccountId(id);
+              clearFieldError('sourceAccountId');
+              if (destAccountId === id) setDestAccountId('');
+            }}
+            accounts={activeAccounts}
+            placeholder="Pilih akun sumber"
+          />
+          {fieldErrors.sourceAccountId && <div className="field-error">{fieldErrors.sourceAccountId}</div>}
+
+          <label className="form-label">Ke Akun</label>
+          <AccountPicker
+            value={destAccountId}
+            onChange={(id) => { setDestAccountId(id); clearFieldError('destAccountId'); }}
+            accounts={activeAccounts.filter(a => a.id !== sourceAccountId)}
+            placeholder="Pilih akun tujuan"
+          />
+          {fieldErrors.destAccountId && <div className="field-error">{fieldErrors.destAccountId}</div>}
+
+          <label className="form-label">Biaya Transfer</label>
+          <div className="input-group">
+            <span className="input-prefix">Rp</span>
+            <input
+              type="number"
+              placeholder="0"
+              value={feeAmount}
+              onChange={e => { setFeeAmount(e.target.value); clearFieldError('feeAmount'); }}
+              min="0"
+              step="any"
+            />
+          </div>
+          {fieldErrors.feeAmount && <div className="field-error">{fieldErrors.feeAmount}</div>}
+        </>
+      )}
+
+      <label className="form-label">Tanggal</label>
+      <input
+        type="date"
+        value={occurredOn}
+        onChange={e => { setOccurredOn(e.target.value); clearFieldError('occurredOn'); }}
+      />
+      {fieldErrors.occurredOn && <div className="field-error">{fieldErrors.occurredOn}</div>}
+
       <div className="form-actions">
         <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? 'Saving...' : 'Save'}
+          {loading ? 'Menyimpan...' : 'Catat'}
         </button>
-        <button type="button" className="btn btn-text" onClick={onCancel} disabled={loading}>
-          Cancel
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={loading}>
+          Batal
         </button>
       </div>
     </form>
