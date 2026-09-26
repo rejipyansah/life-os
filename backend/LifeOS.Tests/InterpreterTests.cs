@@ -181,7 +181,7 @@ public class InterpreterTests : IDisposable
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Contains("Nominalnya berapa?", response.Clarifications);
         Assert.Null(response.Preview);
         Assert.Null(response.Command);
     }
@@ -504,7 +504,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Contains("Nominalnya berapa?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Missing name ─────────────────────────
@@ -526,7 +526,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Alokasi ini untuk apa?", response.Clarifications);
+        Assert.Contains("Untuk keperluan apa?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Missing account ─────────────────────────
@@ -640,7 +640,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Contains("Nominalnya berapa?", response.Clarifications);
         Assert.Single(response.Clarifications);
     }
 
@@ -712,7 +712,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Uang dikirim ke akun mana?", response.Clarifications);
+        Assert.Contains("Ke akun mana?", response.Clarifications);
         Assert.Null(response.Command);
     }
 
@@ -737,7 +737,7 @@ public class InterpreterTests : IDisposable
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
         Assert.Contains("Dari akun mana?", response.Clarifications);
-        Assert.Contains("Uang dikirim ke akun mana?", response.Clarifications);
+        Assert.Contains("Ke akun mana?", response.Clarifications);
         Assert.Null(response.Command);
     }
 
@@ -916,7 +916,7 @@ public class InterpreterTests : IDisposable
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
         Assert.Contains("Dari akun mana?", response.Clarifications);
-        Assert.Contains("Uang dikirim ke akun mana?", response.Clarifications);
+        Assert.Contains("Ke akun mana?", response.Clarifications);
         Assert.Equal(2, response.Clarifications.Count);
     }
 
@@ -943,7 +943,7 @@ public class InterpreterTests : IDisposable
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
         // Only valid field "amount" should remain
-        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Contains("Nominalnya berapa?", response.Clarifications);
         Assert.Single(response.Clarifications);
     }
 
@@ -966,7 +966,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Contains("Nominalnya berapa?", response.Clarifications);
     }
 
     // ───────────────────────── FakeInterpreter ─────────────────────────

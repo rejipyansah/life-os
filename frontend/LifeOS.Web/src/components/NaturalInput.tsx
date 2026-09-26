@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { AccountProjection, InterpretResponse, InterpretTransactionData, InterpretAllocationData } from '../types';
 import { interpret, createTransaction, createAllocation } from '../api';
 
@@ -17,30 +17,60 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<InterpretResponse | null>(null);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultZoneRef = useRef<HTMLDivElement>(null);
 
   const activeAccounts = accounts.filter(a => !a.isArchived);
+
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  const focusInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        const len = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(len, len);
+      }
+    });
+  }, []);
 
   const handleInterpret = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed) return;
+    if (!trimmed || interpreting || submitting) return;
 
     setInterpreting(true);
     setError('');
     setResult(null);
+    setSuccessMessage('');
 
     try {
       const res = await interpret(trimmed);
       setResult(res);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Gagal menginterpretasi input';
+      const msg = err instanceof Error ? err.message : '';
       if (msg.includes('503') || msg.includes('unavailable') || msg.includes('provider')) {
         setError('AI sedang tidak tersedia. Coba lagi beberapa saat.');
       } else {
-        setError(msg);
+        setError('Terjadi gangguan. Silakan coba lagi.');
       }
     } finally {
       setInterpreting(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (input.trim() && !interpreting && !submitting) {
+        handleInterpret(e as unknown as React.FormEvent);
+      }
     }
   };
 
@@ -54,10 +84,15 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
       await createTransaction(result.command);
       setInput('');
       setResult(null);
+      setSuccessMessage('Transaksi tersimpan');
       onSuccess();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Gagal membuat transaksi';
-      setError(msg);
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('503') || msg.includes('unavailable') || msg.includes('provider')) {
+        setError('AI sedang tidak tersedia. Coba lagi beberapa saat.');
+      } else {
+        setError('Gagal menyimpan. Silakan coba lagi.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -73,10 +108,15 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
       await createAllocation(result.allocationCommand);
       setInput('');
       setResult(null);
+      setSuccessMessage('Alokasi tersimpan');
       onSuccess();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Gagal membuat alokasi';
-      setError(msg);
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('503') || msg.includes('unavailable') || msg.includes('provider')) {
+        setError('AI sedang tidak tersedia. Coba lagi beberapa saat.');
+      } else {
+        setError('Gagal menyimpan. Silakan coba lagi.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -85,27 +125,36 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
   const handleEdit = () => {
     setResult(null);
     setError('');
+    focusInput();
   };
 
   const handleClear = () => {
     setInput('');
     setResult(null);
     setError('');
+    setSuccessMessage('');
+  };
+
+  const handleRetry = () => {
+    setError('');
+    setResult(null);
   };
 
   if (activeAccounts.length === 0) return null;
 
-  const hasResult = result !== null || error !== '';
+  const hasResult = interpreting || result !== null || error !== '' || successMessage !== '';
 
   return (
     <>
       <div className="natural-input-row">
         <input
+          ref={inputRef}
           type="text"
           className="natural-field"
           placeholder="Misal: jajan 18rb cash, atau transfer 100k ke bca..."
           value={input}
           onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
           disabled={interpreting || submitting}
         />
         <button
@@ -119,10 +168,30 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
       </div>
 
       {hasResult && (
-        <div className="natural-result-zone">
-          {error && <div className="res-error">{error}</div>}
+        <div className="natural-result-zone" ref={resultZoneRef}>
 
-          {result?.state === 'Ready' && result.preview && (
+          {interpreting && (
+            <div className="res-processing">
+              <span className="res-processing-spinner" />
+              <span className="res-processing-text">Memproses...</span>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="res-success">
+              <span className="res-success-check">✓</span>
+              {successMessage}
+            </div>
+          )}
+
+          {error && !interpreting && (
+            <div className="res-error-row">
+              <div className="res-error">{error}</div>
+              <button className="btn-res-retry" onClick={handleRetry}>Coba lagi</button>
+            </div>
+          )}
+
+          {!interpreting && result?.state === 'Ready' && result.preview && (
             <InterpretPreview
               data={result.preview}
               onConfirm={handleConfirm}
@@ -131,7 +200,7 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
             />
           )}
 
-          {result?.state === 'Ready' && result.allocationPreview && (
+          {!interpreting && result?.state === 'Ready' && result.allocationPreview && (
             <AllocationPreview
               data={result.allocationPreview}
               onConfirm={handleConfirmAllocation}
@@ -140,26 +209,41 @@ export default function NaturalInput({ accounts, onSuccess }: NaturalInputProps)
             />
           )}
 
-          {result?.state === 'NeedsClarification' && result.clarifications.length > 0 && (
+          {!interpreting && result?.state === 'NeedsClarification' && result.clarifications.length > 0 && (
             <div className="res-clarify">
-              <div className="res-clarify-title">Perlu sedikit konfirmasi</div>
-              {result.clarifications.map((c, i) => (
-                <div key={i} className="res-clarify-sub">{c}</div>
-              ))}
-              <button className="btn-text" onClick={handleClear} style={{ marginTop: 8, padding: '4px 0', minHeight: 'auto', fontSize: 12 }}>Kembali</button>
+              <div className="res-clarify-header">
+                <span className="res-clarify-icon">?</span>
+                <span className="res-clarify-title">Masih kurang sedikit</span>
+              </div>
+              <div className="res-clarify-list">
+                {result.clarifications.map((c, i) => (
+                  <div key={i} className="res-clarify-item">{c}</div>
+                ))}
+              </div>
+              <button className="btn-res-cancel" onClick={handleEdit} style={{ marginTop: 8 }}>Edit</button>
             </div>
           )}
 
-          {result?.state === 'Unsupported' && !error && (
-            <div className="res-clarify">
-              <div className="res-clarify-title">Belum terbaca</div>
-              <div className="res-clarify-sub">Input ini bukan transaksi keuangan. Coba sebutkan nominal (misal: <em>kopi 22k</em>).</div>
-              <button className="btn-text" onClick={handleClear} style={{ marginTop: 8, padding: '4px 0', minHeight: 'auto', fontSize: 12 }}>Kembali</button>
+          {!interpreting && result?.state === 'Unsupported' && !error && (
+            <div className="res-unsupported">
+              <div className="res-unsupported-text">
+                Input ini belum terbaca sebagai transaksi. Coba sebutkan nominal, misal: <em>kopi 22k</em>.
+              </div>
+              <button className="btn-res-cancel" onClick={handleClear}>Kembali</button>
             </div>
           )}
         </div>
       )}
     </>
+  );
+}
+
+function PreviewRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className="res-preview-row">
+      <span className="res-preview-label">{label}</span>
+      <span className={`res-preview-value${bold ? ' res-preview-value-bold' : ''}`}>{value}</span>
+    </div>
   );
 }
 
@@ -174,20 +258,24 @@ function InterpretPreview({
   onEdit: () => void;
   submitting: boolean;
 }) {
-  const metaParts: string[] = [];
-  if (data.description) metaParts.push(data.description);
-  if (data.account) metaParts.push(data.account);
-  if (data.type === 'Transfer' && data.toAccount) metaParts.push(`→ ${data.toAccount}`);
+  const rows: { label: string; value: string; bold?: boolean }[] = [];
+
+  if (data.type === 'Transfer') {
+    rows.push({ label: 'Nominal', value: formatCurrency(data.amount), bold: true });
+    if (data.account) rows.push({ label: 'Dari', value: data.account });
+    if (data.toAccount) rows.push({ label: 'Ke', value: data.toAccount });
+  } else {
+    if (data.description) rows.push({ label: 'Deskripsi', value: data.description });
+    rows.push({ label: 'Nominal', value: formatCurrency(data.amount), bold: true });
+    if (data.account) rows.push({ label: 'Akun', value: data.account });
+  }
 
   return (
     <div className="res-ready">
-      <div className="res-ready-left">
-        <span className="res-amount">
-          {data.type === 'Income' ? '+' : data.type === 'Transfer' ? '' : '–'} {formatCurrency(data.amount)}
-        </span>
-        {metaParts.length > 0 && (
-          <span className="res-meta">{metaParts.join(' · ')}</span>
-        )}
+      <div className="res-preview-fields">
+        {rows.map((row, i) => (
+          <PreviewRow key={i} label={row.label} value={row.value} bold={row.bold} />
+        ))}
       </div>
       <div className="res-actions">
         <button className="btn-res-cancel" onClick={onEdit} disabled={submitting}>
@@ -214,10 +302,10 @@ function AllocationPreview({
 }) {
   return (
     <div className="res-ready">
-      <div className="res-ready-left">
-        <span className="res-meta" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Alokasi</span>
-        <span className="res-amount">{data.name}</span>
-        <span className="res-meta">{formatCurrency(data.amount)}{data.account ? ` · ${data.account}` : ''}</span>
+      <div className="res-preview-fields">
+        {data.name && <PreviewRow label="Keperluan" value={data.name} />}
+        <PreviewRow label="Nominal" value={formatCurrency(data.amount)} bold />
+        {data.account && <PreviewRow label="Akun" value={data.account} />}
       </div>
       <div className="res-actions">
         <button className="btn-res-cancel" onClick={onEdit} disabled={submitting}>

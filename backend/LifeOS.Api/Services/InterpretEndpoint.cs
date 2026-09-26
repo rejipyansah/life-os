@@ -15,10 +15,10 @@ public static class InterpretEndpoint
 
     private static readonly Dictionary<string, string> FieldMessages = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["amount"] = "Berapa jumlahnya?",
+        ["amount"] = "Nominalnya berapa?",
         ["account"] = "Dari akun mana?",
-        ["toAccount"] = "Uang dikirim ke akun mana?",
-        ["allocationName"] = "Alokasi ini untuk apa?"
+        ["toAccount"] = "Ke akun mana?",
+        ["allocationName"] = "Untuk keperluan apa?"
     };
 
     public static async Task<HandlerResult> HandleAsync(
