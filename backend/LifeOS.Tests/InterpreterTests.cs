@@ -65,7 +65,7 @@ public class InterpreterTests : IDisposable
             Description = "Jajan",
             Account = "Cash",
             Date = "2026-09-18",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -109,7 +109,7 @@ public class InterpreterTests : IDisposable
             Description = "Gaji",
             Account = "Mandiri",
             Date = "2026-09-01",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -140,7 +140,7 @@ public class InterpreterTests : IDisposable
             Account = "Mandiri",
             ToAccount = "SeaBank",
             Date = "2026-09-18",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -161,7 +161,7 @@ public class InterpreterTests : IDisposable
         Assert.Equal(100000m, cmd.Entries[1].Amount);
     }
 
-    // ───────────────────────── 4. Clarification needed ─────────────────────────
+    // ───────────────────────── 4. Clarification: missing amount ─────────────────────────
 
     [Fact]
     public async Task Interpret_MissingInfo_ReturnsNeedsClarification()
@@ -170,19 +170,18 @@ public class InterpreterTests : IDisposable
         {
             Intent = "CreateTransaction",
             TransactionType = "Expense",
-            Amount = 18000,
-            Account = null,
-            Clarifications = ["Which account should this come from?"]
+            Account = "Cash",
+            ClarificationFields = ["amount"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
-            new InterpretInputRequest { Input = "jajan 18rb" },
+            new InterpretInputRequest { Input = "jajan" },
             fake, _scopeId, _db);
 
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("Which account should this come from?", response.Clarifications);
+        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
         Assert.Null(response.Preview);
         Assert.Null(response.Command);
     }
@@ -197,7 +196,7 @@ public class InterpreterTests : IDisposable
             Amount = 18000,
             Account = "NonExistent",
             Date = "2026-09-18",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -207,7 +206,7 @@ public class InterpreterTests : IDisposable
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("NonExistent"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
     }
 
     // ───────────────────────── 5. Unsupported input ─────────────────────────
@@ -218,7 +217,7 @@ public class InterpreterTests : IDisposable
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
             Intent = "Unsupported",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -259,7 +258,7 @@ public class InterpreterTests : IDisposable
             Amount = 18000,
             Account = "Cash",
             Date = "2026-09-18",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         await InterpretEndpoint.HandleAsync(
@@ -290,7 +289,7 @@ public class InterpreterTests : IDisposable
             Amount = 18000,
             Account = "Cash",
             Date = "2026-09-18",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         await InterpretEndpoint.HandleAsync(
@@ -322,7 +321,7 @@ public class InterpreterTests : IDisposable
                 Amount = 18000,
                 Account = "Cash",
                 Date = "2026-09-18",
-                Clarifications = []
+                ClarificationFields = []
             });
         });
 
@@ -357,7 +356,7 @@ public class InterpreterTests : IDisposable
                 Account = "Cash",
                 ToAccount = "Cash",
                 Date = "2026-09-18",
-                Clarifications = []
+                ClarificationFields = []
             },
             _accounts,
             _scopeId);
@@ -382,7 +381,7 @@ public class InterpreterTests : IDisposable
             TransactionType = "Expense",
             Amount = 18000,
             Account = "Cash",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -409,7 +408,7 @@ public class InterpreterTests : IDisposable
             ToAccount = "SeaBank",
             Date = "2026-09-18",
             FeeAmount = 2500,
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -435,7 +434,7 @@ public class InterpreterTests : IDisposable
             Amount = 50000,
             Account = "GoPay",
             Date = "2026-09-18",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -444,7 +443,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("GoPay"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Valid ─────────────────────────
@@ -458,7 +457,7 @@ public class InterpreterTests : IDisposable
             Amount = 350000,
             AllocationName = "WiFi",
             Account = "Mandiri",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -494,10 +493,9 @@ public class InterpreterTests : IDisposable
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
             Intent = "CreateAllocation",
-            Amount = null,
             AllocationName = "WiFi",
             Account = "Mandiri",
-            Clarifications = []
+            ClarificationFields = ["amount"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -506,7 +504,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("much"));
+        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Missing name ─────────────────────────
@@ -518,9 +516,8 @@ public class InterpreterTests : IDisposable
         {
             Intent = "CreateAllocation",
             Amount = 350000,
-            AllocationName = null,
             Account = "Mandiri",
-            Clarifications = []
+            ClarificationFields = ["allocationName"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -529,7 +526,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("allocation"));
+        Assert.Contains("Alokasi ini untuk apa?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Missing account ─────────────────────────
@@ -542,8 +539,7 @@ public class InterpreterTests : IDisposable
             Intent = "CreateAllocation",
             Amount = 350000,
             AllocationName = "WiFi",
-            Account = null,
-            Clarifications = []
+            ClarificationFields = ["account"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -552,7 +548,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("account"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Invalid account ─────────────────────────
@@ -566,7 +562,7 @@ public class InterpreterTests : IDisposable
             Amount = 350000,
             AllocationName = "WiFi",
             Account = "GoPay",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -575,7 +571,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("GoPay"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
     }
 
     // ───────────────────────── Allocation: No persistence ─────────────────────────
@@ -591,7 +587,7 @@ public class InterpreterTests : IDisposable
             Amount = 350000,
             AllocationName = "WiFi",
             Account = "Mandiri",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         await InterpretEndpoint.HandleAsync(
@@ -612,7 +608,7 @@ public class InterpreterTests : IDisposable
             Amount = 350000,
             AllocationName = "WiFi",
             Account = "Mandiri",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         await InterpretEndpoint.HandleAsync(
@@ -624,10 +620,10 @@ public class InterpreterTests : IDisposable
             Assert.False(Guid.TryParse(account, out _), $"Account should be a name, not a GUID: {account}"));
     }
 
-    // ───────────────────────── Allocation: AI clarifications pass through ─────────────────────────
+    // ───────────────────────── Allocation: Invalid AI field is filtered ─────────────────────────
 
     [Fact]
-    public async Task Interpret_Allocation_AiClarifications_PassThrough()
+    public async Task Interpret_Allocation_InvalidAiField_Filtered()
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
@@ -635,16 +631,17 @@ public class InterpreterTests : IDisposable
             Amount = 350000,
             AllocationName = "WiFi",
             Account = "Mandiri",
-            Clarifications = ["How often should this allocation repeat?"]
+            ClarificationFields = ["invalid_field", "amount"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
-            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi" },
+            new InterpretInputRequest { Input = "sisihkan 350rb buat wifi dari mandiri" },
             fake, _scopeId, _db);
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains("How often", response.Clarifications[0]);
+        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Single(response.Clarifications);
     }
 
     // ───────────────────────── Allocation: Zero amount ─────────────────────────
@@ -658,7 +655,7 @@ public class InterpreterTests : IDisposable
             Amount = 0,
             AllocationName = "WiFi",
             Account = "Mandiri",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -682,7 +679,7 @@ public class InterpreterTests : IDisposable
             Account = "Cash",
             ToAccount = "SeaBank",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -691,7 +688,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("transferring from"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
         Assert.Null(response.Command);
     }
 
@@ -706,7 +703,7 @@ public class InterpreterTests : IDisposable
             Account = "Mandiri",
             ToAccount = "SeaBank",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -715,7 +712,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("transferring to"));
+        Assert.Contains("Uang dikirim ke akun mana?", response.Clarifications);
         Assert.Null(response.Command);
     }
 
@@ -730,7 +727,7 @@ public class InterpreterTests : IDisposable
             Account = "Cash",
             ToAccount = "Mandiri",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -739,7 +736,8 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("transferring from"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
+        Assert.Contains("Uang dikirim ke akun mana?", response.Clarifications);
         Assert.Null(response.Command);
     }
 
@@ -754,7 +752,7 @@ public class InterpreterTests : IDisposable
             Account = "Mandiri",
             ToAccount = "SeaBank",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -780,7 +778,7 @@ public class InterpreterTests : IDisposable
             Account = "Mandiri",
             ToAccount = "SeaBank",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -805,7 +803,7 @@ public class InterpreterTests : IDisposable
             Account = "SeaBank",
             ToAccount = "Mandiri",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -814,7 +812,7 @@ public class InterpreterTests : IDisposable
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("transferring from"));
+        Assert.Contains("Dari akun mana?", response.Clarifications);
         Assert.Null(response.Command);
     }
 
@@ -830,7 +828,7 @@ public class InterpreterTests : IDisposable
             Amount = 18000,
             Account = "Cash",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -852,7 +850,7 @@ public class InterpreterTests : IDisposable
             Amount = 5000000,
             Account = "Mandiri",
             Date = "2026-09-25",
-            Clarifications = []
+            ClarificationFields = []
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -864,10 +862,68 @@ public class InterpreterTests : IDisposable
         Assert.NotNull(response.Command);
     }
 
-    // ───────────────────────── Placeholder clarification filtering ─────────────────────────
+    // ───────────────────────── Field merging: AI + deterministic ─────────────────────────
 
     [Fact]
-    public async Task Interpret_PlaceholderClarification_FallsThroughToValidation()
+    public async Task Interpret_Transfer_AiFieldsAndDeterministicFieldsMerged()
+    {
+        // AI says account is missing, but toAccount is provided and valid in input
+        // Backend should also detect toAccount mention and not add it
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = null,
+            ToAccount = "SeaBank",
+            Date = "2026-09-25",
+            ClarificationFields = ["account"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb ke SeaBank" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        // Only account should be in clarification, not toAccount (it's valid in input)
+        Assert.Contains("Dari akun mana?", response.Clarifications);
+        Assert.Single(response.Clarifications);
+    }
+
+    // ───────────────────────── Field dedup: same field from AI + deterministic ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Transfer_DuplicateFields_Deduplicated()
+    {
+        // AI says both account and toAccount missing, backend also detects account missing
+        // "account" should appear only once
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Transfer",
+            Amount = 100000,
+            Account = null,
+            ToAccount = null,
+            Date = "2026-09-25",
+            ClarificationFields = ["account", "toAccount"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "transfer 100rb" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains("Dari akun mana?", response.Clarifications);
+        Assert.Contains("Uang dikirim ke akun mana?", response.Clarifications);
+        Assert.Equal(2, response.Clarifications.Count);
+    }
+
+    // ───────────────────────── AI sends invalid field → filtered ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Transfer_InvalidAiField_Filtered()
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
@@ -877,7 +933,7 @@ public class InterpreterTests : IDisposable
             Account = "Mandiri",
             ToAccount = "SeaBank",
             Date = "2026-09-25",
-            Clarifications = ["string"]
+            ClarificationFields = ["free_text_clarification", "amount"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -885,8 +941,32 @@ public class InterpreterTests : IDisposable
             fake, _scopeId, _db);
 
         var response = Assert.IsType<InterpretResponse>(result.Body);
-        Assert.Equal("Ready", response.State);
-        Assert.NotNull(response.Command);
+        Assert.Equal("NeedsClarification", response.State);
+        // Only valid field "amount" should remain
+        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
+        Assert.Single(response.Clarifications);
+    }
+
+    // ───────────────────────── Expense/Income: missing amount → field-based ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_Expense_MissingAmount_ReturnsFieldClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Expense",
+            Account = "Cash",
+            ClarificationFields = ["amount"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "jajan" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains("Berapa jumlahnya?", response.Clarifications);
     }
 
     // ───────────────────────── FakeInterpreter ─────────────────────────

@@ -8,6 +8,19 @@ public static class InterpretEndpoint
 {
     public record HandlerResult(int StatusCode, object Body);
 
+    private static readonly HashSet<string> ValidFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "amount", "account", "toAccount", "allocationName"
+    };
+
+    private static readonly Dictionary<string, string> FieldMessages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["amount"] = "Berapa jumlahnya?",
+        ["account"] = "Dari akun mana?",
+        ["toAccount"] = "Uang dikirim ke akun mana?",
+        ["allocationName"] = "Alokasi ini untuk apa?"
+    };
+
     public static async Task<HandlerResult> HandleAsync(
         InterpretInputRequest body,
         IInterpreter interpreter,
@@ -65,74 +78,157 @@ public static class InterpretEndpoint
             {
                 Intent = "Unsupported",
                 State = "Unsupported",
-                Clarifications = raw.Clarifications.Count > 0
-                    ? raw.Clarifications
-                    : ["This input doesn't match any supported financial action."]
+                Clarifications = ["This input doesn't match any supported financial action."]
             };
         }
 
-        if (raw.Clarifications.Count > 0)
-        {
-            var cleanClarifications = raw.Clarifications
-                .Where(c => !string.IsNullOrWhiteSpace(c) && c.Trim().Length > 1 && c.Trim() != "string")
-                .ToList();
+        var fields = raw.ClarificationFields
+            .Where(f => ValidFields.Contains(f))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            if (cleanClarifications.Count > 0)
+        if (raw.Intent == "CreateAllocation")
+        {
+            CollectAllocationFields(raw, eligibleAccounts, fields);
+            return BuildResponse(raw, fields, eligibleAccounts, scopeId);
+        }
+
+        CollectTransactionFields(raw, eligibleAccounts, scopeId, userInput, fields);
+        return BuildResponse(raw, fields, eligibleAccounts, scopeId);
+    }
+
+    private static void CollectAllocationFields(
+        InterpretResult raw,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        List<string> fields)
+    {
+        if (!raw.Amount.HasValue || raw.Amount <= 0)
+            AddField(fields, "amount");
+
+        if (string.IsNullOrWhiteSpace(raw.AllocationName))
+            AddField(fields, "allocationName");
+
+        if (string.IsNullOrEmpty(raw.Account))
+        {
+            AddField(fields, "account");
+        }
+        else
+        {
+            var accountNameLookup = eligibleAccounts.ToDictionary(
+                a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
+
+            if (!accountNameLookup.ContainsKey(raw.Account))
+                AddField(fields, "account");
+        }
+    }
+
+    private static void CollectTransactionFields(
+        InterpretResult raw,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        Guid scopeId,
+        string userInput,
+        List<string> fields)
+    {
+        if (string.IsNullOrEmpty(raw.TransactionType) || !raw.Amount.HasValue || raw.Amount <= 0)
+        {
+            if (string.IsNullOrEmpty(raw.TransactionType))
             {
-                return new InterpretResponse
-                {
-                    Intent = raw.Intent,
-                    State = "NeedsClarification",
-                    Clarifications = cleanClarifications
-                };
+                AddField(fields, "account");
             }
+
+            if (!raw.Amount.HasValue || raw.Amount <= 0)
+                AddField(fields, "amount");
+
+            return;
+        }
+
+        if (raw.TransactionType is not ("Expense" or "Income" or "Transfer"))
+            return;
+
+        if (string.IsNullOrEmpty(raw.Account))
+        {
+            AddField(fields, "account");
+        }
+        else
+        {
+            var accountNameLookup = eligibleAccounts.ToDictionary(
+                a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
+
+            if (!accountNameLookup.ContainsKey(raw.Account))
+                AddField(fields, "account");
+        }
+
+        if (raw.TransactionType == "Transfer")
+        {
+            if (string.IsNullOrEmpty(raw.ToAccount))
+            {
+                AddField(fields, "toAccount");
+            }
+            else
+            {
+                var accountNameLookup = eligibleAccounts.ToDictionary(
+                    a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
+
+                if (!accountNameLookup.TryGetValue(raw.ToAccount, out var _))
+                {
+                    AddField(fields, "toAccount");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(userInput) && !fields.Contains("account", StringComparer.OrdinalIgnoreCase))
+            {
+                if (!IsAccountMentionedInInput(raw.Account!, userInput))
+                    AddField(fields, "account");
+            }
+
+            if (!string.IsNullOrEmpty(userInput) && !fields.Contains("toAccount", StringComparer.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrEmpty(raw.ToAccount) && !IsAccountMentionedInInput(raw.ToAccount, userInput))
+                    AddField(fields, "toAccount");
+            }
+        }
+    }
+
+    private static void AddField(List<string> fields, string field)
+    {
+        if (!fields.Contains(field, StringComparer.OrdinalIgnoreCase))
+            fields.Add(field);
+    }
+
+    private static InterpretResponse BuildResponse(
+        InterpretResult raw,
+        List<string> fields,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        Guid scopeId)
+    {
+        if (fields.Count > 0)
+        {
+            return new InterpretResponse
+            {
+                Intent = raw.Intent,
+                State = "NeedsClarification",
+                Clarifications = fields
+                    .Where(f => FieldMessages.ContainsKey(f))
+                    .Select(f => FieldMessages[f])
+                    .ToList()
+            };
         }
 
         if (raw.Intent == "CreateAllocation")
-            return ValidateAllocation(raw, eligibleAccounts, scopeId);
+            return BuildAllocationReady(raw, eligibleAccounts, scopeId);
 
-        return ValidateTransaction(raw, eligibleAccounts, scopeId, userInput);
+        return BuildTransactionReady(raw, eligibleAccounts, scopeId);
     }
 
-    private static InterpretResponse ValidateAllocation(
+    private static InterpretResponse BuildAllocationReady(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
         Guid scopeId)
     {
-        if (!raw.Amount.HasValue || raw.Amount <= 0)
-        {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = ["How much do you want to set aside?"]
-            };
-        }
-
-        if (string.IsNullOrWhiteSpace(raw.AllocationName))
-        {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = ["What is this allocation for? (e.g., WiFi, Vacation, Emergency Fund)"]
-            };
-        }
-
-        if (string.IsNullOrEmpty(raw.Account))
-        {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = ["Which account? Available: " + string.Join(", ", eligibleAccounts.Select(a => a.Name))]
-            };
-        }
-
         var accountNameLookup = eligibleAccounts.ToDictionary(
             a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
 
-        if (!accountNameLookup.TryGetValue(raw.Account, out var accountId))
+        if (!accountNameLookup.TryGetValue(raw.Account!, out var accountId))
         {
             return new InterpretResponse
             {
@@ -167,46 +263,15 @@ public static class InterpretEndpoint
         };
     }
 
-    private static InterpretResponse ValidateTransaction(
+    private static InterpretResponse BuildTransactionReady(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
-        Guid scopeId,
-        string userInput = "")
+        Guid scopeId)
     {
-        if (string.IsNullOrEmpty(raw.TransactionType) || !raw.Amount.HasValue || raw.Amount <= 0)
-        {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = ["Missing required information. Please specify the type and amount."]
-            };
-        }
-
-        if (raw.TransactionType is not ("Expense" or "Income" or "Transfer"))
-        {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = [$"Unsupported transaction type: {raw.TransactionType}"]
-            };
-        }
-
-        if (string.IsNullOrEmpty(raw.Account))
-        {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = ["Which account? Available: " + string.Join(", ", eligibleAccounts.Select(a => a.Name))]
-            };
-        }
-
         var accountNameLookup = eligibleAccounts.ToDictionary(
             a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
 
-        if (!accountNameLookup.TryGetValue(raw.Account, out var accountId))
+        if (!accountNameLookup.TryGetValue(raw.Account!, out var accountId))
         {
             return new InterpretResponse
             {
@@ -218,17 +283,7 @@ public static class InterpretEndpoint
 
         if (raw.TransactionType == "Transfer")
         {
-            if (string.IsNullOrEmpty(raw.ToAccount))
-            {
-                return new InterpretResponse
-                {
-                    Intent = raw.Intent,
-                    State = "NeedsClarification",
-                    Clarifications = ["Which destination account? Available: " + string.Join(", ", eligibleAccounts.Select(a => a.Name))]
-                };
-            }
-
-            if (!accountNameLookup.TryGetValue(raw.ToAccount, out var toAccountId))
+            if (!accountNameLookup.TryGetValue(raw.ToAccount!, out var toAccountId))
             {
                 return new InterpretResponse
                 {
@@ -246,29 +301,6 @@ public static class InterpretEndpoint
                     State = "NeedsClarification",
                     Clarifications = ["Source and destination accounts must be different."]
                 };
-            }
-
-            if (!string.IsNullOrEmpty(userInput))
-            {
-                if (!IsAccountMentionedInInput(raw.Account!, userInput))
-                {
-                    return new InterpretResponse
-                    {
-                        Intent = raw.Intent,
-                        State = "NeedsClarification",
-                        Clarifications = [$"Which account are you transferring from? Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
-                    };
-                }
-
-                if (!IsAccountMentionedInInput(raw.ToAccount!, userInput))
-                {
-                    return new InterpretResponse
-                    {
-                        Intent = raw.Intent,
-                        State = "NeedsClarification",
-                        Clarifications = [$"Which account are you transferring to? Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
-                    };
-                }
             }
         }
 

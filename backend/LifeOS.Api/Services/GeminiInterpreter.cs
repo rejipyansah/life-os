@@ -50,10 +50,10 @@ public class GeminiInterpreter : IInterpreter
 
             var text = response.Candidates?[0]?.Content?.Parts?[0]?.Text;
             if (string.IsNullOrEmpty(text))
-                return new InterpretResult { Intent = "Unsupported", Clarifications = ["Empty response from AI provider."] };
+                return new InterpretResult { Intent = "Unsupported", ClarificationFields = ["amount"] };
 
             return JsonSerializer.Deserialize<InterpretResult>(text, JsonOptions)
-                ?? new InterpretResult { Intent = "Unsupported", Clarifications = ["Failed to parse AI response."] };
+                ?? new InterpretResult { Intent = "Unsupported", ClarificationFields = ["amount"] };
         }
         catch (InterpreterProviderException)
         {
@@ -83,7 +83,7 @@ public class GeminiInterpreter : IInterpreter
             - For CreateAllocation: setting aside money for a purpose (a reservation/intention, NOT a transaction). Amount is positive. Account is where the funds are reserved. allocationName is the purpose/name (e.g., "WiFi", "Vacation", "Emergency Fund").
             - Never fabricate account names. Only use names from the provided list.
             - Return intent="Unsupported" if the input is not a financial action.
-            - If you need more information (e.g., which account, how much), add a clarification message and leave the missing field null.
+            - If a required field is missing or ambiguous, add the field name to clarificationFields (e.g. "amount", "account", "toAccount", "allocationName"). Do NOT write free-text clarification messages.
             - Use today's date as the default date if not specified.
             - Date format: YYYY-MM-DD.
             """;
@@ -105,11 +105,11 @@ public class GeminiInterpreter : IInterpreter
                 { "date", new Schema { Type = Google.GenAI.Types.Type.String } },
                 { "feeAmount", new Schema { Type = Google.GenAI.Types.Type.Number } },
                 { "allocationName", new Schema { Type = Google.GenAI.Types.Type.String } },
-                { "clarifications", new Schema { Type = Google.GenAI.Types.Type.Array, Items = new Schema { Type = Google.GenAI.Types.Type.String } } }
+                { "clarificationFields", new Schema { Type = Google.GenAI.Types.Type.Array, Items = new Schema { Type = Google.GenAI.Types.Type.String, Enum = ["amount", "account", "toAccount", "allocationName"] } } }
             },
-            Required = ["intent", "clarifications"],
+            Required = ["intent", "clarificationFields"],
             Title = "FinanceInterpretation",
-            PropertyOrdering = ["intent", "transactionType", "amount", "description", "account", "toAccount", "date", "feeAmount", "allocationName", "clarifications"]
+            PropertyOrdering = ["intent", "transactionType", "amount", "description", "account", "toAccount", "date", "feeAmount", "allocationName", "clarificationFields"]
         };
     }
 }

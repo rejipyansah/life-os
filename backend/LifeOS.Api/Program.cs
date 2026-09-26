@@ -111,7 +111,14 @@ builder.Services.AddScoped<GuestTokenService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<AllocationService>();
 builder.Services.AddScoped<AccountService>();
-builder.Services.AddScoped<IInterpreter, GeminiInterpreter>();
+builder.Services.AddScoped<IInterpreter>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var provider = config["AI:Provider"] ?? "Gemini";
+    return provider.Equals("Groq", StringComparison.OrdinalIgnoreCase)
+        ? new GroqInterpreter(config)
+        : new GeminiInterpreter(config);
+});
 
 builder.Services.AddOpenApi();
 

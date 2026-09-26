@@ -25,7 +25,7 @@ public class InterpretResultDeserializationTests
             "toAccount": null,
             "date": "2026-09-18",
             "feeAmount": null,
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -40,7 +40,7 @@ public class InterpretResultDeserializationTests
         Assert.Null(result.ToAccount);
         Assert.Equal("2026-09-18", result.Date);
         Assert.Null(result.FeeAmount);
-        Assert.Empty(result.Clarifications);
+        Assert.Empty(result.ClarificationFields);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class InterpretResultDeserializationTests
             "account": "Mandiri",
             "toAccount": "SeaBank",
             "date": "2026-09-18",
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -73,7 +73,7 @@ public class InterpretResultDeserializationTests
         var json = """
         {
             "intent": "Unsupported",
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -86,7 +86,7 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_WithClarifications_GeminiOutput()
+    public void Deserialize_WithClarificationFields_GeminiOutput()
     {
         var json = """
         {
@@ -95,7 +95,7 @@ public class InterpretResultDeserializationTests
             "amount": 18000,
             "account": null,
             "date": "2026-09-18",
-            "clarifications": ["Which account should this come from?"]
+            "clarificationFields": ["account"]
         }
         """;
 
@@ -103,8 +103,8 @@ public class InterpretResultDeserializationTests
 
         Assert.NotNull(result);
         Assert.Null(result.Account);
-        Assert.Single(result.Clarifications);
-        Assert.Contains("Which account", result.Clarifications[0]);
+        Assert.Single(result.ClarificationFields);
+        Assert.Contains("account", result.ClarificationFields);
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class InterpretResultDeserializationTests
         var json = """
         {
             "intent": "CreateTransaction",
-            "clarifications": ["Need more info"]
+            "clarificationFields": ["account", "amount"]
         }
         """;
 
@@ -137,7 +137,7 @@ public class InterpretResultDeserializationTests
             "transactionType": "Income",
             "amount": 5000000,
             "account": "Mandiri",
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -157,7 +157,7 @@ public class InterpretResultDeserializationTests
             "transactionType": "Expense",
             "amount": 18500.50,
             "account": "Cash",
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -185,7 +185,7 @@ public class InterpretResultDeserializationTests
         Assert.Equal("", result.Intent);
         Assert.Null(result.TransactionType);
         Assert.Null(result.Amount);
-        Assert.Empty(result.Clarifications);
+        Assert.Empty(result.ClarificationFields);
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public class InterpretResultDeserializationTests
             "amount": 350000,
             "allocationName": "WiFi",
             "account": "Mandiri",
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -209,7 +209,7 @@ public class InterpretResultDeserializationTests
         Assert.Equal("WiFi", result.AllocationName);
         Assert.Equal("Mandiri", result.Account);
         Assert.Null(result.TransactionType);
-        Assert.Empty(result.Clarifications);
+        Assert.Empty(result.ClarificationFields);
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public class InterpretResultDeserializationTests
             "intent": "CreateAllocation",
             "amount": 350000,
             "account": "Mandiri",
-            "clarifications": []
+            "clarificationFields": []
         }
         """;
 
@@ -240,7 +240,7 @@ public class InterpretResultDeserializationTests
             "transactionType": "Expense",
             "amount": 18000,
             "account": "Cash",
-            "clarifications": [],
+            "clarificationFields": [],
             "scopeId": "should-be-ignored",
             "accountId": "should-be-ignored",
             "userId": "should-be-ignored"

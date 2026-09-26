@@ -25,7 +25,7 @@ public class InterpretResult
     public string? Date { get; set; }
     public decimal? FeeAmount { get; set; }
     public string? AllocationName { get; set; }
-    public List<string> Clarifications { get; set; } = [];
+    public List<string> ClarificationFields { get; set; } = [];
 }
 
 public class InterpretResponse
