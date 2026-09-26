@@ -16,6 +16,10 @@ It is a personal operating system that lives alongside its user.
 
 The interface should feel like a tool the user opens to do something, not a dashboard they manage.
 
+**What Life OS is not:**
+
+Life OS should never feel like a generic SaaS product, an enterprise dashboard, a wellness app, a fintech template, or an overly decorative marketing UI. These patterns erode the personal, calm character that defines the product.
+
 ---
 
 ## Visual Principles
@@ -24,9 +28,17 @@ The interface should feel like a tool the user opens to do something, not a dash
 
 Life OS should feel private and considered. It should not shout.
 
+**Atmosphere is part of the experience.**
+
+Life OS should feel like a personal space users want to return to, not merely a functional data-entry application. Subtle gradients, soft color transitions, atmospheric backgrounds, and layered surfaces are allowed when they strengthen the feeling of Life OS. Visual atmosphere is part of the product experience.
+
+**Gradients are allowed, but must remain restrained.**
+
+Gradients may support atmosphere and depth without hurting readability, hierarchy, contrast, or usability. They should never compete with content or become the focal point.
+
 **Functional over decorative.**
 
-Every visual element should serve a purpose. If it does not help the user understand or act, it does not belong.
+Every visual element should serve a purpose. If it does not help the user understand or act, it does not belong. Functional clarity, accessibility, hierarchy, and usability remain more important than decoration.
 
 **Information hierarchy over excessive containers.**
 
@@ -38,7 +50,23 @@ Cards are acceptable when they provide real grouping value. They are not the def
 
 **Avoid visual noise.**
 
-No gradients. No glassmorphism. No excessive shadows. No excessive rounded cards. No decorative illustrations. No unnecessary charts. Avoid excessive icon usage. Do not add UI libraries just to make the interface look "modern".
+No glassmorphism. No excessive shadows. No excessive rounded cards. No decorative illustrations. No unnecessary charts. Avoid excessive icon usage. Visual noise is anything that competes with the user's focus without adding meaning.
+
+---
+
+## Implementation Technology
+
+**Tailwind CSS is approved.**
+
+Tailwind CSS may be used to translate and maintain the Life OS design system. It is a tooling choice, not the source of design decisions.
+
+**Life OS visual language is the source of truth.**
+
+Design decisions originate from the principles in this document, not from Tailwind's defaults or utility patterns. Tailwind serves the design, not the other way around.
+
+**Stitch prototypes as visual references.**
+
+Stitch prototypes may be used as visual references when they successfully express the intended Life OS character. They are references, not specifications. Implementation decisions should still follow the principles above.
 
 ---
 
