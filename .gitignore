@@ -6,6 +6,9 @@ obj/
 node_modules/
 dist/
 
+backend/GeminiBenchmark/
+backend/ProviderBenchmark/
+
 # Environment / secrets
 .env
 .env.*

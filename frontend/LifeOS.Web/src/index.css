@@ -1,3 +1,24 @@
+@import "tailwindcss";
+@source "../src";
+
+@theme {
+  --font-headline: "Literata", serif;
+  --font-body: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --color-lo-primary: #1c3f2e;
+  --color-lo-primary-hover: #254f3a;
+  --color-lo-on-primary: #ffffff;
+  --color-lo-surface: #f5fbf4;
+  --color-lo-surface-container: #e9efe9;
+  --color-lo-on-surface: #171d19;
+  --color-lo-on-surface-variant: #414843;
+  --color-lo-text-subtle: #5E7064;
+  --color-lo-outline-variant: #c1c8c2;
+  --color-lo-border-hairline: #D5E0D3;
+  --color-lo-error: #ba1a1a;
+  --color-lo-error-container: #ffdad6;
+}
+
 :root {
   --color-bg: #f8f7f4;
   --color-surface: #ffffff;
@@ -17,22 +38,18 @@
   --radius-sm: 6px;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: #eae7df;
+    color: var(--color-text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-body {
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #eae7df;
-  color: var(--color-text);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-input, select, button {
-  font-family: inherit;
-  font-size: 1rem;
+  input, select, button {
+    font-family: inherit;
+    font-size: 1rem;
+  }
 }
