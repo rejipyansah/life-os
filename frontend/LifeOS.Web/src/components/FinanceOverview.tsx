@@ -14,6 +14,7 @@ interface FinanceOverviewProps {
   isGuest: boolean;
   onLogout: () => void;
   onRequestLogin: () => void;
+  onBackToHome?: () => void;
 }
 
 function formatCurrency(amount: number): string {
@@ -22,7 +23,7 @@ function formatCurrency(amount: number): string {
 
 type View = 'overview' | 'add-transaction' | 'create-account' | 'edit-account' | 'transaction-detail' | 'add-allocation' | 'edit-allocation';
 
-export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: FinanceOverviewProps) {
+export default function FinanceOverview({ isGuest, onLogout, onRequestLogin, onBackToHome }: FinanceOverviewProps) {
   const [accounts, setAccounts] = useState<AccountListProjection | null>(null);
   const [transactions, setTransactions] = useState<TransactionProjection[]>([]);
   const [allocations, setAllocations] = useState<AllocationProjection[]>([]);
@@ -269,6 +270,11 @@ export default function FinanceOverview({ isGuest, onLogout, onRequestLogin }: F
     <div className="finance-screen">
       <header className="app-header">
         <div className="header-left">
+          {onBackToHome && (
+            <button className="btn-header-action" onClick={onBackToHome}>
+              Beranda
+            </button>
+          )}
           <span className="brand-mark">Life OS</span>
           <div className="domain-crumb">
             <span className="active">Keuangan</span>

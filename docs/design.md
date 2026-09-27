@@ -140,6 +140,34 @@ The user should not experience moving between unrelated applications when switch
 
 ---
 
+## Home / Beranda
+
+**Home is context, not a dashboard.**
+
+Home surfaces what is meaningful now. It is not a screen that exposes every available metric or module. Home provides context and direction; modules provide deeper interaction and detail.
+
+**State-driven sections.**
+
+Sections appear based on meaningful state. The interface does not preserve empty sections to maintain a fixed layout. No active target means no progress section. No relevant current items means no "Penting Sekarang" section.
+
+**Evidence over motivation.**
+
+Progress is shown through concrete evidence rather than motivational language, gamification, or artificial encouragement. Show the evidence and let the user interpret its meaning.
+
+**Same information across responsive compositions.**
+
+Desktop and mobile may use different layouts, density, and interaction presentation. They must preserve the same information, data, state, semantic meaning, and available actions. Responsive design may change presentation but must not remove a capability because the user changed device.
+
+**Desktop and mobile composition.**
+
+Desktop uses an asymmetric two-column editorial grid (7/5 split). Mobile uses a single stacked column. Navigation adapts: bottom tab bar on mobile, top navigation bar on desktop. The same destinations and same enabled/disabled states apply on both.
+
+**Quiet visual direction.**
+
+Home follows the same visual language as the rest of Life OS: calm atmosphere, organic surfaces, restrained elevation, hairline borders. No glassmorphism, no unnecessary cards, no decorative charts, no excessive icon usage.
+
+---
+
 ## What This Document Is Not
 
 - Not a full color palette or typography scale.

@@ -5,10 +5,12 @@ import { getAuthMe, resumeGuestSession, logout } from './api';
 import EntryScreen from './components/EntryScreen';
 import LoginScreen from './components/LoginScreen';
 import FinanceOverview from './components/FinanceOverview';
+import HomeScreen from './components/HomeScreen';
+import type { NavDestination } from './components/Home/navItems';
 
 import './App.css';
 
-type AppState = 'checking' | 'entry' | 'login' | 'finance';
+type AppState = 'checking' | 'entry' | 'login' | 'home' | 'finance';
 
 function getInitialState(): AppState {
   if (
@@ -39,7 +41,7 @@ function App() {
         if (cancelled) return;
 
         if (auth) {
-          setState('finance');
+          setState('home');
           setIsGuest(false);
           return;
         }
@@ -54,7 +56,7 @@ function App() {
         if (guestResult.isNew) {
           setState('entry');
         } else {
-          setState('finance');
+          setState('home');
         }
       })
       .catch(() => {
@@ -70,7 +72,7 @@ function App() {
 
   const handleEnter = (guest: boolean) => {
     setIsGuest(guest);
-    setState('finance');
+    setState('home');
   };
 
   const handleLogout = async () => {
@@ -89,6 +91,18 @@ function App() {
   const handleRequestLogin = (origin: 'entry' | 'finance') => {
     setLoginOrigin(origin);
     setState('login');
+  };
+
+  const handleHomeNavigate = (dest: NavDestination) => {
+    if (dest === 'keuangan') {
+      setState('finance');
+    }
+    // 'beranda', 'jurnal', 'target' remain on home for now
+    // jurnal and target are not yet implemented
+  };
+
+  const handleFinanceBackToHome = () => {
+    setState('home');
   };
 
   if (state === 'checking') {
@@ -120,9 +134,19 @@ function App() {
               setState('entry');
             } else {
               setIsGuest(true);
-              setState('finance');
+              setState('home');
             }
           }}
+        />
+      </div>
+    );
+  }
+
+  if (state === 'home') {
+    return (
+      <div className="app">
+        <HomeScreen
+          onNavigate={handleHomeNavigate}
         />
       </div>
     );
@@ -134,6 +158,7 @@ function App() {
         isGuest={isGuest}
         onLogout={handleLogout}
         onRequestLogin={() => handleRequestLogin('finance')}
+        onBackToHome={handleFinanceBackToHome}
       />
     </div>
   );
