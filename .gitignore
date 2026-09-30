@@ -5,6 +5,7 @@ obj/
 # Node / Vite
 node_modules/
 dist/
+AGENTS.md
 
 backend/GeminiBenchmark/
 backend/ProviderBenchmark/

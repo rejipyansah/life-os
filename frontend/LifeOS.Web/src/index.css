@@ -17,6 +17,20 @@
   --color-lo-border-hairline: #D5E0D3;
   --color-lo-error: #ba1a1a;
   --color-lo-error-container: #ffdad6;
+
+  /* Finance final design tokens (DESIGN.md — Calm Personal Companion) */
+  --color-lo-surface-cream: #f7faf5;
+  --color-lo-surface-recessed: #e5ede3;
+  --color-lo-container-low: #eff5ee;
+  --color-lo-accent-wash: #e1ebe0;
+  --color-lo-text-ink: #18241d;
+  --color-lo-secondary: #336946;
+  --color-lo-secondary-hover: #2d5a43;
+  --color-lo-secondary-container: #b5f0c4;
+  --color-lo-on-secondary-container: #195130;
+  --color-lo-warning: #c77048;
+  --color-lo-warning-soft: #fdf4ef;
+  --color-lo-border-subtle: #e5ede3;
 }
 
 :root {

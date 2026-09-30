@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { createGuestSession } from '../api';
 import BrandLogo from './BrandLogo';
 import ObservationCard from './ObservationCard';
+import AppFooter from './AppFooter';
 
 interface EntryScreenProps {
   onEnter: (isGuest: boolean) => void;
@@ -27,14 +28,14 @@ export default function EntryScreen({ onEnter, onRequestLogin }: EntryScreenProp
 
   return (
     <main
-      className="w-full flex-1 min-h-0 flex flex-col justify-between px-6 py-6 md:px-10 md:py-8 lg:px-20 lg:py-10 antialiased"
+      className="w-full flex-1 min-h-0 flex flex-col antialiased"
       style={{
         background:
           'radial-gradient(90% 70% at 85% 45%, rgba(200, 224, 206, 0.45) 0%, rgba(245, 251, 244, 0.2) 65%), radial-gradient(120% 80% at 50% 0%, rgb(245, 251, 244) 0%, rgb(237, 245, 236) 55%, rgb(228, 238, 226) 100%)',
       }}
     >
-      <div className="flex-1 w-full max-w-6xl mx-auto flex items-center justify-center">
-        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center my-auto">
+      <div className="flex-1 w-full max-w-6xl mx-auto flex items-center justify-center px-6 py-6 md:px-10 md:py-8 lg:px-20 lg:py-10">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start lg:items-center my-auto">
           {/* Left column — narrative */}
           <div className="lg:col-span-7 flex flex-col justify-center space-y-6 lg:space-y-7">
             <BrandLogo size="md" showEdition />
@@ -125,12 +126,7 @@ export default function EntryScreen({ onEnter, onRequestLogin }: EntryScreenProp
         </div>
       </div>
 
-      {/* Footer */}
-      <footer className="w-full max-w-6xl mx-auto pb-6 flex items-center justify-between text-[#5E7064] text-xs font-body border-t border-[#d5e0d3]/40 pt-6">
-        <span className="tracking-wide opacity-80">
-          Designed &amp; built by Reji Pikriyansah
-        </span>
-      </footer>
+      <AppFooter />
     </main>
   );
 }

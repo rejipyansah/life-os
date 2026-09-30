@@ -12,6 +12,7 @@ import {
 } from './Home/homePrototypeData';
 import type { NavDestination } from './Home/navItems';
 import Navigation from './Navigation';
+import AppFooter from './AppFooter';
 
 interface HomeScreenProps {
   onNavigate: (dest: NavDestination) => void;
@@ -76,12 +77,7 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="w-full py-6 px-5 md:px-6 lg:px-12 flex justify-center items-center mt-auto">
-        <p className="text-xs text-lo-text-subtle tracking-normal opacity-80 text-center">
-          Designed &amp; built by Reji Pikriyansah
-        </p>
-      </footer>
+      <AppFooter />
     </div>
   );
 }

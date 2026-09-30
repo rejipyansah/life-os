@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
 
-import { getAuthMe, resumeGuestSession, logout } from './api';
+import { getAuthMe, resumeGuestSession } from './api';
 
 import EntryScreen from './components/EntryScreen';
 import LoginScreen from './components/LoginScreen';
-import FinanceOverview from './components/FinanceOverview';
+import FinancePage from './components/finance/FinancePage';
 import HomeScreen from './components/HomeScreen';
 import type { NavDestination } from './components/Home/navItems';
-
-import './App.css';
 
 type AppState = 'checking' | 'entry' | 'login' | 'home' | 'finance';
 
@@ -75,19 +73,6 @@ function App() {
     setState('home');
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      // proceed with local logout even if server call fails
-    }
-
-    sessionStorage.setItem('just_logged_out', '1');
-
-    setIsGuest(false);
-    setState('entry');
-  };
-
   const handleRequestLogin = (origin: 'entry' | 'finance') => {
     setLoginOrigin(origin);
     setState('login');
@@ -97,25 +82,29 @@ function App() {
     if (dest === 'keuangan') {
       setState('finance');
     }
-    // 'beranda', 'jurnal', 'target' remain on home for now
-    // jurnal and target are not yet implemented
   };
 
   const handleFinanceBackToHome = () => {
     setState('home');
   };
 
+  const handleFinanceNavigate = (dest: NavDestination) => {
+    if (dest === 'beranda') {
+      setState('home');
+    }
+  };
+
   if (state === 'checking') {
     return (
-      <div className="app loading-screen">
-        <div className="spinner" />
+      <div className="h-dvh flex flex-col items-center justify-center overflow-y-auto">
+        <div className="w-6 h-6 border-[3px] border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
       </div>
     );
   }
 
   if (state === 'entry') {
     return (
-      <div className="app">
+      <div className="h-dvh flex flex-col overflow-y-auto">
         <EntryScreen
           onEnter={(guest) => handleEnter(guest)}
           onRequestLogin={() => handleRequestLogin('entry')}
@@ -126,7 +115,7 @@ function App() {
 
   if (state === 'login') {
     return (
-      <div className="app">
+      <div className="h-dvh flex flex-col overflow-y-auto">
         <LoginScreen
           onLogin={() => handleEnter(false)}
           onBack={() => {
@@ -144,7 +133,7 @@ function App() {
 
   if (state === 'home') {
     return (
-      <div className="app">
+      <div className="h-dvh flex flex-col overflow-y-auto">
         <HomeScreen
           onNavigate={handleHomeNavigate}
         />
@@ -153,12 +142,12 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <FinanceOverview
+    <div className="h-dvh flex flex-col overflow-y-auto">
+      <FinancePage
         isGuest={isGuest}
-        onLogout={handleLogout}
         onRequestLogin={() => handleRequestLogin('finance')}
         onBackToHome={handleFinanceBackToHome}
+        onNavigate={handleFinanceNavigate}
       />
     </div>
   );

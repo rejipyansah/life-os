@@ -90,9 +90,12 @@ export default function Navigation({ active, onNavigate, brand }: NavigationProp
       <nav className="hidden md:flex fixed top-0 left-0 right-0 z-50 h-14 bg-[#f5fbf4] border-b border-[#D5E0D3]/60">
         <div className="w-full max-w-6xl mx-auto px-6 lg:px-12 flex items-center">
           <div className="flex items-center gap-6">
-            <span className="font-headline text-base tracking-tight text-lo-primary font-semibold">
-              {brand ?? 'Life OS'}
-            </span>
+            <div className="flex items-center gap-2">
+              <img src="/life-os-logo.png" alt="" className="w-6 h-6 rounded-full object-cover" />
+              <span className="font-headline text-base tracking-tight text-lo-primary font-semibold">
+                {brand ?? 'Life OS'}
+              </span>
+            </div>
             <div className="flex items-center gap-1">
               {navItems.map((item) => {
                 const isActive = active === item.id;
