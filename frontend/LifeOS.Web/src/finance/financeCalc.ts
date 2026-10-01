@@ -93,6 +93,17 @@ export function formatNumberString(value: string): string {
   return parseInt(clean, 10).toLocaleString('id-ID');
 }
 
+/** Nominal cepat untuk chip input — urut dari kecil ke besar, pecahan alami Indonesia. */
+export const QUICK_AMOUNTS = [
+  1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000,
+] as const;
+
+/** Label chip ringkas tanpa "Rp": 1000 → "+1k". Input & nilai transaksi tetap Rupiah penuh. */
+export function quickAmountLabel(amount: number): string {
+  const thousands = amount / 1000;
+  return `+${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}k`;
+}
+
 /** Warna progress bar: sisa dana terhadap plafon. */
 export type ProgressTone = 'green' | 'yellow' | 'red';
 

@@ -65,9 +65,9 @@ export default function FinancePage({
             onSave={state.saveTransaction}
           />
 
-          {/* Row 3: Yang Disisihkan | Sumber Dana + Aktivitas Terkini */}
+          {/* Row 3: Yang Disisihkan + Agenda | Sumber Dana + Aktivitas Terkini */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <div className="lg:col-span-7">
+            <div className="lg:col-span-7 flex flex-col gap-6">
               <YangDisisihkanSection
                 posItems={state.posItems}
                 accounts={state.accounts}
@@ -82,6 +82,21 @@ export default function FinancePage({
                 onExecuteSingle={state.executeSingleSpendPos}
                 onCreate={state.createPos}
                 onDelete={state.deletePos}
+              />
+              {/* Seukuran Yang Disisihkan, menutup ruang kosong di kolom kiri. */}
+              <AgendaKasSection
+                accounts={state.accounts}
+                agendas={state.agendas}
+                archivedAgendas={state.archivedAgendas}
+                filter={state.agendaFilter}
+                page={state.agendaPage}
+                onFilterChange={state.setAgendaFilter}
+                onPageChange={state.setAgendaPage}
+                onSkip={state.skipAgenda}
+                onPostpone={state.postponeAgenda}
+                onDelete={state.deleteAgenda}
+                onFinish={state.finishAgenda}
+                onCreate={state.createAgenda}
               />
             </div>
             <div className="lg:col-span-5 flex flex-col gap-6">
@@ -103,22 +118,6 @@ export default function FinancePage({
               />
             </div>
           </div>
-
-          {/* Row 4: Agenda Kas Mendatang */}
-          <AgendaKasSection
-            accounts={state.accounts}
-            agendas={state.agendas}
-            archivedAgendas={state.archivedAgendas}
-            filter={state.agendaFilter}
-            page={state.agendaPage}
-            onFilterChange={state.setAgendaFilter}
-            onPageChange={state.setAgendaPage}
-            onSkip={state.skipAgenda}
-            onPostpone={state.postponeAgenda}
-            onDelete={state.deleteAgenda}
-            onFinish={state.finishAgenda}
-            onCreate={state.createAgenda}
-          />
         </div>
       </main>
 

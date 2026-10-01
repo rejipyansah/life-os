@@ -5,6 +5,8 @@ import {
   formatCurrencyRaw,
   formatNumberString,
   parseFormattedNumber,
+  quickAmountLabel,
+  QUICK_AMOUNTS,
   type Account,
   type AccountType,
 } from '../../finance';
@@ -336,11 +338,12 @@ function TransferModal({
   const canSubmit = !sameAccount && amount > 0 && !exceeds && fromAcc && toAcc;
 
   const setQuick = (v: number | 'all') => {
-    if (v === 'all') {
-      setAmountStr(fromAcc ? String(fromAcc.balance) : '');
-    } else {
-      setAmountStr(String(parseFormattedNumber(amountStr) + v));
-    }
+    // Chip "+1k" menambah nominal yang sudah ada, bukan menimpa.
+    const next =
+      v === 'all'
+        ? fromAcc?.balance ?? 0
+        : parseFormattedNumber(amountStr) + v;
+    setAmountStr(formatNumberString(String(next)));
   };
 
   const swap = () => {
@@ -465,14 +468,14 @@ function TransferModal({
             />
           </div>
           <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-            {[50_000, 100_000, 250_000, 500_000].map((v) => (
+            {QUICK_AMOUNTS.map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setQuick(v)}
                 className="px-2.5 py-1 rounded-full bg-lo-surface-recessed hover:bg-lo-border-hairline/60 text-lo-text-subtle text-[11px] font-medium border border-lo-border-hairline transition-colors cursor-pointer active:scale-95"
               >
-                +{v / 1000}rb
+                {quickAmountLabel(v)}
               </button>
             ))}
             <button

@@ -9,6 +9,8 @@ import {
   formatNumberString,
   posCategoryLabel,
   accountTypeLabel,
+  quickAmountLabel,
+  QUICK_AMOUNTS,
 } from './financeCalc';
 import { parseTransactionText, detectAccountFromText } from './parseTransaction';
 import type { Account, BillDue } from './types';
@@ -256,6 +258,24 @@ describe('incrementalPlafonStatus', () => {
       remainingPct: 0,
       overage: 0,
     });
+  });
+});
+
+describe('quick amounts', () => {
+  it('urut kecil ke besar dengan label ringkas tanpa Rp', () => {
+    expect([...QUICK_AMOUNTS]).toEqual([
+      1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000,
+    ]);
+    expect(QUICK_AMOUNTS.every((v, i, a) => i === 0 || a[i - 1] < v)).toBe(true);
+
+    expect(quickAmountLabel(1_000)).toBe('+1k');
+    expect(quickAmountLabel(2_000)).toBe('+2k');
+    expect(quickAmountLabel(5_000)).toBe('+5k');
+    expect(quickAmountLabel(10_000)).toBe('+10k');
+    expect(quickAmountLabel(20_000)).toBe('+20k');
+    expect(quickAmountLabel(50_000)).toBe('+50k');
+    expect(quickAmountLabel(100_000)).toBe('+100k');
+    expect(QUICK_AMOUNTS.every((v) => !quickAmountLabel(v).includes('Rp'))).toBe(true);
   });
 });
 

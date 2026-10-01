@@ -102,7 +102,6 @@ export function Modal({
   return (
     <div
       className="fixed inset-0 z-50 bg-lo-text-ink/35 backdrop-blur-[2px] flex items-center justify-center p-4"
-      onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -408,9 +407,14 @@ export function ProgressBar({
   className?: string;
 }) {
   const clamped = Math.max(0, Math.min(100, percent));
-  const fillClass = PROGRESS_TONE_CLASS[tone ?? 'green'];
+  const activeTone = tone ?? 'green';
+  const fillClass = PROGRESS_TONE_CLASS[activeTone];
+  // Saat tone merah (termasuk 0%), track ikut merah supaya bar tetap terbaca
+  // sebagai "bahaya" walaupun isinya kosong.
+  const trackClass =
+    activeTone === 'red' ? 'bg-lo-error/35' : 'bg-lo-surface-recessed';
   return (
-    <div className={`w-full h-1.5 rounded-full bg-lo-surface-recessed overflow-hidden ${className}`}>
+    <div className={`w-full h-1.5 rounded-full ${trackClass} overflow-hidden ${className}`}>
       <div
         className={`h-full rounded-full ${fillClass} transition-all duration-300`}
         style={{ width: `${clamped}%` }}

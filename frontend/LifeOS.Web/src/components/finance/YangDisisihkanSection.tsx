@@ -7,6 +7,8 @@ import {
   incrementalPlafonStatus,
   parseFormattedNumber,
   posCategoryLabel,
+  quickAmountLabel,
+  QUICK_AMOUNTS,
   type Account,
   type CreatePosInput,
   type PosCategory,
@@ -321,6 +323,9 @@ function PosCard({
           ? 'Dana terkumpul penuh'
           : pos.status || (hasTarget ? `${targetPct}% tercapai` : 'Fleksibel');
 
+  // Penanda visual bahwa pemakaian sudah melewati plafon.
+  const overPlafon = pos.category === 'routine_incremental' && overage > 0;
+
   return (
     <div className="group bg-lo-surface-cream/70 hover:bg-lo-surface-recessed/50 transition-all duration-200 rounded-2xl p-5 border border-lo-border-hairline/60 hover:border-lo-secondary/30">
       <div className="flex items-start justify-between gap-4">
@@ -377,11 +382,15 @@ function PosCard({
         <div className="mt-4 pt-3 border-t border-lo-border-hairline/40">
           <ProgressBar percent={remainingPct} tone={remainingTone} />
           {overage > 0 ? (
-            <div className="mt-1.5 flex flex-col gap-0.5 text-[11px] font-medium text-lo-warning">
-              <span>
-                Melewati plafon <span className="font-semibold">{formatCurrencyRaw(overage)}</span>
+            <div className="mt-1.5 flex items-start gap-1.5 text-[11px] font-medium text-lo-error">
+              <Icon name="warning" className="text-[14px] leading-4 shrink-0" />
+              <span className="flex flex-col gap-0.5">
+                <span>
+                  Melewati plafon{' '}
+                  <span className="font-semibold">{formatCurrencyRaw(overage)}</span>
+                </span>
+                <span>Dari Uang Bebas</span>
               </span>
-              <span>Dari Uang Bebas</span>
             </div>
           ) : null}
         </div>
@@ -421,7 +430,13 @@ function PosCard({
           <span>{actionLabel}</span>
         </button>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-lo-text-subtle">{rightStatus}</span>
+          <span
+            className={`text-[11px] ${
+              overPlafon ? 'font-semibold text-lo-error' : 'text-lo-text-subtle'
+            }`}
+          >
+            {rightStatus}
+          </span>
           <button
             type="button"
             onClick={onDelete}
@@ -823,10 +838,12 @@ function SavingsModal({
       : amount <= pos.amount);
 
   const setQuick = (v: number) => {
+    // Chip "+1k" menambah nominal yang sudah ada, bukan menimpa.
+    const current = parseFormattedNumber(amountStr);
     if (mode === 'topup') {
-      setAmountStr(String(parseFormattedNumber(amountStr) + v));
+      setAmountStr(formatNumberString(String(current + v)));
     } else {
-      setAmountStr(String(Math.min(v, pos.amount)));
+      setAmountStr(formatNumberString(String(Math.min(current + v, pos.amount))));
     }
   };
 
@@ -924,14 +941,14 @@ function SavingsModal({
               : 'Tarik sebagian simpanan. Dana yang ditarik akan langsung dikembalikan ke Kas / Uang Bebas Anda.'}
           </p>
           <div className="grid grid-cols-4 gap-2 mb-3">
-            {[50_000, 100_000, 250_000, 500_000].map((v) => (
+            {QUICK_AMOUNTS.map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setQuick(v)}
                 className="py-2 rounded-lg text-[11px] bg-lo-surface-cream hover:bg-lo-accent-wash text-lo-text-ink border border-lo-border-hairline font-medium text-center transition-all cursor-pointer"
               >
-                {v / 1000}rb
+                {quickAmountLabel(v)}
               </button>
             ))}
           </div>
@@ -1054,14 +1071,18 @@ function IncrementalModal({
             Nominal Pemakaian Kali Ini <span className="text-lo-secondary">*</span>
           </label>
           <div className="grid grid-cols-4 gap-2">
-            {[15_000, 25_000, 50_000, 100_000].map((v) => (
+            {QUICK_AMOUNTS.map((v) => (
               <button
                 key={v}
                 type="button"
-                onClick={() => setAmountStr(String(v))}
+                onClick={() =>
+                  setAmountStr((prev) =>
+                    formatNumberString(String(parseFormattedNumber(prev) + v))
+                  )
+                }
                 className="py-2 rounded-lg text-[11px] bg-lo-surface-cream hover:bg-lo-accent-wash text-lo-text-ink border border-lo-border-hairline font-medium text-center transition-all cursor-pointer"
               >
-                {v / 1000}rb
+                {quickAmountLabel(v)}
               </button>
             ))}
           </div>
@@ -1169,7 +1190,7 @@ function BatchModal({
   onSubmit: (cost: number, note?: string) => void;
 }) {
   const defaultCost = pos.plafon || pos.amount;
-  const [amountStr, setAmountStr] = useState(String(defaultCost));
+  const [amountStr, setAmountStr] = useState(formatNumberString(String(defaultCost)));
   const [note, setNote] = useState('');
   const amount = parseFormattedNumber(amountStr) || defaultCost;
 
@@ -1227,7 +1248,7 @@ function BatchModal({
             </label>
             <button
               type="button"
-              onClick={() => setAmountStr(String(defaultCost))}
+              onClick={() => setAmountStr(formatNumberString(String(defaultCost)))}
               className="text-[11px] text-lo-secondary hover:underline cursor-pointer font-medium"
             >
               Pas Plafon ({formatCurrencyRaw(defaultCost)})
@@ -1241,7 +1262,7 @@ function BatchModal({
               className={`${inputBase} pl-11 font-semibold tabular-nums text-base`}
               value={amountStr}
               onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
-              placeholder={String(defaultCost)}
+              placeholder={formatNumberString(String(defaultCost))}
             />
           </div>
         </div>
@@ -1289,7 +1310,7 @@ function SingleSpendModal({
   onSubmit: (cost: number, note?: string) => void;
 }) {
   const defaultCost = pos.targetAmount || pos.amount;
-  const [amountStr, setAmountStr] = useState(String(defaultCost));
+  const [amountStr, setAmountStr] = useState(formatNumberString(String(defaultCost)));
   const [note, setNote] = useState('');
   const amount = parseFormattedNumber(amountStr) || defaultCost;
 
@@ -1348,7 +1369,9 @@ function SingleSpendModal({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setAmountStr(String(Math.round(defaultCost * 0.925)))}
+                onClick={() =>
+                  setAmountStr(formatNumberString(String(Math.round(defaultCost * 0.925))))
+                }
                 className="text-[11px] text-lo-secondary hover:underline cursor-pointer font-medium"
               >
                 Hemat ({Math.round((defaultCost * 0.925) / 1000)}rb)
@@ -1356,7 +1379,7 @@ function SingleSpendModal({
               <span className="text-lo-border-hairline">·</span>
               <button
                 type="button"
-                onClick={() => setAmountStr(String(defaultCost))}
+                onClick={() => setAmountStr(formatNumberString(String(defaultCost)))}
                 className="text-[11px] text-lo-secondary hover:underline cursor-pointer font-medium"
               >
                 Pas ({Math.round(defaultCost / 1000)}rb)
@@ -1371,7 +1394,7 @@ function SingleSpendModal({
               className={`${inputBase} pl-11 font-semibold tabular-nums text-base`}
               value={amountStr}
               onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
-              placeholder={String(defaultCost)}
+              placeholder={formatNumberString(String(defaultCost))}
             />
           </div>
         </div>
