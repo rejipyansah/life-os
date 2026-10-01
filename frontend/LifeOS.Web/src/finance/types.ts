@@ -1,3 +1,5 @@
+import type { SetAsideCycleKind } from '../types';
+
 export type AccountType = 'bank' | 'cash' | 'ewallet' | 'credit';
 
 export interface Account {
@@ -6,7 +8,10 @@ export interface Account {
   role: string;
   type: AccountType;
   balance: number;
+  /** Saldo tersedia = actual − set-aside. Sumber validasi funding di UI. */
+  availableBalance: number;
   icon: string;
+  archived: boolean;
 }
 
 export type BillStatus = 'unpaid' | 'paid' | 'postponed';
@@ -114,6 +119,12 @@ export interface CreatePosInput {
   targetAmount?: number;
   plafon?: number;
   cycle?: string;
+  cycleKind?: SetAsideCycleKind;
+  /**
+   * Opsional, hanya untuk tipe yang tidak auto-fund (mis. saving).
+   * Rutinitas Bertahap & Sekali Pakai: amount dihitung dari plafon/target.
+   */
+  amount?: number;
   icon?: string;
 }
 

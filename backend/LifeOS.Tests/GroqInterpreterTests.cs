@@ -66,7 +66,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -95,7 +95,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -124,7 +124,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": "BCA",
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -154,7 +154,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": ["amount"]
         }
         """);
@@ -179,7 +179,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": ["amount", "account"]
         }
         """);
@@ -191,14 +191,14 @@ public class GroqInterpreterTests : IDisposable
         Assert.Equal(2, result.ClarificationFields.Count);
     }
 
-    // ───────────────────── 5. CreateAllocation ─────────────────────
+    // ───────────────────── 5. CreateSetAside ─────────────────────
 
     [Fact]
-    public async Task Interpret_CreateAllocation_ReturnsCorrectResult()
+    public async Task Interpret_CreateSetAside_ReturnsCorrectResult()
     {
         SetResponse("""
         {
-            "intent": "CreateAllocation",
+            "intent": "CreateSetAside",
             "transactionType": null,
             "amount": 350000,
             "description": null,
@@ -206,18 +206,18 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": null,
             "feeAmount": null,
-            "allocationName": "WiFi",
+            "setAsideName": "WiFi",
             "clarificationFields": []
         }
         """);
 
         var result = await _interpreter.InterpretAsync(MakeRequest("sisihkan 350rb buat wifi dari mandiri"));
 
-        Assert.Equal("CreateAllocation", result.Intent);
+        Assert.Equal("CreateSetAside", result.Intent);
         Assert.Null(result.TransactionType);
         Assert.Equal(350000m, result.Amount);
         Assert.Equal("Mandiri", result.Account);
-        Assert.Equal("WiFi", result.AllocationName);
+        Assert.Equal("WiFi", result.SetAsideName);
         Assert.Empty(result.ClarificationFields);
     }
 
@@ -236,7 +236,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": null,
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -262,7 +262,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -287,7 +287,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": "BCA",
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": ["account"]
         }
         """);
@@ -315,7 +315,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": ["unknown_field"]
         }
         """);
@@ -342,7 +342,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": null,
             "date": "2026-09-26",
             "feeAmount": null,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -424,7 +424,7 @@ public class GroqInterpreterTests : IDisposable
             "toAccount": "BCA",
             "date": "2026-09-26",
             "feeAmount": 2500,
-            "allocationName": null,
+            "setAsideName": null,
             "clarificationFields": []
         }
         """);
@@ -439,7 +439,7 @@ public class GroqInterpreterTests : IDisposable
         Assert.Equal("BCA", result.ToAccount);
         Assert.Equal("2026-09-26", result.Date);
         Assert.Equal(2500m, result.FeeAmount);
-        Assert.Null(result.AllocationName);
+        Assert.Null(result.SetAsideName);
         Assert.Empty(result.ClarificationFields);
     }
 

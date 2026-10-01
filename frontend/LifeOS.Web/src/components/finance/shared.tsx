@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 
-import type { FinanceToast } from '../../finance';
+import type { FinanceToast, ProgressTone } from '../../finance';
 
 /* ── Shared class tokens (from DESIGN.md + module sources) ── */
 
@@ -392,18 +392,27 @@ export function Pagination({
 
 /* ── Progress bar ── */
 
+const PROGRESS_TONE_CLASS: Record<ProgressTone, string> = {
+  green: 'bg-lo-secondary',
+  yellow: 'bg-yellow-500',
+  red: 'bg-lo-error',
+};
+
 export function ProgressBar({
   percent,
+  tone,
   className = '',
 }: {
   percent: number;
+  tone?: ProgressTone;
   className?: string;
 }) {
   const clamped = Math.max(0, Math.min(100, percent));
+  const fillClass = PROGRESS_TONE_CLASS[tone ?? 'green'];
   return (
     <div className={`w-full h-1.5 rounded-full bg-lo-surface-recessed overflow-hidden ${className}`}>
       <div
-        className="h-full rounded-full bg-lo-secondary transition-all duration-300"
+        className={`h-full rounded-full ${fillClass} transition-all duration-300`}
         style={{ width: `${clamped}%` }}
       />
     </div>

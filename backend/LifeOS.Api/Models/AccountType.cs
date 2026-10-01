@@ -4,5 +4,6 @@ public enum AccountType
 {
     Cash = 0,
     Bank = 1,
-    EWallet = 2
+    EWallet = 2,
+    Credit = 3
 }

@@ -4,12 +4,12 @@ import {
   formatCurrency,
   formatCurrencyRaw,
   formatSignedCurrency,
+  incrementalPlafonStatus,
   parseFormattedNumber,
   formatNumberString,
   posCategoryLabel,
   accountTypeLabel,
 } from './financeCalc';
-import { financeFixture } from './financeFixture';
 import { parseTransactionText, detectAccountFromText } from './parseTransaction';
 import type { Account, BillDue } from './types';
 
@@ -20,7 +20,9 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     role: 'Test',
     type: 'bank',
     balance: 0,
+    availableBalance: 0,
     icon: 'account_balance',
+    archived: false,
     ...overrides,
   };
 }
@@ -110,18 +112,7 @@ describe('deriveFinanceState', () => {
     expect(result.freeCash).toBe(100_000);
   });
 
-  it('default fixture matches design values', () => {
-    const result = deriveFinanceState({
-      accounts: financeFixture.accounts,
-      billsDue: financeFixture.billsDue,
-      savingsCommitment: financeFixture.savingsCommitment,
-    });
-    expect(result.totalLiquidity).toBe(2_661_000);
-    expect(result.billsDueTotal).toBe(615_440);
-    expect(result.savingsCommitment).toBe(875_000);
-    expect(result.freeCash).toBe(1_170_560);
-    expect(result.unpaidBillsCount).toBe(2);
-  });
+
 });
 
 describe('formatCurrency', () => {
@@ -168,6 +159,103 @@ describe('labels', () => {
   it('accountTypeLabel maps types', () => {
     expect(accountTypeLabel('bank')).toBe('Bank');
     expect(accountTypeLabel('cash')).toBe('Tunai');
+  });
+});
+
+describe('incrementalPlafonStatus', () => {
+  const plafon = 300_000;
+
+  it('bar = sisa dana terhadap plafon, dengan warna bertahap', () => {
+    expect(incrementalPlafonStatus({ amount: 300_000, plafon })).toMatchObject({
+      remaining: 300_000,
+      remainingPct: 100,
+      tone: 'green',
+      overage: 0,
+    });
+    expect(incrementalPlafonStatus({ amount: 100_000, plafon })).toMatchObject({
+      remainingPct: 33,
+      tone: 'yellow',
+    });
+    expect(incrementalPlafonStatus({ amount: 50_000, plafon })).toMatchObject({
+      remainingPct: 17,
+      tone: 'red',
+    });
+    expect(incrementalPlafonStatus({ amount: 0, plafon })).toMatchObject({
+      remaining: 0,
+      remainingPct: 0,
+      tone: 'red',
+      overage: 0,
+    });
+  });
+
+  it('tone thresholds: >50% green, 25–50% yellow, <25% red', () => {
+    expect(incrementalPlafonStatus({ amount: 151_000, plafon }).tone).toBe('green');
+    expect(incrementalPlafonStatus({ amount: 150_000, plafon }).tone).toBe('yellow');
+    expect(incrementalPlafonStatus({ amount: 75_000, plafon }).tone).toBe('yellow');
+    expect(incrementalPlafonStatus({ amount: 74_000, plafon }).tone).toBe('red');
+  });
+
+  it('overspend stays usable: sisa clamps to 0, overage reported', () => {
+    const status = incrementalPlafonStatus({
+      amount: 0,
+      plafon,
+      usedAmount: 350_000,
+    });
+    expect(status.limit).toBe(300_000);
+    expect(status.remaining).toBe(0);
+    expect(status.remainingPct).toBe(0);
+    expect(status.tone).toBe('red');
+    expect(status.overage).toBe(50_000);
+  });
+
+  it('overspend kecil: plafon 25k, terpakai 35k → sisa 0, kelebihan 10k', () => {
+    const status = incrementalPlafonStatus({
+      amount: 0,
+      plafon: 25_000,
+      usedAmount: 35_000,
+    });
+    expect(status.limit).toBe(25_000);
+    expect(status.remaining).toBe(0);
+    expect(status.remainingPct).toBe(0);
+    expect(status.tone).toBe('red');
+    expect(status.overage).toBe(10_000);
+  });
+
+  it('kelebihan = max(0, used − targetAmount) saat plafon tidak ter-mapping', () => {
+    const status = incrementalPlafonStatus({
+      amount: 0,
+      targetAmount: 300_000,
+      usedAmount: 350_000,
+    });
+    expect(status.limit).toBe(300_000);
+    expect(status.overage).toBe(50_000);
+    expect(status.remainingPct).toBe(0);
+    expect(status.tone).toBe('red');
+  });
+
+  it('tanpa overspend: overage 0 (warning tidak boleh muncul)', () => {
+    expect(
+      incrementalPlafonStatus({ amount: 0, plafon, usedAmount: plafon }).overage
+    ).toBe(0);
+    expect(
+      incrementalPlafonStatus({ amount: 50_000, plafon, usedAmount: 250_000 }).overage
+    ).toBe(0);
+  });
+
+  it('never reports a negative sisa, even with negative saldo', () => {
+    const status = incrementalPlafonStatus({ amount: -40_000, plafon, usedAmount: 340_000 });
+    expect(status.remaining).toBe(0);
+    expect(status.remainingPct).toBe(0);
+    expect(status.tone).toBe('red');
+    expect(status.overage).toBe(40_000);
+  });
+
+  it('handles a pos without plafon', () => {
+    expect(incrementalPlafonStatus({ amount: 50_000 })).toMatchObject({
+      remaining: 50_000,
+      remainingPct: 0,
+      overage: 0,
+    });
   });
 });
 

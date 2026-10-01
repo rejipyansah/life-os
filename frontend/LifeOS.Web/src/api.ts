@@ -2,19 +2,27 @@ import type {
   AuthMe,
   AccountType,
   AccountListProjection,
+  AccountProjection,
   TransactionType,
   TransactionProjection,
+  CreateTransactionCommand,
+  ReverseTransactionCommand,
+  SetAsideProjection,
+  SetAsideOperationResult,
+  CreateSetAsideCommand,
+  UpdateSetAsideCommand,
+  SetAsideEntryProjection,
+  UpcomingEventProjection,
+  CreateUpcomingEventCommand,
+  UpdateUpcomingEventCommand,
+  RealizeUpcomingEventResult,
+  FinanceStateProjection,
   InterpretResponse,
-  AllocationProjection,
-  UpdateAllocationCommand,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
-async function request<T>(
-  path: string,
-  init?: RequestInit
-): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: 'include',
@@ -24,9 +32,7 @@ async function request<T>(
 
   if (!res.ok) {
     const msg =
-      body &&
-      typeof body === 'object' &&
-      'error' in body
+      body && typeof body === 'object' && 'error' in body
         ? (body as { error: string }).error
         : `Request failed (${res.status})`;
 
@@ -36,18 +42,38 @@ async function request<T>(
   return body as T;
 }
 
+async function requestNoContent(path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    credentials: 'include',
+  });
+
+  if (res.ok) return;
+
+  const body = await res.json().catch(() => null);
+  const msg =
+    body && typeof body === 'object' && 'error' in body
+      ? (body as { error: string }).error
+      : `Request failed (${res.status})`;
+
+  throw new Error(msg);
+}
+
+const json = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+// ───────────────────────── Auth ─────────────────────────
+
 export async function getAuthMe(): Promise<AuthMe | null> {
   const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
     credentials: 'include',
   });
 
-  if (res.status === 401) {
-    return null;
-  }
-
-  if (!res.ok) {
-    throw new Error(`Request failed (${res.status})`);
-  }
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
   return res.json() as Promise<AuthMe>;
 }
@@ -56,16 +82,7 @@ export async function login(
   email: string,
   password: string
 ): Promise<{ isAuthenticated: boolean }> {
-  return request('/api/auth/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      email,
-      password,
-    }),
-  });
+  return request('/api/auth/login', json('POST', { email, password }));
 }
 
 export async function logout(): Promise<void> {
@@ -75,12 +92,8 @@ export async function logout(): Promise<void> {
   });
 }
 
-export async function createGuestSession(): Promise<{
-  isGuest: boolean;
-}> {
-  return request('/api/guest/session', {
-    method: 'POST',
-  });
+export async function createGuestSession(): Promise<{ isGuest: boolean }> {
+  return request('/api/guest/session', { method: 'POST' });
 }
 
 export async function resumeGuestSession(): Promise<{
@@ -92,82 +105,67 @@ export async function resumeGuestSession(): Promise<{
   });
 
   if (res.ok) {
-    return {
-      ...(await res.json()),
-      isNew: false,
-    };
+    return { ...(await res.json()), isNew: false };
   }
 
-  if (res.status === 401) {
-    throw new Error('No guest session');
-  }
+  if (res.status === 401) throw new Error('No guest session');
 
   const body = await res.json().catch(() => null);
-
   const msg =
-    body &&
-    typeof body === 'object' &&
-    'error' in body
+    body && typeof body === 'object' && 'error' in body
       ? (body as { error: string }).error
       : `Request failed (${res.status})`;
 
   throw new Error(msg);
 }
 
+// ───────────────────────── Finance state ─────────────────────────
+
+/** Single read model for the Finance page. All figures are derived server-side. */
+export async function getFinanceState(): Promise<FinanceStateProjection> {
+  return request('/api/finance/state');
+}
+
+// ───────────────────────── Accounts ─────────────────────────
+
 export async function getAccounts(
   includeArchived = false
 ): Promise<AccountListProjection> {
-  const qs = includeArchived
-    ? '?includeArchived=true'
-    : '';
-
+  const qs = includeArchived ? '?includeArchived=true' : '';
   return request(`/api/finance/accounts${qs}`);
+}
+
+export async function getAccount(id: string): Promise<AccountProjection> {
+  return request(`/api/finance/accounts/${id}`);
 }
 
 export async function createAccount(command: {
   name: string;
   type: AccountType;
-}) {
-  return request<{
-    accountId: string;
-    name: string;
-    type: AccountType;
-    isArchived: boolean;
-    createdAt: string;
-  }>('/api/finance/accounts', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: command.name,
-      type: command.type,
-    }),
-  });
+}): Promise<{
+  accountId: string;
+  name: string;
+  type: AccountType;
+  isArchived: boolean;
+  createdAt: string;
+}> {
+  return request('/api/finance/accounts', json('POST', command));
 }
 
 export async function updateAccount(
   id: string,
-  command: {
-    name?: string;
-    type?: AccountType;
-    isArchived?: boolean;
-  }
-) {
-  return request<{
-    accountId: string;
-    name: string;
-    type: AccountType;
-    isArchived: boolean;
-    createdAt: string;
-  }>(`/api/finance/accounts/${id}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(command),
-  });
+  command: { name?: string; type?: AccountType; isArchived?: boolean }
+): Promise<{
+  accountId: string;
+  name: string;
+  type: AccountType;
+  isArchived: boolean;
+  createdAt: string;
+}> {
+  return request(`/api/finance/accounts/${id}`, json('PATCH', command));
 }
+
+// ───────────────────────── Transactions ─────────────────────────
 
 export async function getTransactions(): Promise<{
   items: TransactionProjection[];
@@ -178,115 +176,187 @@ export async function getTransactions(): Promise<{
 export async function getTransaction(
   id: string
 ): Promise<TransactionProjection> {
-  return request(
-    `/api/finance/transactions/${id}`
-  );
+  return request(`/api/finance/transactions/${id}`);
 }
 
-export async function createTransaction(command: {
+export async function createTransaction(command: CreateTransactionCommand): Promise<{
+  transactionId: string;
   type: TransactionType;
   amount: number;
-  description?: string;
-  categoryName?: string;
   occurredOn: string;
-  relatedTransactionId?: string;
-  feeAmount?: number;
-  entries: {
-    accountId: string;
-    amount: number;
-  }[];
-}) {
-  return request<{
-    transactionId: string;
-    type: TransactionType;
-    amount: number;
-    occurredOn: string;
-    createdAt: string;
-    entryCount: number;
-  }>('/api/finance/transactions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      type: command.type,
-      amount: command.amount,
-      description: command.description,
-      categoryName: command.categoryName,
-      occurredOn: command.occurredOn,
-      relatedTransactionId: command.relatedTransactionId,
-      feeAmount: command.feeAmount,
-      entries: command.entries,
-    }),
-  });
+  createdAt: string;
+  entryCount: number;
+}> {
+  return request('/api/finance/transactions', json('POST', command));
 }
 
-export async function interpret(
-  input: string
-): Promise<InterpretResponse> {
-  return request<InterpretResponse>(
-    '/api/interpret',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        input,
-      }),
-    }
-  );
-}
-
-export async function createAllocation(command: {
-  name: string;
-  amount: number;
-  accountId: string;
-}) {
-  return request<{
-    allocationId: string;
-    accountId: string;
-    name: string;
-    amount: number;
-    status: string;
-    createdAt: string;
-  }>('/api/finance/allocations', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: command.name,
-      amount: command.amount,
-      accountId: command.accountId,
-    }),
-  });
-}
-
-export async function getAllocations(): Promise<
-  AllocationProjection[]
-> {
-  return request<AllocationProjection[]>(
-    '/api/finance/allocations'
-  );
-}
-
-export async function updateAllocation(
+/**
+ * Membatalkan transaksi tanpa mengubah histori: membuat Reversal berlawanan arah
+ * yang dihubungkan ke transaksi asli.
+ */
+export async function reverseTransaction(
   id: string,
-  command: UpdateAllocationCommand
-) {
-  return request<{
-    allocationId: string;
-    accountId: string;
-    name: string;
+  command: ReverseTransactionCommand = {}
+): Promise<{
+  transactionId: string;
+  type: TransactionType;
+  amount: number;
+  relatedTransactionId: string | null;
+  occurredOn: string;
+  createdAt: string;
+}> {
+  return request(`/api/finance/transactions/${id}/reverse`, json('POST', command));
+}
+
+// ───────────────────────── Set-asides ─────────────────────────
+
+export async function getSetAsides(): Promise<{ items: SetAsideProjection[] }> {
+  return request('/api/finance/set-asides');
+}
+
+export async function getSetAside(id: string): Promise<SetAsideProjection> {
+  return request(`/api/finance/set-asides/${id}`);
+}
+
+export async function getSetAsideHistory(
+  id: string
+): Promise<{ items: SetAsideEntryProjection[] }> {
+  return request(`/api/finance/set-asides/${id}/history`);
+}
+
+export async function createSetAside(
+  command: CreateSetAsideCommand
+): Promise<SetAsideProjection> {
+  return request('/api/finance/set-asides', json('POST', command));
+}
+
+export async function updateSetAside(
+  id: string,
+  command: UpdateSetAsideCommand
+): Promise<SetAsideProjection> {
+  return request(`/api/finance/set-asides/${id}`, json('PATCH', command));
+}
+
+/** Menambah saldo disisihkan (top-up). Bukan Expense. */
+export async function addToSetAside(
+  id: string,
+  command: { amount: number; note?: string }
+): Promise<SetAsideOperationResult> {
+  return request(`/api/finance/set-asides/${id}/add`, json('POST', command));
+}
+
+/** Menarik kembali saldo disisihkan. Bukan Expense. */
+export async function withdrawFromSetAside(
+  id: string,
+  command: { amount: number; note?: string }
+): Promise<SetAsideOperationResult> {
+  return request(`/api/finance/set-asides/${id}/withdraw`, json('POST', command));
+}
+
+/** Pengeluaran riil dari set-aside: membuat Expense sekaligus melepas reservasi.
+ *  FreeCashAccountId: rekening sumber Uang Bebas untuk porsi di atas saldo pos. */
+export async function spendFromSetAside(
+  id: string,
+  command: {
     amount: number;
-    status: string;
-    createdAt: string;
-  }>(`/api/finance/allocations/${id}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(command),
+    description?: string;
+    categoryName?: string;
+    occurredOn: string;
+    note?: string;
+    freeCashAccountId?: string;
+  }
+): Promise<SetAsideOperationResult> {
+  return request(`/api/finance/set-asides/${id}/spend`, json('POST', command));
+}
+
+export async function closeSetAside(
+  id: string,
+  command: {
+    reason?: 'Spent' | 'Withdrawn' | 'Cancelled';
+    note?: string;
+  } = {}
+): Promise<SetAsideOperationResult> {
+  return request(`/api/finance/set-asides/${id}/close`, json('POST', command));
+}
+
+// ───────────────────────── Upcoming cash events ─────────────────────────
+
+export async function getUpcomingEvents(): Promise<{
+  items: UpcomingEventProjection[];
+}> {
+  return request('/api/finance/upcoming-events');
+}
+
+export async function getUpcomingEvent(
+  id: string
+): Promise<UpcomingEventProjection> {
+  return request(`/api/finance/upcoming-events/${id}`);
+}
+
+export async function createUpcomingEvent(
+  command: CreateUpcomingEventCommand
+): Promise<UpcomingEventProjection> {
+  return request('/api/finance/upcoming-events', json('POST', command));
+}
+
+export async function updateUpcomingEvent(
+  id: string,
+  command: UpdateUpcomingEventCommand
+): Promise<UpcomingEventProjection> {
+  return request(`/api/finance/upcoming-events/${id}`, json('PATCH', command));
+}
+
+/** Tanpa newDueDate, agenda digeser satu hari. */
+export async function postponeUpcomingEvent(
+  id: string,
+  command: { newDueDate?: string; reason?: string } = {}
+): Promise<UpcomingEventProjection> {
+  return request(
+    `/api/finance/upcoming-events/${id}/postpone`,
+    json('POST', command)
+  );
+}
+
+export async function skipUpcomingEvent(
+  id: string,
+  command: { reason?: string } = {}
+): Promise<UpcomingEventProjection> {
+  return request(`/api/finance/upcoming-events/${id}/skip`, json('POST', command));
+}
+
+export async function cancelUpcomingEvent(
+  id: string,
+  command: { reason?: string } = {}
+): Promise<UpcomingEventProjection> {
+  return request(
+    `/api/finance/upcoming-events/${id}/cancel`,
+    json('POST', command)
+  );
+}
+
+/** Merealisasikan agenda menjadi transaksi riil. */
+export async function realizeUpcomingEvent(
+  id: string,
+  command: { occurredOn?: string; description?: string } = {}
+): Promise<RealizeUpcomingEventResult> {
+  return request(
+    `/api/finance/upcoming-events/${id}/realize`,
+    json('POST', command)
+  );
+}
+
+export async function deleteUpcomingEvent(id: string): Promise<void> {
+  await requestNoContent(`/api/finance/upcoming-events/${id}`, {
+    method: 'DELETE',
   });
+}
+
+// ───────────────────────── Natural input ─────────────────────────
+
+/**
+ * Interpreter only: menghasilkan structured command/preview tanpa menyentuh database.
+ * User mengonfirmasi, lalu command dikirim ke endpoint yang sesuai.
+ */
+export async function interpret(input: string): Promise<InterpretResponse> {
+  return request('/api/interpret', json('POST', { input }));
 }

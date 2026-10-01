@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 
+import type { SetAsideCycleKind } from '../../types';
 import {
   formatCurrencyRaw,
   formatNumberString,
+  incrementalPlafonStatus,
   parseFormattedNumber,
   posCategoryLabel,
   type Account,
@@ -44,7 +46,12 @@ interface YangDisisihkanSectionProps {
   onPageChange: (p: number) => void;
   onTopUp: (id: string, amount: number) => void;
   onWithdraw: (id: string, amount: number) => void;
-  onUseIncremental: (id: string, amount: number, note?: string) => void;
+  onUseIncremental: (
+    id: string,
+    amount: number,
+    note?: string,
+    freeCashAccountId?: string
+  ) => void;
   onExecuteBatch: (id: string, actualCost: number, note?: string) => void;
   onExecuteSingle: (id: string, actualCost: number, note?: string) => void;
   onCreate: (input: CreatePosInput) => void;
@@ -191,6 +198,7 @@ export default function YangDisisihkanSection({
       {modal?.kind === 'savings' ? (
         <SavingsModal
           pos={modal.pos}
+          accounts={accounts}
           onClose={() => setModal(null)}
           onTopUp={(amt) => {
             onTopUp(modal.pos.id, amt);
@@ -211,9 +219,10 @@ export default function YangDisisihkanSection({
       {modal?.kind === 'incremental' ? (
         <IncrementalModal
           pos={modal.pos}
+          accounts={accounts}
           onClose={() => setModal(null)}
-          onSubmit={(amt, note) => {
-            onUseIncremental(modal.pos.id, amt, note);
+          onSubmit={(amt, note, freeCashAccountId) => {
+            onUseIncremental(modal.pos.id, amt, note, freeCashAccountId);
             setModal(null);
           }}
         />
@@ -281,10 +290,16 @@ function PosCard({
   const targetPct = hasTarget
     ? Math.min(100, Math.round((pos.amount / (pos.targetAmount as number)) * 100))
     : 0;
-  const usedPct =
-    pos.plafon && pos.plafon > 0
-      ? Math.min(100, Math.round(((pos.usedAmount || 0) / pos.plafon) * 100))
-      : 0;
+  // Rutinitas Bertahap — lihat incrementalPlafonStatus (financeCalc):
+  // bar = SISA dana terhadap plafon, warna mengikuti margin aman,
+  // overspend hanya warning dengan nominal, tanpa saldo negatif / overflow.
+  const { limit, remaining, remainingPct, tone: remainingTone, overage } =
+    incrementalPlafonStatus({
+      amount: pos.amount,
+      plafon: pos.plafon,
+      targetAmount: pos.targetAmount,
+      usedAmount: pos.usedAmount,
+    });
 
   const actionLabel =
     pos.category === 'routine_incremental'
@@ -301,7 +316,7 @@ function PosCard({
     pos.category === 'routine_incremental'
       ? `Terpakai ${formatCurrencyRaw(pos.usedAmount || 0)}`
       : pos.category === 'routine_batch'
-        ? 'Target terpenuh'
+        ? ''
         : pos.category === 'single_spend'
           ? 'Dana terkumpul penuh'
           : pos.status || (hasTarget ? `${targetPct}% tercapai` : 'Fleksibel');
@@ -332,16 +347,18 @@ function PosCard({
         <div className="text-right shrink-0">
           <div className="font-headline text-[22px] font-semibold tabular-nums tracking-tight text-lo-text-ink leading-tight">
             {pos.category === 'routine_incremental'
-              ? `Sisa ${formatCurrencyRaw(pos.amount)}`
+              ? limit > 0
+                ? `Sisa ${formatCurrencyRaw(remaining)} / ${formatCurrencyRaw(limit)}`
+                : `Sisa ${formatCurrencyRaw(remaining)}`
               : formatCurrencyRaw(pos.amount)}
           </div>
           <div className="text-[11px] text-lo-text-subtle mt-0.5">
             {pos.category === 'routine_incremental'
-              ? `${100 - usedPct}% aman`
-              : hasTarget
-                ? `Target ${formatCurrencyRaw(pos.targetAmount as number)} (${targetPct}%)`
-                : pos.category === 'routine_batch'
-                  ? `${formatCurrencyRaw(pos.plafon || pos.amount)} (100% Siap)`
+              ? ''
+              : pos.category === 'routine_batch'
+                ? ''
+                : hasTarget
+                  ? `Target ${formatCurrencyRaw(pos.targetAmount as number)} (${targetPct}%)`
                   : pos.category === 'single_spend'
                     ? `${pos.status || 'Siap'}`
                     : ''}
@@ -349,20 +366,24 @@ function PosCard({
         </div>
       </div>
 
-      {/* Progress */}
+      {/* Progress — hanya Bertahap / Sekali Pakai / Tabungan ber-target.
+          Rutinitas Berkala: dana sudah tersedia, tanpa progress bar. */}
       {pos.category === 'saving' && hasTarget ? (
         <div className="mt-4 pt-3 border-t border-lo-border-hairline/40">
           <ProgressBar percent={targetPct} />
         </div>
       ) : null}
-      {pos.category === 'routine_incremental' && pos.plafon ? (
+      {pos.category === 'routine_incremental' && limit > 0 ? (
         <div className="mt-4 pt-3 border-t border-lo-border-hairline/40">
-          <ProgressBar percent={usedPct} />
-        </div>
-      ) : null}
-      {pos.category === 'routine_batch' ? (
-        <div className="mt-4 pt-3 border-t border-lo-border-hairline/40">
-          <ProgressBar percent={pos.amount > 0 ? 100 : 0} />
+          <ProgressBar percent={remainingPct} tone={remainingTone} />
+          {overage > 0 ? (
+            <div className="mt-1.5 flex flex-col gap-0.5 text-[11px] font-medium text-lo-warning">
+              <span>
+                Melewati plafon <span className="font-semibold">{formatCurrencyRaw(overage)}</span>
+              </span>
+              <span>Dari Uang Bebas</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {pos.category === 'single_spend' && hasTarget ? (
@@ -430,20 +451,49 @@ function CreatePosModal({
 }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState<PosCategory>('saving');
-  const [accountLabel, setAccountLabel] = useState(accounts[0]?.name || 'SeaBank');
+  const [accountLabel, setAccountLabel] = useState('');
   const [target, setTarget] = useState('');
   const [plafon, setPlafon] = useState('');
   const [cycle, setCycle] = useState('Bulanan');
+  const [cycleKind, setCycleKind] = useState<SetAsideCycleKind>('Monthly');
   const [description, setDescription] = useState('');
 
-  const canSubmit = name.trim().length >= 2;
+  // Only real, non-archived accounts may be picked as the source of funds.
+  // Non-tabungan: tampilkan available balance; Rp0 tidak dapat dipilih.
+  const isFundingNonSaving = category !== 'saving';
+  const baseAccounts = accounts.filter((a) => !a.archived);
+  const selectableAccounts = isFundingNonSaving
+    ? baseAccounts.filter((a) => a.availableBalance > 0)
+    : baseAccounts;
+  const selectedAccount =
+    selectableAccounts.find((a) => a.name === accountLabel) ?? selectableAccounts[0];
+
+  // Dana yang disiapkan = Plafon Siklus / Estimasi Biaya / Target Anggaran
+  // (bukan input user). Rutinitas Berkala: dana langsung disisihkan saat create.
+  const preparesInitialFunds =
+    category === 'routine_incremental' ||
+    category === 'routine_batch' ||
+    category === 'single_spend';
+  const prepareAmount = preparesInitialFunds ? parseFormattedNumber(plafon) : 0;
+  const availableBalance = selectedAccount?.availableBalance ?? 0;
+  const exceedsAvailable = prepareAmount > 0 && prepareAmount > availableBalance;
+  const missingNominal = preparesInitialFunds && prepareAmount <= 0;
+
+  const canSubmit =
+    name.trim().length >= 2 &&
+    !!selectedAccount &&
+    (!isFundingNonSaving || selectedAccount.availableBalance > 0) &&
+    !missingNominal &&
+    !exceedsAvailable;
 
   const reset = () => {
     setName('');
     setCategory('saving');
+    setAccountLabel('');
     setTarget('');
     setPlafon('');
     setCycle('Bulanan');
+    setCycleKind('Monthly');
     setDescription('');
   };
 
@@ -479,14 +529,17 @@ function CreatePosModal({
                   description.trim() ||
                   (category === 'saving' ? 'Simpanan fleksibel' : 'Pos dana baru'),
                 category,
-                accountLabel,
+                accountLabel: selectedAccount?.name ?? '',
                 targetAmount:
                   category === 'saving' && target ? parseFormattedNumber(target) : undefined,
                 plafon:
-                  category === 'routine_incremental' || category === 'routine_batch'
+                  category === 'routine_incremental' ||
+                  category === 'routine_batch' ||
+                  category === 'single_spend'
                     ? parseFormattedNumber(plafon) || undefined
                     : undefined,
                 cycle: category === 'routine_batch' ? cycle : undefined,
+                cycleKind: category === 'routine_incremental' ? cycleKind : undefined,
               });
               reset();
             }}
@@ -523,16 +576,30 @@ function CreatePosModal({
             <select
               id="new-pos-account"
               className={selectBase}
-              value={accountLabel}
+              value={selectedAccount?.name ?? ''}
               onChange={(e) => setAccountLabel(e.target.value)}
             >
-              {accounts.map((a) => (
+              {selectableAccounts.length === 0 && (
+                <option value="" disabled>
+                  {isFundingNonSaving
+                    ? 'Tidak ada rekening dengan saldo tersedia'
+                    : 'Belum ada rekening aktif'}
+                </option>
+              )}
+              {selectableAccounts.map((a) => (
                 <option key={a.id} value={a.name}>
-                  {a.name}
+                  {isFundingNonSaving
+                    ? `${a.name} — ${formatCurrencyRaw(a.availableBalance)} tersedia`
+                    : a.name}
                 </option>
               ))}
-              <option value="BCA Syariah">BCA Syariah</option>
             </select>
+            {isFundingNonSaving && selectedAccount ? (
+              <span className="text-[11px] text-lo-text-subtle">
+                Tersedia {formatCurrencyRaw(selectedAccount.availableBalance)} di{' '}
+                {selectedAccount.name}.
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -571,6 +638,26 @@ function CreatePosModal({
 
         {category === 'routine_incremental' ? (
           <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-cycle-kind">
+              Pengulangan <span className="text-lo-secondary">*</span>
+            </label>
+            <select
+              id="new-pos-cycle-kind"
+              className={selectBase}
+              value={cycleKind}
+              onChange={(e) => setCycleKind(e.target.value as SetAsideCycleKind)}
+            >
+              <option value="Weekly">Mingguan</option>
+              <option value="Monthly">Bulanan</option>
+              <option value="Quarterly">Triwulanan</option>
+              <option value="SemiAnnual">Semesteran</option>
+              <option value="Annual">Tahunan</option>
+            </select>
+          </div>
+        ) : null}
+
+        {category === 'routine_incremental' ? (
+          <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-plafon">
               Plafon Siklus (Rp) <span className="text-lo-secondary">*</span>
             </label>
@@ -582,6 +669,18 @@ function CreatePosModal({
               onChange={(e) => setPlafon(formatNumberString(e.target.value))}
               placeholder="Contoh: 300000"
             />
+            {exceedsAvailable ? (
+              <p className="text-[11px] text-lo-error">
+                Plafon {formatCurrencyRaw(prepareAmount)} melebihi saldo tersedia{' '}
+                {formatCurrencyRaw(availableBalance)} di{' '}
+                {selectedAccount?.name ?? 'rekening'}. Kurangi plafon atau pilih rekening lain.
+              </p>
+            ) : (
+              <span className="text-[11px] text-lo-text-subtle">
+                Sistem menyiapkan dana dari Uang Bebas sampai mencapai plafon ini. Cycle
+                berikutnya dinormalisasi kembali ke plafon.
+              </span>
+            )}
           </div>
         ) : null}
 
@@ -616,6 +715,20 @@ function CreatePosModal({
                 placeholder="Contoh: 500000"
               />
             </div>
+            <div className="sm:col-span-2">
+              {exceedsAvailable ? (
+                <p className="text-[11px] text-lo-error">
+                  Estimasi biaya {formatCurrencyRaw(prepareAmount)} melebihi saldo tersedia{' '}
+                  {formatCurrencyRaw(availableBalance)} di{' '}
+                  {selectedAccount?.name ?? 'rekening'}. Kurangi nominal atau pilih rekening lain.
+                </p>
+              ) : (
+                <span className="text-[11px] text-lo-text-subtle">
+                  Dana langsung disisihkan dari Uang Bebas saat pos dibuat. Digunakan saat
+                  kebutuhan terjadi.
+                </span>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -630,11 +743,20 @@ function CreatePosModal({
               className={inputBase}
               value={plafon}
               onChange={(e) => setPlafon(formatNumberString(e.target.value))}
-              placeholder="Contoh: 400000"
+              placeholder="Contoh: 2000000"
             />
-            <span className="text-[11px] text-lo-text-subtle">
-              Setelah dibelanjakan tuntas, pos akan dipindahkan dari daftar aktif.
-            </span>
+            {exceedsAvailable ? (
+              <p className="text-[11px] text-lo-error">
+                Target {formatCurrencyRaw(prepareAmount)} melebihi saldo tersedia{' '}
+                {formatCurrencyRaw(availableBalance)} di{' '}
+                {selectedAccount?.name ?? 'rekening'}. Kurangi target atau pilih rekening lain.
+              </p>
+            ) : (
+              <span className="text-[11px] text-lo-text-subtle">
+                Sistem menyisihkan dana dari Uang Bebas rekening sumber sesuai target ini. Setelah
+                digunakan tuntas, pos keluar dari daftar aktif.
+              </span>
+            )}
           </div>
         ) : null}
 
@@ -653,7 +775,15 @@ function CreatePosModal({
         </div>
 
         {!canSubmit ? (
-          <p className="text-[11px] text-lo-text-subtle">Isi nama pos untuk melanjutkan.</p>
+          <p className="text-[11px] text-lo-text-subtle">
+            {exceedsAvailable
+              ? 'Dana yang disiapkan melebihi saldo tersedia rekening sumber. Kurangi nominal atau pilih rekening lain.'
+              : missingNominal
+                ? 'Isi plafon siklus / estimasi biaya / target anggaran untuk melanjutkan.'
+                : isFundingNonSaving && baseAccounts.length > 0 && selectableAccounts.length === 0
+                  ? 'Semua rekening memiliki saldo tersedia Rp 0. Tambah dana atau pilih tipe pos lain.'
+                  : 'Isi nama pos untuk melanjutkan.'}
+          </p>
         ) : null}
       </div>
     </Modal>
@@ -664,12 +794,14 @@ function CreatePosModal({
 
 function SavingsModal({
   pos,
+  accounts,
   onClose,
   onTopUp,
   onWithdraw,
   onDelete,
 }: {
   pos: PosItem;
+  accounts: Account[];
   onClose: () => void;
   onTopUp: (amount: number) => void;
   onWithdraw: (amount: number) => void;
@@ -678,7 +810,17 @@ function SavingsModal({
   const [mode, setMode] = useState<'topup' | 'withdraw'>('topup');
   const [amountStr, setAmountStr] = useState('');
   const amount = parseFormattedNumber(amountStr);
-  const canSubmit = amount > 0 && (mode === 'topup' || amount <= pos.amount);
+
+  // Available balance aktual dari Finance state — bukan hardcode.
+  const sourceAccount = accounts.find((a) => a.name === pos.accountLabel);
+  const availableBalance = sourceAccount?.availableBalance ?? 0;
+
+  const exceedsAvailable = mode === 'topup' && amount > availableBalance;
+  const canSubmit =
+    amount > 0 &&
+    (mode === 'topup'
+      ? !exceedsAvailable && amount <= availableBalance
+      : amount <= pos.amount);
 
   const setQuick = (v: number) => {
     if (mode === 'topup') {
@@ -803,9 +945,15 @@ function SavingsModal({
               placeholder="Ketik nominal transfer..."
             />
           </div>
+          {mode === 'topup' && exceedsAvailable ? (
+            <p className="mt-2 text-[12px] text-lo-error">
+              Melebihi saldo tersedia {formatCurrencyRaw(availableBalance)} di{' '}
+              {pos.accountLabel}. Maksimal top-up {formatCurrencyRaw(availableBalance)}.
+            </p>
+          ) : null}
           <div className="mt-3 p-3 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline text-[12px] text-lo-text-subtle">
             {mode === 'topup'
-              ? 'Menyisihkan dana ke pos simpanan akan mengurangi Uang Bebas aktif Anda.'
+              ? `Maksimal top-up: ${formatCurrencyRaw(availableBalance)} (saldo tersedia ${pos.accountLabel}).`
               : `Maksimal tarik: ${formatCurrencyRaw(pos.amount)}.`}
           </div>
         </div>
@@ -818,17 +966,33 @@ function SavingsModal({
 
 function IncrementalModal({
   pos,
+  accounts,
   onClose,
   onSubmit,
 }: {
   pos: PosItem;
+  accounts: Account[];
   onClose: () => void;
-  onSubmit: (amount: number, note?: string) => void;
+  onSubmit: (amount: number, note?: string, freeCashAccountId?: string) => void;
 }) {
   const [amountStr, setAmountStr] = useState('');
   const [note, setNote] = useState('');
+  const [freeCashLabel, setFreeCashLabel] = useState('');
   const amount = parseFormattedNumber(amountStr);
-  const canSubmit = amount > 0 && amount <= pos.amount;
+
+  // Plafon = batas aman, bukan hard limit. Pemakaian boleh melebihi saldo pos;
+  // kekurangannya diambil dari Uang Bebas (rekening terpilih).
+  const fromPos = Math.min(amount, pos.amount);
+  const shortfall = Math.max(0, amount - pos.amount);
+
+  const freeCashAccounts = accounts.filter((a) => !a.archived && a.availableBalance > 0);
+  const selectedFreeCash =
+    freeCashAccounts.find((a) => a.name === freeCashLabel) ?? freeCashAccounts[0];
+  const freeCashAvailable = selectedFreeCash?.availableBalance ?? 0;
+  const exceedsFreeCash = shortfall > 0 && shortfall > freeCashAvailable;
+
+  const canSubmit =
+    amount > 0 && (shortfall === 0 || (!!selectedFreeCash && !exceedsFreeCash));
 
   return (
     <Modal
@@ -848,7 +1012,13 @@ function IncrementalModal({
           <button
             type="button"
             disabled={!canSubmit}
-            onClick={() => onSubmit(amount, note || undefined)}
+            onClick={() =>
+              onSubmit(
+                amount,
+                note || undefined,
+                shortfall > 0 ? selectedFreeCash?.id : undefined
+              )
+            }
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-base" />
@@ -865,12 +1035,13 @@ function IncrementalModal({
             </span>
             <span className="text-base font-semibold text-lo-text-ink">{pos.name}</span>
             <span className="text-[12px] text-lo-text-subtle block mt-0.5">
-              {pos.accountLabel} · Plafon {formatCurrencyRaw(pos.plafon || 0)}
+              {pos.accountLabel} · Plafon{' '}
+              {formatCurrencyRaw(pos.plafon ?? pos.targetAmount ?? 0)} (batas aman)
             </span>
           </div>
           <div className="text-right">
             <span className="text-[11px] text-lo-text-subtle block uppercase tracking-wide">
-              Sisa Plafon Siap Pakai
+              Saldo Pos Saat Ini
             </span>
             <span className="text-2xl font-semibold tabular-nums text-lo-text-ink">
               {formatCurrencyRaw(pos.amount)}
@@ -887,7 +1058,7 @@ function IncrementalModal({
               <button
                 key={v}
                 type="button"
-                onClick={() => setAmountStr(String(Math.min(v, pos.amount)))}
+                onClick={() => setAmountStr(String(v))}
                 className="py-2 rounded-lg text-[11px] bg-lo-surface-cream hover:bg-lo-accent-wash text-lo-text-ink border border-lo-border-hairline font-medium text-center transition-all cursor-pointer"
               >
                 {v / 1000}rb
@@ -907,6 +1078,42 @@ function IncrementalModal({
           </div>
         </div>
 
+        {shortfall > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-lo-text-ink" htmlFor="inc-free-cash">
+              Rekening Uang Bebas <span className="text-lo-secondary">*</span>
+            </label>
+            <select
+              id="inc-free-cash"
+              className={selectBase}
+              value={selectedFreeCash?.name ?? ''}
+              onChange={(e) => setFreeCashLabel(e.target.value)}
+            >
+              {freeCashAccounts.length === 0 && (
+                <option value="" disabled>
+                  Tidak ada rekening dengan saldo tersedia
+                </option>
+              )}
+              {freeCashAccounts.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name} — {formatCurrencyRaw(a.availableBalance)} tersedia
+                </option>
+              ))}
+            </select>
+            {exceedsFreeCash ? (
+              <p className="text-[11px] text-lo-error">
+                Kekurangan {formatCurrencyRaw(shortfall)} melebihi saldo tersedia{' '}
+                {formatCurrencyRaw(freeCashAvailable)} di{' '}
+                {selectedFreeCash?.name ?? 'rekening'}. Pilih rekening lain atau kurangi nominal.
+              </p>
+            ) : (
+              <span className="text-[11px] text-lo-text-subtle">
+                Dipakai untuk menutup kekurangan di atas saldo pos.
+              </span>
+            )}
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-lo-text-ink" htmlFor="inc-note">
             Keperluan / Catatan Transaksi
@@ -922,14 +1129,27 @@ function IncrementalModal({
         </div>
 
         {amount > 0 ? (
-          <div className="p-3 rounded-xl bg-lo-accent-wash/60 border border-lo-secondary/20 text-xs text-lo-text-ink">
-            Pemakaian{' '}
-            <span className="font-semibold font-headline">{formatCurrencyRaw(amount)}</span> akan
-            mengurangi sisa plafon menjadi{' '}
-            <span className="font-semibold font-headline">
-              {formatCurrencyRaw(Math.max(0, pos.amount - amount))}
-            </span>
-            .
+          <div className="p-3 rounded-xl bg-lo-accent-wash/60 border border-lo-secondary/20 text-xs text-lo-text-ink space-y-1">
+            <div>
+              Pemakaian{' '}
+              <span className="font-semibold font-headline">{formatCurrencyRaw(amount)}</span>{' '}
+              dicatat sebagai Expense penuh.
+            </div>
+            <div className="text-lo-text-subtle">
+              Dari saldo pos:{' '}
+              <span className="font-semibold font-headline text-lo-text-ink">
+                {formatCurrencyRaw(fromPos)}
+              </span>
+              {shortfall > 0 ? (
+                <>
+                  {' · '}Dari Uang Bebas:{' '}
+                  <span className="font-semibold font-headline text-lo-text-ink">
+                    {formatCurrencyRaw(shortfall)}
+                  </span>
+                  {selectedFreeCash ? ` (${selectedFreeCash.name})` : ''}
+                </>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>

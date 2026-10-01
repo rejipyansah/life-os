@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 
 import {
   formatCurrencyRaw,
+  type Account,
   type AgendaItem,
   type ArchivedAgenda,
   type CreateAgendaInput,
@@ -25,6 +26,7 @@ import {
 const AGENDA_PER_PAGE = 5;
 
 interface AgendaKasSectionProps {
+  accounts: Account[];
   agendas: AgendaItem[];
   archivedAgendas: ArchivedAgenda[];
   filter: 'all' | 'scheduled' | 'flexible';
@@ -41,6 +43,7 @@ interface AgendaKasSectionProps {
 type ConfirmKind = 'skip' | 'postpone' | 'delete' | 'finish';
 
 export default function AgendaKasSection({
+  accounts,
   agendas,
   archivedAgendas,
   filter,
@@ -173,6 +176,7 @@ export default function AgendaKasSection({
 
       <CreateAgendaModal
         open={createOpen}
+        accounts={accounts}
         onClose={() => setCreateOpen(false)}
         onCreate={(input) => {
           onCreate(input);
@@ -336,10 +340,12 @@ function AgendaCard({
 
 function CreateAgendaModal({
   open,
+  accounts,
   onClose,
   onCreate,
 }: {
   open: boolean;
+  accounts: Account[];
   onClose: () => void;
   onCreate: (input: CreateAgendaInput) => void;
 }) {
@@ -349,12 +355,18 @@ function CreateAgendaModal({
   const [category, setCategory] = useState('Utilitas Rutin');
   const [date, setDate] = useState('');
   const [repeat, setRepeat] = useState('Bulanan');
-  const [accountLabel, setAccountLabel] = useState('BCA Operasional');
+  const [accountLabel, setAccountLabel] = useState('');
   const [agendaType, setAgendaType] = useState<'scheduled' | 'flexible'>('scheduled');
   const [note, setNote] = useState('');
 
+  // Only real, non-archived accounts may be picked as the cash account.
+  const selectableAccounts = accounts.filter((a) => !a.archived);
+  const selectedAccount =
+    selectableAccounts.find((a) => a.name === accountLabel) ?? selectableAccounts[0];
+
   const amountNum = parseInt(amount.replace(/\D/g, ''), 10) || 0;
-  const canSubmit = title.trim().length > 0 && amountNum > 0 && date.length > 0;
+  const canSubmit =
+    title.trim().length > 0 && amountNum > 0 && date.length > 0 && !!selectedAccount;
 
   const reset = () => {
     setIsIncome(false);
@@ -363,7 +375,7 @@ function CreateAgendaModal({
     setCategory('Utilitas Rutin');
     setDate('');
     setRepeat('Bulanan');
-    setAccountLabel('BCA Operasional');
+    setAccountLabel('');
     setAgendaType('scheduled');
     setNote('');
   };
@@ -399,7 +411,7 @@ function CreateAgendaModal({
                 amount: amountNum,
                 isIncome,
                 rawDate: date,
-                accountLabel,
+                accountLabel: selectedAccount?.name ?? '',
                 categoryLabel: isIncome ? 'Pemasukan Kas' : category,
                 repeat,
                 type: agendaType,
@@ -562,13 +574,19 @@ function CreateAgendaModal({
             <select
               id="agd-account"
               className={`${selectBase} text-xs`}
-              value={accountLabel}
+              value={selectedAccount?.name ?? ''}
               onChange={(e) => setAccountLabel(e.target.value)}
             >
-              <option value="BCA Operasional">BCA Operasional</option>
-              <option value="SeaBank">SeaBank</option>
-              <option value="Bank Mandiri">Bank Mandiri</option>
-              <option value="Dompet Tunai">Dompet Tunai</option>
+              {selectableAccounts.length === 0 && (
+                <option value="" disabled>
+                  Belum ada rekening aktif
+                </option>
+              )}
+              {selectableAccounts.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
             </select>
           </div>
           <div>

@@ -4,13 +4,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LifeOS.Api.Services;
 
+/// <summary>
+/// Natural Input → interpret → structured command/preview → user confirmation → backend command.
+///
+/// Interpreter tetap interpreter: langkah ini tidak pernah memodifikasi database.
+/// User mengonfirmasi preview, lalu frontend mengirim command ke endpoint yang sesuai.
+/// </summary>
 public static class InterpretEndpoint
 {
     public record HandlerResult(int StatusCode, object Body);
 
     private static readonly HashSet<string> ValidFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "amount", "account", "toAccount", "allocationName"
+        "amount", "account", "toAccount", "setAsideName", "title", "direction", "date"
     };
 
     private static readonly Dictionary<string, string> FieldMessages = new(StringComparer.OrdinalIgnoreCase)
@@ -18,8 +24,15 @@ public static class InterpretEndpoint
         ["amount"] = "Nominalnya berapa?",
         ["account"] = "Dari akun mana?",
         ["toAccount"] = "Ke akun mana?",
-        ["allocationName"] = "Untuk keperluan apa?"
+        ["setAsideName"] = "Untuk keperluan apa?",
+        ["title"] = "Agendanya untuk apa?",
+        ["direction"] = "Apakah ini pemasukan atau pengeluaran?",
+        ["date"] = "Tanggalnya kapan?"
     };
+
+    private const string IntentTransaction = "CreateTransaction";
+    private const string IntentSetAside = "CreateSetAside";
+    private const string IntentEvent = "CreateUpcomingEvent";
 
     public static async Task<HandlerResult> HandleAsync(
         InterpretInputRequest body,
@@ -40,7 +53,7 @@ public static class InterpretEndpoint
         {
             return new HandlerResult(200, new InterpretResponse
             {
-                Intent = "CreateTransaction",
+                Intent = IntentTransaction,
                 State = "NeedsClarification",
                 Clarifications = ["No accounts available. Please create an account first."]
             });
@@ -72,11 +85,11 @@ public static class InterpretEndpoint
         Guid scopeId,
         string userInput = "")
     {
-        if (raw.Intent == "Unsupported")
+        if (raw.Intent == "Unsupported" || raw.Intent is not (IntentTransaction or IntentSetAside or IntentEvent))
         {
             return new InterpretResponse
             {
-                Intent = "Unsupported",
+                Intent = raw.Intent,
                 State = "Unsupported",
                 Clarifications = ["This input doesn't match any supported financial action."]
             };
@@ -87,17 +100,23 @@ public static class InterpretEndpoint
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (raw.Intent == "CreateAllocation")
+        switch (raw.Intent)
         {
-            CollectAllocationFields(raw, eligibleAccounts, fields);
-            return BuildResponse(raw, fields, eligibleAccounts, scopeId);
+            case IntentSetAside:
+                CollectSetAsideFields(raw, eligibleAccounts, fields);
+                break;
+            case IntentEvent:
+                CollectEventFields(raw, eligibleAccounts, fields);
+                break;
+            default:
+                CollectTransactionFields(raw, eligibleAccounts, userInput, fields);
+                break;
         }
 
-        CollectTransactionFields(raw, eligibleAccounts, scopeId, userInput, fields);
         return BuildResponse(raw, fields, eligibleAccounts, scopeId);
     }
 
-    private static void CollectAllocationFields(
+    private static void CollectSetAsideFields(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
         List<string> fields)
@@ -105,36 +124,45 @@ public static class InterpretEndpoint
         if (!raw.Amount.HasValue || raw.Amount <= 0)
             AddField(fields, "amount");
 
-        if (string.IsNullOrWhiteSpace(raw.AllocationName))
-            AddField(fields, "allocationName");
+        if (string.IsNullOrWhiteSpace(raw.SetAsideName))
+            AddField(fields, "setAsideName");
 
-        if (string.IsNullOrEmpty(raw.Account))
-        {
+        if (!TryResolveAccount(raw.Account, eligibleAccounts, out _))
             AddField(fields, "account");
-        }
-        else
-        {
-            var accountNameLookup = eligibleAccounts.ToDictionary(
-                a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
+    }
 
-            if (!accountNameLookup.ContainsKey(raw.Account))
-                AddField(fields, "account");
-        }
+    private static void CollectEventFields(
+        InterpretResult raw,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        List<string> fields)
+    {
+        if (!raw.Amount.HasValue || raw.Amount <= 0)
+            AddField(fields, "amount");
+
+        if (string.IsNullOrWhiteSpace(raw.Title))
+            AddField(fields, "title");
+
+        if (raw.Direction is not ("Income" or "Expense"))
+            AddField(fields, "direction");
+
+        if (!TryResolveAccount(raw.Account, eligibleAccounts, out _))
+            AddField(fields, "account");
+
+        // Agenda fleksibel boleh tanpa tanggal; tanpa tanggal ia otomatis Flexible.
+        if (!string.IsNullOrWhiteSpace(raw.Date) && !TryParseDate(raw.Date, out _))
+            AddField(fields, "date");
     }
 
     private static void CollectTransactionFields(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
-        Guid scopeId,
         string userInput,
         List<string> fields)
     {
         if (string.IsNullOrEmpty(raw.TransactionType) || !raw.Amount.HasValue || raw.Amount <= 0)
         {
             if (string.IsNullOrEmpty(raw.TransactionType))
-            {
                 AddField(fields, "account");
-            }
 
             if (!raw.Amount.HasValue || raw.Amount <= 0)
                 AddField(fields, "amount");
@@ -145,46 +173,27 @@ public static class InterpretEndpoint
         if (raw.TransactionType is not ("Expense" or "Income" or "Transfer"))
             return;
 
-        if (string.IsNullOrEmpty(raw.Account))
-        {
+        if (!TryResolveAccount(raw.Account, eligibleAccounts, out _))
             AddField(fields, "account");
-        }
-        else
-        {
-            var accountNameLookup = eligibleAccounts.ToDictionary(
-                a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
-
-            if (!accountNameLookup.ContainsKey(raw.Account))
-                AddField(fields, "account");
-        }
 
         if (raw.TransactionType == "Transfer")
         {
-            if (string.IsNullOrEmpty(raw.ToAccount))
+            if (!TryResolveAccount(raw.ToAccount, eligibleAccounts, out _))
             {
                 AddField(fields, "toAccount");
             }
-            else
+            else if (!string.IsNullOrEmpty(userInput)
+                && !fields.Contains("toAccount", StringComparer.OrdinalIgnoreCase)
+                && !IsAccountMentionedInInput(raw.ToAccount!, userInput))
             {
-                var accountNameLookup = eligibleAccounts.ToDictionary(
-                    a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
-
-                if (!accountNameLookup.TryGetValue(raw.ToAccount, out var _))
-                {
-                    AddField(fields, "toAccount");
-                }
+                AddField(fields, "toAccount");
             }
 
-            if (!string.IsNullOrEmpty(userInput) && !fields.Contains("account", StringComparer.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(userInput)
+                && !fields.Contains("account", StringComparer.OrdinalIgnoreCase)
+                && !IsAccountMentionedInInput(raw.Account!, userInput))
             {
-                if (!IsAccountMentionedInInput(raw.Account!, userInput))
-                    AddField(fields, "account");
-            }
-
-            if (!string.IsNullOrEmpty(userInput) && !fields.Contains("toAccount", StringComparer.OrdinalIgnoreCase))
-            {
-                if (!string.IsNullOrEmpty(raw.ToAccount) && !IsAccountMentionedInInput(raw.ToAccount, userInput))
-                    AddField(fields, "toAccount");
+                AddField(fields, "account");
             }
         }
     }
@@ -214,51 +223,91 @@ public static class InterpretEndpoint
             };
         }
 
-        if (raw.Intent == "CreateAllocation")
-            return BuildAllocationReady(raw, eligibleAccounts, scopeId);
-
-        return BuildTransactionReady(raw, eligibleAccounts, scopeId);
+        return raw.Intent switch
+        {
+            IntentSetAside => BuildSetAsideReady(raw, eligibleAccounts, scopeId),
+            IntentEvent => BuildEventReady(raw, eligibleAccounts, scopeId),
+            _ => BuildTransactionReady(raw, eligibleAccounts, scopeId)
+        };
     }
 
-    private static InterpretResponse BuildAllocationReady(
+    private static InterpretResponse BuildSetAsideReady(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
         Guid scopeId)
     {
-        var accountNameLookup = eligibleAccounts.ToDictionary(
-            a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
-
-        if (!accountNameLookup.TryGetValue(raw.Account!, out var accountId))
+        if (!TryResolveAccount(raw.Account, eligibleAccounts, out var accountId))
         {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = [$"Account '{raw.Account}' not found. Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
-            };
+            return NotFound(raw, raw.Account, eligibleAccounts);
         }
 
-        var preview = new InterpretAllocationData
+        var preview = new InterpretSetAsideData
         {
-            Name = raw.AllocationName!,
+            Name = raw.SetAsideName!,
             Amount = raw.Amount!.Value,
             Account = raw.Account
         };
 
-        var command = new CreateAllocationCommand
+        var command = new CreateSetAsideCommand
         {
             ScopeId = scopeId,
             AccountId = accountId,
-            Name = raw.AllocationName!.Trim(),
-            Amount = raw.Amount!.Value
+            Name = raw.SetAsideName!.Trim(),
+            Amount = raw.Amount!.Value,
+            Kind = SetAsideKind.Saving
         };
 
         return new InterpretResponse
         {
             Intent = raw.Intent,
             State = "Ready",
-            AllocationPreview = preview,
-            AllocationCommand = command,
+            SetAsidePreview = preview,
+            SetAsideCommand = command,
+            Clarifications = []
+        };
+    }
+
+    private static InterpretResponse BuildEventReady(
+        InterpretResult raw,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        Guid scopeId)
+    {
+        if (!TryResolveAccount(raw.Account, eligibleAccounts, out var accountId))
+        {
+            return NotFound(raw, raw.Account, eligibleAccounts);
+        }
+
+        DateOnly? dueDate = string.IsNullOrWhiteSpace(raw.Date) ? null : ParseDate(raw.Date!);
+        var isIncome = raw.Direction == "Income";
+
+        var preview = new InterpretEventData
+        {
+            Title = raw.Title!,
+            Amount = raw.Amount!.Value,
+            Direction = isIncome ? "Income" : "Expense",
+            Account = raw.Account,
+            Date = raw.Date
+        };
+
+        var command = new CreateUpcomingEventCommand
+        {
+            ScopeId = scopeId,
+            AccountId = accountId,
+            Title = raw.Title!.Trim(),
+            Amount = raw.Amount!.Value,
+            Direction = isIncome ? UpcomingEventDirection.Income : UpcomingEventDirection.Expense,
+            DueDate = dueDate,
+            ScheduleKind = dueDate.HasValue
+                ? UpcomingEventScheduleKind.Scheduled
+                : UpcomingEventScheduleKind.Flexible
+        };
+
+        return new InterpretResponse
+        {
+            Intent = raw.Intent,
+            State = "Ready",
+            EventPreview = preview,
+            EventCommand = command,
             Clarifications = []
         };
     }
@@ -268,29 +317,16 @@ public static class InterpretEndpoint
         IReadOnlyList<AccountLookup> eligibleAccounts,
         Guid scopeId)
     {
-        var accountNameLookup = eligibleAccounts.ToDictionary(
-            a => a.Name, a => a.Id, StringComparer.OrdinalIgnoreCase);
-
-        if (!accountNameLookup.TryGetValue(raw.Account!, out var accountId))
+        if (!TryResolveAccount(raw.Account, eligibleAccounts, out var accountId))
         {
-            return new InterpretResponse
-            {
-                Intent = raw.Intent,
-                State = "NeedsClarification",
-                Clarifications = [$"Account '{raw.Account}' not found. Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
-            };
+            return NotFound(raw, raw.Account, eligibleAccounts);
         }
 
         if (raw.TransactionType == "Transfer")
         {
-            if (!accountNameLookup.TryGetValue(raw.ToAccount!, out var toAccountId))
+            if (!TryResolveAccount(raw.ToAccount, eligibleAccounts, out var toAccountId))
             {
-                return new InterpretResponse
-                {
-                    Intent = raw.Intent,
-                    State = "NeedsClarification",
-                    Clarifications = [$"Destination account '{raw.ToAccount}' not found. Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
-                };
+                return NotFound(raw, raw.ToAccount, eligibleAccounts);
             }
 
             if (accountId == toAccountId)
@@ -315,7 +351,7 @@ public static class InterpretEndpoint
             FeeAmount = raw.FeeAmount
         };
 
-        var command = BuildCreateTransactionCommand(raw, accountId, scopeId, accountNameLookup);
+        var command = BuildCreateTransactionCommand(raw, accountId, scopeId, eligibleAccounts);
 
         return new InterpretResponse
         {
@@ -331,14 +367,17 @@ public static class InterpretEndpoint
         InterpretResult raw,
         Guid accountId,
         Guid scopeId,
-        Dictionary<string, Guid> accountNameLookup)
+        IReadOnlyList<AccountLookup> eligibleAccounts)
     {
         var amount = raw.Amount!.Value;
         var type = raw.TransactionType!;
+        var occurredOn = string.IsNullOrWhiteSpace(raw.Date)
+            ? DateOnly.FromDateTime(DateTime.UtcNow)
+            : ParseDate(raw.Date!);
 
         if (type == "Transfer")
         {
-            var toAccountId = accountNameLookup[raw.ToAccount!];
+            TryResolveAccount(raw.ToAccount, eligibleAccounts, out var toAccountId);
             var fee = raw.FeeAmount ?? 0m;
 
             return new CreateTransactionCommand
@@ -347,7 +386,7 @@ public static class InterpretEndpoint
                 Type = TransactionType.Transfer,
                 Amount = amount,
                 Description = raw.Description,
-                OccurredOn = DateOnly.Parse(raw.Date ?? DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")),
+                OccurredOn = occurredOn,
                 FeeAmount = fee > 0 ? fee : null,
                 Entries =
                 [
@@ -366,13 +405,50 @@ public static class InterpretEndpoint
             Type = txType,
             Amount = amount,
             Description = raw.Description,
-            OccurredOn = DateOnly.Parse(raw.Date ?? DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")),
+            OccurredOn = occurredOn,
             Entries =
             [
                 new CreateTransactionEntryCommand { AccountId = accountId, Amount = signedAmount }
             ]
         };
     }
+
+    private static InterpretResponse NotFound(
+        InterpretResult raw, string? accountName, IReadOnlyList<AccountLookup> eligibleAccounts)
+        => new()
+        {
+            Intent = raw.Intent,
+            State = "NeedsClarification",
+            Clarifications =
+                [$"Account '{accountName}' not found. Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
+        };
+
+    private static bool TryResolveAccount(
+        string? accountName,
+        IReadOnlyList<AccountLookup> eligibleAccounts,
+        out Guid accountId)
+    {
+        accountId = Guid.Empty;
+        if (string.IsNullOrEmpty(accountName)) return false;
+
+        foreach (var account in eligibleAccounts)
+        {
+            if (string.Equals(account.Name, accountName, StringComparison.OrdinalIgnoreCase))
+            {
+                accountId = account.Id;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryParseDate(string value, out DateOnly date)
+        => DateOnly.TryParse(value, out date);
+
+    private static DateOnly ParseDate(string value)
+        => DateOnly.TryParse(value, out var date)
+            ? date
+            : throw new ValidationException($"Invalid date: {value}");
 
     internal static bool IsAccountMentionedInInput(string accountName, string userInput)
     {

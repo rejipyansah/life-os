@@ -19,38 +19,31 @@ interface CatatTransaksiSectionProps {
 }
 
 const QUICK_PHRASES = [
-  'bayar wifi 340rb di SeaBank',
+  'bayar wifi 340rb',
   'jajan kopi 25rb',
-  'terima freelance desain 750rb di BCA',
-  'beli makan siang 45rb tunai',
+  'terima freelance desain 750rb',
+  'beli makan siang 45rb',
 ];
-
-function detectAccount(text: string): string | null {
-  const lower = text.toLowerCase();
-  if (lower.includes('seabank')) return 'SeaBank';
-  if (lower.includes('bca')) return 'BCA Operasional';
-  if (lower.includes('mandiri')) return 'Bank Mandiri';
-  if (lower.includes('tunai') || lower.includes('cash') || lower.includes('dompet'))
-    return 'Dompet Fisik / Tunai';
-  return null;
-}
 
 export default function CatatTransaksiSection({
   accounts,
   onSave,
 }: CatatTransaksiSectionProps) {
   const [input, setInput] = useState('');
-  const [activeAccount, setActiveAccount] = useState('BCA Operasional');
+  const [activeAccountId, setActiveAccountId] = useState('');
   const [guidance, setGuidance] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedTransaction | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
 
-  const selectorAccounts = accounts.slice(0, 4);
+  const selectorAccounts = accounts.filter((a) => !a.archived);
+  const selectedAccount =
+    selectorAccounts.find((a) => a.id === activeAccountId) ?? selectorAccounts[0];
 
-  const handleAccountClick = (name: string) => {
-    setActiveAccount(name);
-    if (parsed && parsed.status === 'SUCCESS') {
-      setParsed({ ...parsed, account: name });
+  const handleAccountClick = (id: string) => {
+    setActiveAccountId(id);
+    const account = selectorAccounts.find((a) => a.id === id);
+    if (account && parsed && parsed.status === 'SUCCESS') {
+      setParsed({ ...parsed, account: account.name });
     }
   };
 
@@ -58,8 +51,6 @@ export default function CatatTransaksiSection({
     setInput(value);
     setGuidance(null);
     setSavedMsg(null);
-    const detected = detectAccount(value);
-    if (detected) setActiveAccount(detected);
   };
 
   const clearInput = () => {
@@ -70,6 +61,11 @@ export default function CatatTransaksiSection({
   };
 
   const handleSubmit = () => {
+    if (!selectedAccount) {
+      setGuidance('Belum ada rekening aktif. Tambahkan rekening di bagian Sumber Dana.');
+      setParsed(null);
+      return;
+    }
     const result = parseTransactionText(input);
     if (result.status === 'EMPTY') {
       setGuidance('Masukkan catatan transaksi terlebih dahulu.');
@@ -81,10 +77,9 @@ export default function CatatTransaksiSection({
       setParsed(null);
       return;
     }
-    const detected = detectAccount(input);
     const withAccount: ParsedTransaction = {
       ...result,
-      account: detected || activeAccount,
+      account: selectedAccount.name,
     };
     setGuidance(null);
     setSavedMsg(null);
@@ -133,27 +128,35 @@ export default function CatatTransaksiSection({
           </label>
           <span className="text-[11px] text-lo-text-subtle">
             Aktif:{' '}
-            <strong className="text-lo-primary font-medium">{activeAccount}</strong>
+            <strong className="text-lo-primary font-medium">
+              {selectedAccount?.name ?? '—'}
+            </strong>
           </span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {selectorAccounts.map((acc) => {
-            const isActive = acc.name === activeAccount;
-            return (
-              <button
-                key={acc.id}
-                type="button"
-                onClick={() => handleAccountClick(acc.name)}
-                className={`px-3 py-2 rounded-xl text-xs font-medium border text-center transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-lo-primary text-white border-lo-primary shadow-xs'
-                    : 'bg-lo-surface-recessed text-lo-text-ink border-lo-border-hairline hover:bg-lo-accent-wash'
-                }`}
-              >
-                {acc.name.replace(' Operasional', '').replace('Dompet Fisik / ', '')}
-              </button>
-            );
-          })}
+          {selectorAccounts.length === 0 ? (
+            <p className="col-span-2 sm:col-span-4 text-xs text-lo-text-subtle px-1">
+              Belum ada rekening aktif. Tambahkan rekening di bagian Sumber Dana.
+            </p>
+          ) : (
+            selectorAccounts.map((acc) => {
+              const isActive = acc.id === selectedAccount?.id;
+              return (
+                <button
+                  key={acc.id}
+                  type="button"
+                  onClick={() => handleAccountClick(acc.id)}
+                  className={`px-3 py-2 rounded-xl text-xs font-medium border text-center transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-lo-primary text-white border-lo-primary shadow-xs'
+                      : 'bg-lo-surface-recessed text-lo-text-ink border-lo-border-hairline hover:bg-lo-accent-wash'
+                  }`}
+                >
+                  {acc.name.replace(' Operasional', '').replace('Dompet Fisik / ', '')}
+                </button>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -317,12 +320,16 @@ export default function CatatTransaksiSection({
               setInput(phrase);
               setGuidance(null);
               setSavedMsg(null);
-              const detected = detectAccount(phrase);
-              const nextAccount = detected || activeAccount;
-              if (detected) setActiveAccount(detected);
+              if (!selectedAccount) {
+                setGuidance(
+                  'Belum ada rekening aktif. Tambahkan rekening di bagian Sumber Dana.'
+                );
+                setParsed(null);
+                return;
+              }
               const result = parseTransactionText(phrase);
               if (result.status === 'SUCCESS') {
-                setParsed({ ...result, account: nextAccount });
+                setParsed({ ...result, account: selectedAccount.name });
               } else if (result.status === 'NO_AMOUNT') {
                 setGuidance('Sertakan nominal transaksi (contoh: 25rb, 340rb, atau 1.5jt).');
                 setParsed(null);

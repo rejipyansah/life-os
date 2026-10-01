@@ -1,7 +1,34 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { financeFixture } from './financeFixture';
-import { deriveFinanceState } from './financeCalc';
+import {
+  createAccount,
+  createSetAside,
+  createTransaction,
+  createUpcomingEvent,
+  deleteUpcomingEvent,
+  getFinanceState,
+  postponeUpcomingEvent,
+  realizeUpcomingEvent,
+  reverseTransaction,
+  skipUpcomingEvent,
+  spendFromSetAside,
+  addToSetAside,
+  withdrawFromSetAside,
+  closeSetAside,
+  updateAccount as updateAccountRequest,
+} from '../api';
+import type {
+  FinanceStateProjection,
+  SetAsideCloseReason,
+} from '../types';
+import type { FinanceDerived } from './financeCalc';
+import {
+  fromAccountType,
+  fromRepeatLabel,
+  mapFinanceState,
+  toCreateSetAsideCommand,
+  todayIso,
+} from './apiMapping';
 import type {
   Account,
   AgendaItem,
@@ -23,41 +50,21 @@ const ACTIVITY_PER_PAGE = 5;
 
 let toastSeq = 0;
 
-function cloneAccounts(list: Account[]): Account[] {
-  return list.map((a) => ({ ...a }));
+function formatRupiah(amount: number): string {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
-function cloneBills(list: BillDue[]): BillDue[] {
-  return list.map((b) => ({ ...b }));
-}
-
-function clonePos(list: PosItem[]): PosItem[] {
-  return list.map((p) => ({ ...p }));
-}
-
-function cloneAgendas(list: AgendaItem[]): AgendaItem[] {
-  return list.map((a) => ({ ...a }));
-}
-
-function cloneTransactions(list: Transaction[]): Transaction[] {
-  return list.map((t) => ({ ...t }));
-}
-
-function formatDateDisplay(dateString: string): string {
-  if (!dateString) return 'Fleksibel';
-  const parts = dateString.split('-');
-  if (parts.length === 3) {
-    const year = parts[0];
-    const monthIndex = parseInt(parts[1], 10) - 1;
-    const day = parseInt(parts[2], 10);
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-    return `${day} ${months[monthIndex] || ''} ${year}`;
-  }
-  return dateString;
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return 'Terjadi kesalahan. Silakan coba lagi.';
 }
 
 export interface FinanceStateApi {
-  derived: ReturnType<typeof deriveFinanceState>;
+  derived: FinanceDerived;
   accounts: Account[];
   billsDue: BillDue[];
   posItems: PosItem[];
@@ -100,7 +107,12 @@ export interface FinanceStateApi {
 
   topUpPos: (id: string, amount: number) => void;
   withdrawPos: (id: string, amount: number) => void;
-  useIncrementalPos: (id: string, amount: number, note?: string) => void;
+  useIncrementalPos: (
+    id: string,
+    amount: number,
+    note?: string,
+    freeCashAccountId?: string
+  ) => void;
   executeBatchPos: (id: string, actualCost: number, note?: string) => void;
   executeSingleSpendPos: (id: string, actualCost: number, note?: string) => void;
   createPos: (input: CreatePosInput) => void;
@@ -114,25 +126,8 @@ export interface FinanceStateApi {
 }
 
 export function useFinanceState(): FinanceStateApi {
-  const [accounts, setAccounts] = useState<Account[]>(() =>
-    cloneAccounts(financeFixture.accounts)
-  );
-  const [billsDue, setBillsDue] = useState<BillDue[]>(() =>
-    cloneBills(financeFixture.billsDue)
-  );
-  const [posItems, setPosItems] = useState<PosItem[]>(() =>
-    clonePos(financeFixture.posItems)
-  );
-  const [agendas, setAgendas] = useState<AgendaItem[]>(() =>
-    cloneAgendas(financeFixture.agendas)
-  );
-  const [archivedAgendas, setArchivedAgendas] = useState<ArchivedAgenda[]>(() =>
-    financeFixture.archivedAgendas.map((a) => ({ ...a }))
-  );
-  const [transactions, setTransactions] = useState<Transaction[]>(() =>
-    cloneTransactions(financeFixture.transactions)
-  );
-  const [toasts, setToasts] = useState<FinanceToast[]>([]);
+  const [projection, setProjection] = useState<FinanceStateProjection | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [posFilter, setPosFilter] = useState<PosCategory | 'all'>('all');
   const [posPage, setPosPage] = useState(1);
@@ -140,16 +135,29 @@ export function useFinanceState(): FinanceStateApi {
   const [agendaPage, setAgendaPage] = useState(1);
   const [activityFilter, setActivityFilter] = useState<TimePeriod | 'all'>('all');
   const [activityPage, setActivityPage] = useState(1);
+  const [toasts, setToasts] = useState<FinanceToast[]>([]);
 
-  const derived = useMemo(
-    () =>
-      deriveFinanceState({
-        accounts,
-        billsDue,
-        savingsCommitment: financeFixture.savingsCommitment,
-      }),
-    [accounts, billsDue]
-  );
+  /* ── Read model ──────────────────────────────────────────────
+   * Every figure below is derived on the backend. The client only
+   * formats it — it never recomputes financial state.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    getFinanceState()
+      .then((next) => {
+        if (!cancelled) setProjection(next);
+      })
+      .catch(() => {
+        // Keep the last known projection; the UI already renders empty state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  const mapped = useMemo(() => mapFinanceState(projection), [projection]);
+
+  const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
 
   const pushToast = useCallback((message: string, icon?: string) => {
     const id = ++toastSeq;
@@ -163,490 +171,474 @@ export function useFinanceState(): FinanceStateApi {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  /* ── Uang Bebas / Bills ─────────────────────────── */
+  /** Runs a backend mutation, refreshes the read model, and reports failures. */
+  const run = useCallback(
+    async (action: () => Promise<unknown>, onSuccess?: () => void) => {
+      try {
+        await action();
+        onSuccess?.();
+        refresh();
+      } catch (error) {
+        pushToast(errorMessage(error), 'error');
+      }
+    },
+    [pushToast, refresh]
+  );
 
+  const resolveAccountId = useCallback(
+    (name: string | undefined): string | undefined => {
+      if (!name) return undefined;
+      const wanted = name.trim().toLowerCase();
+      return (
+        mapped.accounts.find((a) => a.name.toLowerCase() === wanted)?.id ??
+        mapped.accounts[0]?.id
+      );
+    },
+    [mapped.accounts]
+  );
+
+  /* ── Jatuh Tempo ────────────────────────────────────────────
+   * A bill is a due upcoming cash event. Paying it realizes it into a
+   * real transaction; postponing moves its due date.
+   */
   const payBill = useCallback(
     (id: string) => {
-      setBillsDue((prev) => {
-        const bill = prev.find((b) => b.id === id);
-        if (!bill || bill.status !== 'unpaid') return prev;
-        const next = prev.map((b) =>
-          b.id === id ? { ...b, status: 'paid' as const } : b
-        );
-        setAccounts((accs) =>
-          accs.map((a) =>
-            a.id === bill.sourceAccountId
-              ? { ...a, balance: a.balance - bill.amount }
-              : a
-          )
-        );
-        pushToast(`Berhasil membayar ${bill.name}`, 'task_alt');
-        return next;
-      });
+      const bill = mapped.billsDue.find((b) => b.id === id);
+      void run(
+        () => realizeUpcomingEvent(id, { occurredOn: todayIso() }),
+        () => {
+          if (bill) pushToast(`Berhasil membayar ${bill.name}`, 'task_alt');
+        }
+      );
     },
-    [pushToast]
+    [mapped.billsDue, pushToast, run]
   );
 
   const payAllBills = useCallback(() => {
-    let paidCount = 0;
-    setBillsDue((prev) => {
-      const unpaid = prev.filter((b) => b.status === 'unpaid');
-      if (unpaid.length === 0) return prev;
-      paidCount = unpaid.length;
-      const next = prev.map((b) =>
-        b.status === 'unpaid' ? { ...b, status: 'paid' as const } : b
-      );
-      setAccounts((accs) => {
-        let map = new Map(accs.map((a) => [a.id, a]));
-        unpaid.forEach((b) => {
-          const acc = map.get(b.sourceAccountId);
-          if (acc) {
-            map.set(b.sourceAccountId, {
-              ...acc,
-              balance: acc.balance - b.amount,
-            });
-          }
-        });
-        return Array.from(map.values());
-      });
-      return next;
-    });
-    if (paidCount > 0) {
-      pushToast(
-        `Seluruh tagihan hari ini (${paidCount} tagihan) telah lunas terbayar!`,
-        'check_circle'
-      );
-    } else {
+    const unpaid = mapped.billsDue.filter((b) => b.status === 'unpaid');
+    if (unpaid.length === 0) {
       pushToast('Semua tagihan hari ini sudah lunas sebelumnya.', 'info');
+      return;
     }
-  }, [pushToast]);
+    void run(
+      async () => {
+        for (const bill of unpaid) {
+          await realizeUpcomingEvent(bill.id, { occurredOn: todayIso() });
+        }
+      },
+      () =>
+        pushToast(
+          `Seluruh tagihan hari ini (${unpaid.length} tagihan) telah lunas terbayar!`,
+          'check_circle'
+        )
+    );
+  }, [mapped.billsDue, pushToast, run]);
 
   const postponeBill = useCallback(
     (id: string) => {
-      setBillsDue((prev) => {
-        const bill = prev.find((b) => b.id === id);
-        if (!bill || bill.status !== 'unpaid') return prev;
-        pushToast(
-          `Jatuh tempo untuk "${bill.name}" ditunda ke esok hari`,
-          'event_repeat'
-        );
-        return prev.map((b) =>
-          b.id === id ? { ...b, status: 'postponed' as const } : b
-        );
-      });
+      const bill = mapped.billsDue.find((b) => b.id === id);
+      void run(
+        () => postponeUpcomingEvent(id, {}),
+        () => {
+          if (bill) {
+            pushToast(
+              `Jatuh tempo untuk "${bill.name}" ditunda ke esok hari`,
+              'event_repeat'
+            );
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.billsDue, pushToast, run]
   );
 
-  /* ── Sumber Dana ────────────────────────────────── */
+  /* ── Sumber Dana ──────────────────────────────────────────── */
 
   const addAccount = useCallback(
     (data: { name: string; role: string; type: Account['type'] }) => {
-      const iconMap: Record<Account['type'], string> = {
-        bank: 'account_balance',
-        ewallet: 'account_balance_wallet',
-        cash: 'payments',
-        credit: 'credit_card',
-      };
-      setAccounts((prev) => [
-        ...prev,
-        {
-          id: `acct-${Date.now()}`,
-          name: data.name,
-          role: data.role || 'Kas Operasional',
-          type: data.type,
-          balance: 0,
-          icon: iconMap[data.type] || 'account_balance_wallet',
-        },
-      ]);
-      pushToast(`Rekening "${data.name}" ditambahkan.`);
+      void run(
+        () =>
+          createAccount({
+            name: data.name,
+            type: fromAccountType(data.type),
+          }),
+        () => pushToast(`Rekening "${data.name}" ditambahkan.`)
+      );
     },
-    [pushToast]
+    [pushToast, run]
   );
 
   const updateAccount = useCallback(
     (id: string, data: { name: string; role: string; type: Account['type'] }) => {
-      setAccounts((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, ...data } : a))
+      void run(
+        () =>
+          updateAccountRequest(id, {
+            name: data.name,
+            type: fromAccountType(data.type),
+          }),
+        () => pushToast(`Rekening "${data.name}" diperbarui.`)
       );
-      pushToast(`Rekening "${data.name}" diperbarui.`);
     },
-    [pushToast]
+    [pushToast, run]
   );
 
   const deleteAccount = useCallback(
     (id: string) => {
-      setAccounts((prev) => {
-        const target = prev.find((a) => a.id === id);
-        if (target) pushToast(`Rekening "${target.name}" telah dihapus.`, 'delete');
-        return prev.filter((a) => a.id !== id);
-      });
+      const target = mapped.accounts.find((a) => a.id === id);
+      // Accounts are archived, never hard-deleted, so history stays traceable.
+      void run(
+        () => updateAccountRequest(id, { isArchived: true }),
+        () => {
+          if (target) {
+            pushToast(`Rekening "${target.name}" diarsipkan.`, 'delete');
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.accounts, pushToast, run]
   );
 
   const transfer = useCallback(
     (fromId: string, toId: string, amount: number) => {
-      setAccounts((prev) => {
-        const from = prev.find((a) => a.id === fromId);
-        const to = prev.find((a) => a.id === toId);
-        if (!from || !to || fromId === toId || amount <= 0 || from.balance < amount) {
-          return prev;
-        }
-        pushToast(
-          `Transfer ${new Intl.NumberFormat('id-ID', {
-            style: 'currency',
-            currency: 'IDR',
-            maximumFractionDigits: 0,
-          }).format(amount)} ke ${to.name} berhasil!`,
-          'swap_horiz'
-        );
-        return prev.map((a) => {
-          if (a.id === fromId) return { ...a, balance: a.balance - amount };
-          if (a.id === toId) return { ...a, balance: a.balance + amount };
-          return a;
-        });
-      });
+      const target = mapped.accounts.find((a) => a.id === toId);
+      void run(
+        () =>
+          createTransaction({
+            type: 'Transfer',
+            amount,
+            occurredOn: todayIso(),
+            entries: [
+              { accountId: fromId, amount: -amount },
+              { accountId: toId, amount },
+            ],
+          }),
+        () =>
+          pushToast(
+            `Transfer ${formatRupiah(amount)} ke ${target?.name ?? 'rekening'} berhasil!`,
+            'swap_horiz'
+          )
+      );
     },
-    [pushToast]
+    [mapped.accounts, pushToast, run]
   );
 
-  /* ── Catat Transaksi ────────────────────────────── */
+  /* ── Catat Transaksi ──────────────────────────────────────── */
 
   const saveTransaction = useCallback(
     (parsed: ParsedTransaction) => {
-      if (parsed.status !== 'SUCCESS' || !parsed.amount || !parsed.account) return;
+      if (parsed.status !== 'SUCCESS' || !parsed.amount) return;
 
-      const account = accounts.find((a) => a.name === parsed.account);
-      const accountId = account?.id;
-      const isIncome = parsed.type === 'Pemasukan';
-      const signedAmount = isIncome ? parsed.amount : -parsed.amount;
+      const accountId = resolveAccountId(parsed.account);
 
-      const newTx: Transaction = {
-        id: `tx-${Date.now()}`,
-        title: parsed.category || 'Transaksi',
-        accountLabel: parsed.account,
-        accountId,
-        date: 'Hari Ini, baru saja',
-        time: 'baru saja',
-        dateGroup: 'Hari Ini — 24 Okt 2024',
-        timePeriod: 'today',
-        amount: signedAmount,
-        category: parsed.type === 'Pemasukan' ? 'Pemasukan' : parsed.category || 'Lainnya',
-        icon: isIncome ? 'arrow_downward' : 'receipt_long',
-      };
-
-      setTransactions((prev) => [newTx, ...prev]);
-      if (accountId) {
-        setAccounts((prev) =>
-          prev.map((a) =>
-            a.id === accountId
-              ? { ...a, balance: a.balance + signedAmount }
-              : a
-          )
+      // Set-aside intent: a reservation, never a transaction.
+      if (parsed.type === 'Alokasi Pos') {
+        if (!accountId) {
+          pushToast('Rekening sumber dana tidak ditemukan.', 'error');
+          return;
+        }
+        void run(
+          () =>
+            createSetAside({
+              accountId,
+              name: parsed.category || 'Pos Dana',
+              amount: parsed.amount,
+              kind: 'Saving',
+            }),
+          () =>
+            pushToast(
+              `${formatRupiah(parsed.amount!)} disisihkan ke pos "${parsed.category}".`
+            )
         );
+        return;
       }
+
+      // The natural-input box has no destination field, so a real transfer
+      // cannot be expressed there. Use Transfer on Sumber Dana instead.
+      if (parsed.type === 'Transfer Kas') {
+        pushToast(
+          'Transfer butuh rekening tujuan. Gunakan menu Transfer di Sumber Dana.',
+          'info'
+        );
+        return;
+      }
+
+      if (!accountId) {
+        pushToast('Rekening sumber dana tidak ditemukan.', 'error');
+        return;
+      }
+
+      const isIncome = parsed.type === 'Pemasukan';
+      void run(
+        () =>
+          createTransaction({
+            type: isIncome ? 'Income' : 'Expense',
+            amount: parsed.amount!,
+            description: parsed.category || undefined,
+            categoryName: isIncome ? 'Pemasukan' : parsed.category || undefined,
+            occurredOn: todayIso(),
+            entries: [
+              {
+                accountId,
+                amount: isIncome ? parsed.amount! : -parsed.amount!,
+              },
+            ],
+          }),
+        () =>
+          pushToast(
+            `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat.`
+          )
+      );
     },
-    [accounts]
+    [pushToast, resolveAccountId, run]
   );
 
   const voidTransaction = useCallback(
     (id: string, reason: string) => {
-      setTransactions((prev) => {
-        const target = prev.find((t) => t.id === id);
-        if (!target || target.isVoided) return prev;
-
-        const reversal: Transaction = {
-          id: `rev-${Date.now()}`,
-          title: `Pembalikan: ${target.title} [Dibatalkan]`,
-          accountLabel: target.accountLabel,
-          accountId: target.accountId,
-          date: 'Hari Ini, baru saja',
-          time: 'baru saja',
-          dateGroup: 'Hari Ini — 24 Okt 2024',
-          timePeriod: 'today',
-          amount: -target.amount,
-          category: target.category,
-          icon: 'history',
-          isReversal: true,
-        };
-
-        pushToast('Transaksi berhasil dibatalkan.', 'check_circle');
-
-        return [
-          reversal,
-          ...prev.map((t) =>
-            t.id === id
-              ? { ...t, isVoided: true, voidReason: reason }
-              : t
-          ),
-        ];
-      });
+      void run(
+        () => reverseTransaction(id, { reason }),
+        () => pushToast('Transaksi berhasil dibatalkan.', 'check_circle')
+      );
     },
-    [pushToast]
+    [pushToast, run]
   );
 
-  /* ── Yang Disisihkan ────────────────────────────── */
+  /* ── Yang Disisihkan ──────────────────────────────────────── */
 
   const topUpPos = useCallback(
     (id: string, amount: number) => {
       if (amount <= 0) return;
-      setPosItems((prev) => {
-        const pos = prev.find((p) => p.id === id);
-        if (!pos) return prev;
-        pushToast(
-          `Simpanan "${pos.name}" bertambah ${new Intl.NumberFormat('id-ID', {
-            style: 'currency',
-            currency: 'IDR',
-            maximumFractionDigits: 0,
-          }).format(amount)}.`
-        );
-        return prev.map((p) =>
-          p.id === id ? { ...p, amount: p.amount + amount } : p
-        );
-      });
+      const pos = mapped.posItems.find((p) => p.id === id);
+      void run(
+        () => addToSetAside(id, { amount }),
+        () => {
+          if (pos) {
+            pushToast(
+              `Simpanan "${pos.name}" bertambah ${formatRupiah(amount)}.`
+            );
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.posItems, pushToast, run]
   );
 
   const withdrawPos = useCallback(
     (id: string, amount: number) => {
       if (amount <= 0) return;
-      setPosItems((prev) => {
-        const pos = prev.find((p) => p.id === id);
-        if (!pos) return prev;
-        const actual = Math.min(amount, pos.amount);
-        pushToast(
-          `Dana "${pos.name}" ditarik ${new Intl.NumberFormat('id-ID', {
-            style: 'currency',
-            currency: 'IDR',
-            maximumFractionDigits: 0,
-          }).format(actual)} kembali ke kas.`
-        );
-        return prev.map((p) =>
-          p.id === id ? { ...p, amount: p.amount - actual } : p
-        );
-      });
+      const pos = mapped.posItems.find((p) => p.id === id);
+      const actual = Math.min(amount, pos?.amount ?? amount);
+      void run(
+        () => withdrawFromSetAside(id, { amount }),
+        () => {
+          if (pos) {
+            pushToast(
+              `Dana "${pos.name}" ditarik ${formatRupiah(actual)} kembali ke kas.`
+            );
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.posItems, pushToast, run]
   );
 
   const useIncrementalPos = useCallback(
-    (id: string, amount: number, _note?: string) => {
+    (id: string, amount: number, note?: string, freeCashAccountId?: string) => {
       if (amount <= 0) return;
-      setPosItems((prev) => {
-        const pos = prev.find((p) => p.id === id);
-        if (!pos) return prev;
-        const actual = Math.min(amount, pos.amount);
-        pushToast(
-          `Pemakaian ${new Intl.NumberFormat('id-ID', {
-            style: 'currency',
-            currency: 'IDR',
-            maximumFractionDigits: 0,
-          }).format(actual)} dicatat dari "${pos.name}".`
-        );
-        return prev.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                amount: p.amount - actual,
-                usedAmount: (p.usedAmount || 0) + actual,
-              }
-            : p
-        );
-      });
+      const pos = mapped.posItems.find((p) => p.id === id);
+      void run(
+        () =>
+          spendFromSetAside(id, {
+            amount,
+            description: note || pos?.name || undefined,
+            occurredOn: todayIso(),
+            note: note || undefined,
+            freeCashAccountId,
+          }),
+        () => {
+          if (pos) {
+            pushToast(
+              `Pemakaian ${formatRupiah(amount)} dicatat dari "${pos.name}".`
+            );
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.posItems, pushToast, run]
   );
 
   const executeBatchPos = useCallback(
-    (id: string, actualCost: number, _note?: string) => {
+    (id: string, actualCost: number, note?: string) => {
       if (actualCost <= 0) return;
-      setPosItems((prev) => {
-        const pos = prev.find((p) => p.id === id);
-        if (!pos) return prev;
-        pushToast(
-          `Eksekusi rutinitas "${pos.name}" diselesaikan (${new Intl.NumberFormat('id-ID', {
-            style: 'currency',
-            currency: 'IDR',
-            maximumFractionDigits: 0,
-          }).format(actualCost)}).`
-        );
-        return prev.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                amount: 0,
-                usedAmount: (p.usedAmount || 0) + actualCost,
-                status: 'Selesai periode ini',
-              }
-            : p
-        );
-      });
+      const pos = mapped.posItems.find((p) => p.id === id);
+      void run(
+        () =>
+          spendFromSetAside(id, {
+            amount: actualCost,
+            description: note || pos?.name || undefined,
+            occurredOn: todayIso(),
+            note: note || undefined,
+          }),
+        () => {
+          if (pos) {
+            pushToast(
+              `Eksekusi rutinitas "${pos.name}" diselesaikan (${formatRupiah(actualCost)}).`
+            );
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.posItems, pushToast, run]
   );
 
   const executeSingleSpendPos = useCallback(
-    (id: string, _actualCost: number, _note?: string) => {
-      setPosItems((prev) => {
-        const pos = prev.find((p) => p.id === id);
-        if (!pos) return prev;
-        pushToast(`Pos "${pos.name}" direalisasikan & diarsipkan.`);
-        return prev.filter((p) => p.id !== id);
-      });
+    (id: string, actualCost: number, note?: string) => {
+      const pos = mapped.posItems.find((p) => p.id === id);
+      const amount = actualCost > 0 ? actualCost : pos?.amount ?? 0;
+      if (amount <= 0) return;
+      void run(
+        () =>
+          spendFromSetAside(id, {
+            amount,
+            description: note || pos?.name || undefined,
+            occurredOn: todayIso(),
+            note: note || undefined,
+          }),
+        () => {
+          if (pos) {
+            pushToast(`Pos "${pos.name}" direalisasikan & diarsipkan.`);
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.posItems, pushToast, run]
   );
 
   const createPos = useCallback(
     (input: CreatePosInput) => {
-      const iconMap: Record<PosCategory, string> = {
-        saving: 'savings',
-        routine_incremental: 'restaurant',
-        routine_batch: 'event_repeat',
-        single_spend: 'shopping_cart_checkout',
-      };
-      setPosItems((prev) => [
-        ...prev,
-        {
-          id: `pos-${Date.now()}`,
-          name: input.name,
-          description: input.description || 'Pos dana baru',
-          category: input.category,
-          accountLabel: input.accountLabel,
-          amount: input.category === 'routine_incremental' ? input.plafon || 0 : 0,
-          targetAmount: input.targetAmount,
-          plafon: input.plafon,
-          cycle: input.cycle,
-          icon: input.icon || iconMap[input.category],
-        },
-      ]);
-      pushToast(`Pos "${input.name}" berhasil dibuat.`);
+      const accountId = resolveAccountId(input.accountLabel);
+      if (!accountId) {
+        pushToast('Rekening sumber dana tidak ditemukan.', 'error');
+        return;
+      }
+
+      void run(
+        () => createSetAside(toCreateSetAsideCommand(input, accountId)),
+        () => pushToast(`Pos "${input.name}" berhasil dibuat.`)
+      );
     },
-    [pushToast]
+    [pushToast, resolveAccountId, run]
   );
 
   const deletePos = useCallback(
     (id: string) => {
-      setPosItems((prev) => {
-        const pos = prev.find((p) => p.id === id);
-        if (pos) pushToast(`Pos "${pos.name}" dihapus. Dana dikembalikan ke kas.`, 'delete');
-        return prev.filter((p) => p.id !== id);
-      });
+      const pos = mapped.posItems.find((p) => p.id === id);
+      void run(
+        () =>
+          closeSetAside(id, {
+            reason: 'Cancelled' as SetAsideCloseReason,
+          }),
+        () => {
+          if (pos) {
+            pushToast(
+              `Pos "${pos.name}" ditutup. Dana yang tersisa dikembalikan ke kas.`,
+              'delete'
+            );
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.posItems, pushToast, run]
   );
 
-  /* ── Agenda Kas Mendatang ───────────────────────── */
+  /* ── Agenda Kas Mendatang ─────────────────────────────────── */
 
   const skipAgenda = useCallback(
     (id: string) => {
-      setAgendas((prev) => {
-        const idx = prev.findIndex((a) => a.id === id);
-        if (idx === -1) return prev;
-        const a = prev[idx];
-        setArchivedAgendas((arch) => [
-          {
-            id: a.id,
-            title: a.title,
-            amount: a.amount,
-            date: 'Dilewati hari ini',
-            accountLabel: a.accountLabel,
-            status: 'Dilewati',
-          },
-          ...arch,
-        ]);
-        pushToast(`Agenda "${a.title}" telah dilewati.`, 'info');
-        return prev.filter((x) => x.id !== id);
-      });
+      const agenda = mapped.agendas.find((a) => a.id === id);
+      void run(
+        () => skipUpcomingEvent(id, {}),
+        () => {
+          if (agenda) pushToast(`Agenda "${agenda.title}" telah dilewati.`, 'info');
+        }
+      );
     },
-    [pushToast]
+    [mapped.agendas, pushToast, run]
   );
 
   const postponeAgenda = useCallback(
     (id: string) => {
-      setAgendas((prev) =>
-        prev.map((a) =>
-          a.id === id ? { ...a, displayDate: 'Besok (Ditunda)' } : a
-        )
+      const agenda = mapped.agendas.find((a) => a.id === id);
+      void run(
+        () => postponeUpcomingEvent(id, {}),
+        () => {
+          if (agenda) pushToast(`Agenda "${agenda.title}" ditunda ke besok.`);
+        }
       );
-      const a = agendas.find((x) => x.id === id);
-      if (a) pushToast(`Agenda "${a.title}" ditunda ke besok.`);
     },
-    [agendas, pushToast]
+    [mapped.agendas, pushToast, run]
   );
 
   const deleteAgenda = useCallback(
     (id: string) => {
-      setAgendas((prev) => {
-        const a = prev.find((x) => x.id === id);
-        if (a) pushToast(`Agenda "${a.title}" telah dihapus.`);
-        return prev.filter((x) => x.id !== id);
-      });
+      const agenda = mapped.agendas.find((a) => a.id === id);
+      void run(
+        () => deleteUpcomingEvent(id),
+        () => {
+          if (agenda) pushToast(`Agenda "${agenda.title}" telah dihapus.`);
+        }
+      );
     },
-    [pushToast]
+    [mapped.agendas, pushToast, run]
   );
 
   const finishAgenda = useCallback(
     (id: string) => {
-      setAgendas((prev) => {
-        const idx = prev.findIndex((a) => a.id === id);
-        if (idx === -1) return prev;
-        const a = prev[idx];
-        setArchivedAgendas((arch) => [
-          {
-            id: a.id,
-            title: a.title,
-            amount: a.amount,
-            date: a.isIncome ? 'Diterima hari ini' : 'Terbayar hari ini',
-            accountLabel: a.accountLabel,
-            status: 'Selesai',
-          },
-          ...arch,
-        ]);
-        pushToast(`Agenda "${a.title}" berhasil diselesaikan!`, 'task_alt');
-        return prev.filter((x) => x.id !== id);
-      });
+      const agenda = mapped.agendas.find((a) => a.id === id);
+      void run(
+        () => realizeUpcomingEvent(id, { occurredOn: todayIso() }),
+        () => {
+          if (agenda) {
+            pushToast(`Agenda "${agenda.title}" berhasil diselesaikan!`, 'task_alt');
+          }
+        }
+      );
     },
-    [pushToast]
+    [mapped.agendas, pushToast, run]
   );
 
   const createAgenda = useCallback(
     (input: CreateAgendaInput) => {
-      setAgendas((prev) => [
-        ...prev,
-        {
-          id: `agd-${Date.now()}`,
-          title: input.title,
-          amount: input.amount,
-          isIncome: input.isIncome,
-          displayDate: formatDateDisplay(input.rawDate),
-          rawDate: input.rawDate,
-          accountLabel: input.accountLabel,
-          categoryLabel: input.categoryLabel,
-          repeat: input.repeat,
-          type: input.type,
-          note: input.note,
-          icon: input.icon || (input.isIncome ? 'payments' : 'receipt_long'),
-        },
-      ]);
-      pushToast(`Agenda "${input.title}" berhasil disimpan.`);
+      const accountId = resolveAccountId(input.accountLabel);
+      const dueDate = input.rawDate || null;
+      void run(
+        () =>
+          createUpcomingEvent({
+            accountId: accountId ?? null,
+            title: input.title,
+            amount: input.amount,
+            direction: input.isIncome ? 'Income' : 'Expense',
+            categoryName: input.categoryLabel || undefined,
+            note: input.note || undefined,
+            dueDate,
+            scheduleKind:
+              input.type === 'flexible' || !dueDate ? 'Flexible' : 'Scheduled',
+            recurrence: fromRepeatLabel(input.repeat),
+          }),
+        () => pushToast(`Agenda "${input.title}" berhasil disimpan.`)
+      );
     },
-    [pushToast]
+    [pushToast, resolveAccountId, run]
   );
 
-  const posArchivedCount = posItems.filter((p) => p.archived).length;
-
   return {
-    derived,
-    accounts,
-    billsDue,
-    posItems,
-    posArchivedCount,
-    agendas,
-    archivedAgendas,
-    transactions,
+    derived: mapped.derived,
+    accounts: mapped.accounts,
+    billsDue: mapped.billsDue,
+    posItems: mapped.posItems,
+    posArchivedCount: mapped.posArchivedCount,
+    agendas: mapped.agendas,
+    archivedAgendas: mapped.archivedAgendas,
+    transactions: mapped.transactions,
     toasts,
 
     posFilter,

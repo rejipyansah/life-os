@@ -93,6 +93,48 @@ export function formatNumberString(value: string): string {
   return parseInt(clean, 10).toLocaleString('id-ID');
 }
 
+/** Warna progress bar: sisa dana terhadap plafon. */
+export type ProgressTone = 'green' | 'yellow' | 'red';
+
+export interface IncrementalStatus {
+  /** Batas aman siklus (plafon, fallback ke targetAmount). */
+  limit: number;
+  /** Sisa dana — tidak pernah negatif. */
+  remaining: number;
+  /** Sisa dana terhadap plafon, 0–100. */
+  remainingPct: number;
+  tone: ProgressTone;
+  /** Nominal kelebihan di atas plafon: max(0, used − limit). */
+  overage: number;
+}
+
+/**
+ * Status visual Rutinitas Bertahap terhadap plafon siklus.
+ *
+ * - bar menunjukkan SISA dana / plafon, bukan total pemakaian;
+ * - sisa dibatasi ≥ 0 (overspend tidak pernah tampil negatif / overflow);
+ * - overage = kelebihan pemakaian, selalu ditampilkan sebagai nominal
+ *   ketika > 0; pemakaian melewati plafon tetap boleh (ditutup Uang Bebas).
+ */
+export function incrementalPlafonStatus(input: {
+  amount: number;
+  plafon?: number;
+  targetAmount?: number;
+  usedAmount?: number;
+}): IncrementalStatus {
+  const limit = input.plafon ?? input.targetAmount ?? 0;
+  const remaining = Math.max(0, input.amount);
+  const ratio = limit > 0 ? remaining / limit : 0;
+  return {
+    limit,
+    remaining,
+    remainingPct: Math.min(100, Math.round(ratio * 100)),
+    // >50% hijau · 25–50% kuning · <25% merah (0% merah & kosong).
+    tone: ratio > 0.5 ? 'green' : ratio >= 0.25 ? 'yellow' : 'red',
+    overage: limit > 0 ? Math.max(0, (input.usedAmount ?? 0) - limit) : 0,
+  };
+}
+
 export function posCategoryLabel(category: PosItem['category']): string {
   switch (category) {
     case 'saving':

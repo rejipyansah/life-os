@@ -16,7 +16,9 @@ public class ApplicationDbContext : IdentityDbContext
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<TransactionEntry> TransactionEntries => Set<TransactionEntry>();
-    public DbSet<Allocation> Allocations => Set<Allocation>();
+    public DbSet<SetAside> SetAsides => Set<SetAside>();
+    public DbSet<SetAsideEntry> SetAsideEntries => Set<SetAsideEntry>();
+    public DbSet<UpcomingEvent> UpcomingEvents => Set<UpcomingEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -147,32 +149,144 @@ public class ApplicationDbContext : IdentityDbContext
             e.HasIndex(te => te.AccountId);
         });
 
-        // Allocation configuration
-        builder.Entity<Allocation>(e =>
+        // SetAside configuration
+        builder.Entity<SetAside>(e =>
         {
-            e.HasKey(a => a.Id);
+            e.HasKey(sa => sa.Id);
 
-            e.Property(a => a.Name)
+            e.Property(sa => sa.Name)
                 .HasMaxLength(256);
 
-            e.Property(a => a.Amount)
+            e.Property(sa => sa.Note)
+                .HasMaxLength(512);
+
+            e.Property(sa => sa.Kind)
+                .HasConversion<string>()
+                .HasMaxLength(32);
+
+            e.Property(sa => sa.Status)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(sa => sa.CloseReason)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(sa => sa.CycleKind)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(sa => sa.TargetAmount)
                 .HasColumnType("decimal(18,2)");
 
             // FK to Scope
-            e.HasOne(a => a.Scope)
+            e.HasOne(sa => sa.Scope)
                 .WithMany()
-                .HasForeignKey(a => a.ScopeId)
+                .HasForeignKey(sa => sa.ScopeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // FK to Account
-            e.HasOne(a => a.Account)
+            e.HasOne(sa => sa.Account)
                 .WithMany()
-                .HasForeignKey(a => a.AccountId)
+                .HasForeignKey(sa => sa.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Indexes
-            e.HasIndex(a => a.ScopeId);
-            e.HasIndex(a => a.AccountId);
+            e.HasIndex(sa => sa.ScopeId);
+            e.HasIndex(sa => sa.AccountId);
+            e.HasIndex(sa => new { sa.ScopeId, sa.Status });
+        });
+
+        // SetAsideEntry configuration
+        builder.Entity<SetAsideEntry>(e =>
+        {
+            e.HasKey(se => se.Id);
+
+            e.Property(se => se.Amount)
+                .HasColumnType("decimal(18,2)");
+
+            e.Property(se => se.Type)
+                .HasConversion<string>()
+                .HasMaxLength(32);
+
+            e.Property(se => se.Note)
+                .HasMaxLength(512);
+
+            e.HasOne(se => se.SetAside)
+                .WithMany()
+                .HasForeignKey(se => se.SetAsideId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(se => se.Scope)
+                .WithMany()
+                .HasForeignKey(se => se.ScopeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The linked realized Transaction must survive SetAsideEntry removal.
+            e.HasOne(se => se.Transaction)
+                .WithMany()
+                .HasForeignKey(se => se.TransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(se => se.SetAsideId);
+            e.HasIndex(se => se.ScopeId);
+            e.HasIndex(se => se.TransactionId);
+        });
+
+        // UpcomingEvent configuration
+        builder.Entity<UpcomingEvent>(e =>
+        {
+            e.HasKey(ue => ue.Id);
+
+            e.Property(ue => ue.Title)
+                .HasMaxLength(256);
+
+            e.Property(ue => ue.CategoryName)
+                .HasMaxLength(128);
+
+            e.Property(ue => ue.Note)
+                .HasMaxLength(512);
+
+            e.Property(ue => ue.StatusReason)
+                .HasMaxLength(512);
+
+            e.Property(ue => ue.Amount)
+                .HasColumnType("decimal(18,2)");
+
+            e.Property(ue => ue.Direction)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(ue => ue.Status)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(ue => ue.ScheduleKind)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.Property(ue => ue.Recurrence)
+                .HasConversion<string>()
+                .HasMaxLength(16);
+
+            e.HasOne(ue => ue.Scope)
+                .WithMany()
+                .HasForeignKey(ue => ue.ScopeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(ue => ue.Account)
+                .WithMany()
+                .HasForeignKey(ue => ue.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(ue => ue.RealizedTransaction)
+                .WithMany()
+                .HasForeignKey(ue => ue.RealizedTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(ue => ue.ScopeId);
+            e.HasIndex(ue => ue.AccountId);
+            e.HasIndex(ue => new { ue.ScopeId, ue.Status });
+            e.HasIndex(ue => ue.RealizedTransactionId);
         });
     }
 }

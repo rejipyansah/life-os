@@ -96,28 +96,7 @@ public class GroqInterpreter : IInterpreter
     }
 
     private static string BuildSystemPrompt(DateOnly currentDate, IReadOnlyList<string> accounts)
-    {
-        var accountList = string.Join(", ", accounts);
-        return $$"""
-            You are a finance interpreter for Life OS. Parse the user's natural language input and return a structured JSON interpretation.
-
-            Rules:
-            - The user may use Indonesian or English casual language.
-            - Amount abbreviations: "rb" or "k" = thousand (×1,000), "jt" = million (×1,000,000), "M" = billion (×1,000,000,000).
-            - "18rb" = 18000, "50k" = 50000, "1jt" = 1000000, "1.5jt" = 1500000.
-            - Today's date is {{currentDate:yyyy-MM-dd}}.
-            - Available accounts: {{accountList}}.
-            - For Expense: spending money from an account. Amount is positive. Account is the source.
-            - For Income: receiving money into an account. Amount is positive. Account is the destination.
-            - For Transfer: moving money between accounts. Amount is positive. Account is source, toAccount is destination.
-            - For CreateAllocation: setting aside money for a purpose (a reservation/intention, NOT a transaction). Amount is positive. Account is where the funds are reserved. allocationName is the purpose/name (e.g., "WiFi", "Vacation", "Emergency Fund").
-            - Never fabricate account names. Only use names from the provided list.
-            - Return intent="Unsupported" if the input is not a financial action.
-            - If a required field is missing or ambiguous, add the field name to clarificationFields (e.g. "amount", "account", "toAccount", "allocationName"). Do NOT write free-text clarification messages.
-            - Use today's date as the default date if not specified.
-            - Date format: YYYY-MM-DD.
-            """;
-    }
+        => InterpreterPrompts.Build(currentDate, accounts);
 
     private static JsonObject BuildSchema()
     {
@@ -129,7 +108,7 @@ public class GroqInterpreter : IInterpreter
                 ["intent"] = new JsonObject
                 {
                     ["type"] = "string",
-                    ["enum"] = new JsonArray("CreateTransaction", "CreateAllocation", "Unsupported")
+                    ["enum"] = new JsonArray("CreateTransaction", "CreateSetAside", "CreateUpcomingEvent", "Unsupported")
                 },
                 ["transactionType"] = new JsonObject
                 {
@@ -180,10 +159,24 @@ public class GroqInterpreter : IInterpreter
                         new JsonObject { ["type"] = "null" }
                     )
                 },
-                ["allocationName"] = new JsonObject
+                ["setAsideName"] = new JsonObject
                 {
                     ["anyOf"] = new JsonArray(
                         new JsonObject { ["type"] = "string" },
+                        new JsonObject { ["type"] = "null" }
+                    )
+                },
+                ["title"] = new JsonObject
+                {
+                    ["anyOf"] = new JsonArray(
+                        new JsonObject { ["type"] = "string" },
+                        new JsonObject { ["type"] = "null" }
+                    )
+                },
+                ["direction"] = new JsonObject
+                {
+                    ["anyOf"] = new JsonArray(
+                        new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("Income", "Expense") },
                         new JsonObject { ["type"] = "null" }
                     )
                 },
@@ -193,14 +186,14 @@ public class GroqInterpreter : IInterpreter
                     ["items"] = new JsonObject
                     {
                         ["type"] = "string",
-                        ["enum"] = new JsonArray("amount", "account", "toAccount", "allocationName")
+                        ["enum"] = new JsonArray("amount", "account", "toAccount", "setAsideName", "title", "direction", "date")
                     }
                 }
             },
             ["required"] = new JsonArray(
                 "intent", "transactionType", "amount", "description",
                 "account", "toAccount", "date", "feeAmount",
-                "allocationName", "clarificationFields"
+                "setAsideName", "title", "direction", "clarificationFields"
             ),
             ["additionalProperties"] = false
         };

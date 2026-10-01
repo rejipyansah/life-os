@@ -14,17 +14,34 @@ public class InterpretRequest
     public required IReadOnlyList<string> EligibleAccounts { get; init; }
 }
 
+/// <summary>
+/// Mentahan hasil interpreter. Interpreter hanya menafsirkan — ia tidak pernah menjadi
+/// source of truth dan tidak pernah menulis ke database.
+/// </summary>
 public class InterpretResult
 {
+    /// <summary>CreateTransaction | CreateSetAside | CreateUpcomingEvent | Unsupported</summary>
     public string Intent { get; set; } = "";
+
+    /// <summary>Expense | Income | Transfer — untuk CreateTransaction.</summary>
     public string? TransactionType { get; set; }
+
     public decimal? Amount { get; set; }
     public string? Description { get; set; }
     public string? Account { get; set; }
     public string? ToAccount { get; set; }
     public string? Date { get; set; }
     public decimal? FeeAmount { get; set; }
-    public string? AllocationName { get; set; }
+
+    /// <summary>Nama pos untuk CreateSetAside.</summary>
+    public string? SetAsideName { get; set; }
+
+    /// <summary>Judul agenda untuk CreateUpcomingEvent.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Income | Expense — arah arus kas untuk CreateUpcomingEvent.</summary>
+    public string? Direction { get; set; }
+
     public List<string> ClarificationFields { get; set; } = [];
 }
 
@@ -42,11 +59,17 @@ public class InterpretResponse
     [JsonPropertyName("command")]
     public CreateTransactionCommand? Command { get; set; }
 
-    [JsonPropertyName("allocationPreview")]
-    public InterpretAllocationData? AllocationPreview { get; set; }
+    [JsonPropertyName("setAsidePreview")]
+    public InterpretSetAsideData? SetAsidePreview { get; set; }
 
-    [JsonPropertyName("allocationCommand")]
-    public CreateAllocationCommand? AllocationCommand { get; set; }
+    [JsonPropertyName("setAsideCommand")]
+    public CreateSetAsideCommand? SetAsideCommand { get; set; }
+
+    [JsonPropertyName("eventPreview")]
+    public InterpretEventData? EventPreview { get; set; }
+
+    [JsonPropertyName("eventCommand")]
+    public CreateUpcomingEventCommand? EventCommand { get; set; }
 
     [JsonPropertyName("clarifications")]
     public List<string> Clarifications { get; set; } = [];
@@ -76,7 +99,7 @@ public class InterpretTransactionData
     public decimal? FeeAmount { get; set; }
 }
 
-public class InterpretAllocationData
+public class InterpretSetAsideData
 {
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
@@ -86,6 +109,24 @@ public class InterpretAllocationData
 
     [JsonPropertyName("account")]
     public string? Account { get; set; }
+}
+
+public class InterpretEventData
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "";
+
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+
+    [JsonPropertyName("direction")]
+    public string Direction { get; set; } = "";
+
+    [JsonPropertyName("account")]
+    public string? Account { get; set; }
+
+    [JsonPropertyName("date")]
+    public string? Date { get; set; }
 }
 
 public class InterpretInputRequest

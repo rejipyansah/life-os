@@ -1,12 +1,9 @@
 export {
-  financeFixture,
-  type FinanceFixture,
-} from './financeFixture';
-export {
   deriveFinanceState,
   formatCurrency,
   formatCurrencyRaw,
   formatSignedCurrency,
+  incrementalPlafonStatus,
   parseFormattedNumber,
   formatNumberString,
   posCategoryLabel,
@@ -14,6 +11,8 @@ export {
   agendaTypeLabel,
   transactionAmountLabel,
   type FinanceDerived,
+  type IncrementalStatus,
+  type ProgressTone,
 } from './financeCalc';
 export {
   useFinanceState,

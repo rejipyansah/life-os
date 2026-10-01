@@ -453,9 +453,9 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             Account = "Mandiri",
             ClarificationFields = []
         }));
@@ -467,15 +467,15 @@ public class InterpreterTests : IDisposable
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("Ready", response.State);
-        Assert.Equal("CreateAllocation", response.Intent);
+        Assert.Equal("CreateSetAside", response.Intent);
 
-        Assert.NotNull(response.AllocationPreview);
-        Assert.Equal("WiFi", response.AllocationPreview!.Name);
-        Assert.Equal(350000m, response.AllocationPreview.Amount);
-        Assert.Equal("Mandiri", response.AllocationPreview.Account);
+        Assert.NotNull(response.SetAsidePreview);
+        Assert.Equal("WiFi", response.SetAsidePreview!.Name);
+        Assert.Equal(350000m, response.SetAsidePreview.Amount);
+        Assert.Equal("Mandiri", response.SetAsidePreview.Account);
 
-        Assert.NotNull(response.AllocationCommand);
-        var cmd = response.AllocationCommand!;
+        Assert.NotNull(response.SetAsideCommand);
+        var cmd = response.SetAsideCommand!;
         Assert.Equal(_scopeId, cmd.ScopeId);
         Assert.Equal(_mandiriAccount.Id, cmd.AccountId);
         Assert.Equal("WiFi", cmd.Name);
@@ -492,8 +492,8 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
-            AllocationName = "WiFi",
+            Intent = "CreateSetAside",
+            SetAsideName = "WiFi",
             Account = "Mandiri",
             ClarificationFields = ["amount"]
         }));
@@ -514,10 +514,10 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
             Account = "Mandiri",
-            ClarificationFields = ["allocationName"]
+            ClarificationFields = ["setAsideName"]
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -536,9 +536,9 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             ClarificationFields = ["account"]
         }));
 
@@ -558,9 +558,9 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             Account = "GoPay",
             ClarificationFields = []
         }));
@@ -579,13 +579,13 @@ public class InterpreterTests : IDisposable
     [Fact]
     public async Task Interpret_Allocation_DoesNotPersistAllocation()
     {
-        var allocCountBefore = await _db.Allocations.CountAsync();
+        var setAsideCountBefore = await _db.SetAsides.CountAsync();
 
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             Account = "Mandiri",
             ClarificationFields = []
         }));
@@ -594,7 +594,7 @@ public class InterpreterTests : IDisposable
             new InterpretInputRequest { Input = "sisihkan 350rb buat wifi dari mandiri" },
             fake, _scopeId, _db);
 
-        Assert.Equal(allocCountBefore, await _db.Allocations.CountAsync());
+        Assert.Equal(setAsideCountBefore, await _db.SetAsides.CountAsync());
     }
 
     // ───────────────────────── Allocation: No ID injection ─────────────────────────
@@ -604,9 +604,9 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             Account = "Mandiri",
             ClarificationFields = []
         }));
@@ -627,9 +627,9 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 350000,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             Account = "Mandiri",
             ClarificationFields = ["invalid_field", "amount"]
         }));
@@ -651,9 +651,9 @@ public class InterpreterTests : IDisposable
     {
         var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
         {
-            Intent = "CreateAllocation",
+            Intent = "CreateSetAside",
             Amount = 0,
-            AllocationName = "WiFi",
+            SetAsideName = "WiFi",
             Account = "Mandiri",
             ClarificationFields = []
         }));
@@ -971,6 +971,126 @@ public class InterpreterTests : IDisposable
 
     // ───────────────────────── FakeInterpreter ─────────────────────────
 
+    // ───────────────────────── Upcoming event ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_UpcomingEvent_ReturnsReady()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateUpcomingEvent",
+            Title = "Gaji",
+            Amount = 5_000_000m,
+            Direction = "Income",
+            Account = "Mandiri",
+            Date = "2026-10-01"
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "gaji 5jt tanggal 1" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.NotNull(response.EventPreview);
+        Assert.Equal("Gaji", response.EventPreview!.Title);
+        Assert.Equal(5_000_000m, response.EventPreview.Amount);
+        Assert.Equal("Income", response.EventPreview.Direction);
+
+        var cmd = response.EventCommand!;
+        Assert.Equal(_scopeId, cmd.ScopeId);
+        Assert.Equal(UpcomingEventDirection.Income, cmd.Direction);
+        Assert.Equal(UpcomingEventScheduleKind.Scheduled, cmd.ScheduleKind);
+        Assert.Equal(new DateOnly(2026, 10, 1), cmd.DueDate);
+    }
+
+    [Fact]
+    public async Task Interpret_UpcomingEvent_WithoutDate_IsFlexible()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateUpcomingEvent",
+            Title = "Sembako",
+            Amount = 200_000m,
+            Direction = "Expense",
+            Account = "Cash"
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "beli sembako 200rb" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.Null(response.EventCommand!.DueDate);
+        Assert.Equal(UpcomingEventScheduleKind.Flexible, response.EventCommand.ScheduleKind);
+    }
+
+    [Fact]
+    public async Task Interpret_UpcomingEvent_MissingFields_ReturnsNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateUpcomingEvent",
+            ClarificationFields = ["amount", "title", "direction"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "bayar" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains("Nominalnya berapa?", response.Clarifications);
+        Assert.Contains("Agendanya untuk apa?", response.Clarifications);
+        Assert.Contains("Apakah ini pemasukan atau pengeluaran?", response.Clarifications);
+    }
+
+    [Fact]
+    public async Task Interpret_UpcomingEvent_DoesNotPersist()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateUpcomingEvent",
+            Title = "WiFi",
+            Amount = 340_440m,
+            Direction = "Expense",
+            Account = "Mandiri",
+            Date = "2026-10-28"
+        }));
+
+        var before = await _db.UpcomingEvents.CountAsync();
+
+        await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "bayar wifi 340rb tgl 28" },
+            fake, _scopeId, _db);
+
+        Assert.Equal(before, await _db.UpcomingEvents.CountAsync());
+    }
+
+    // ───────────────────────── Set-aside vocabulary ─────────────────────────
+
+    [Fact]
+    public async Task Interpret_SetAside_UsesFinalDomainVocabulary()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateSetAside",
+            SetAsideName = "Dana Servis Motor",
+            Amount = 500_000m,
+            Account = "SeaBank"
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "sisihkan 500rb untuk servis motor di SeaBank" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.Equal("CreateSetAside", response.Intent);
+        Assert.Equal("Dana Servis Motor", response.SetAsidePreview!.Name);
+        Assert.Equal("Dana Servis Motor", response.SetAsideCommand!.Name);
+    }
     private class FakeInterpreter : IInterpreter
     {
         private readonly Func<InterpretRequest, Task<InterpretResult>> _handler;

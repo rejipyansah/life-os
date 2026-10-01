@@ -106,6 +106,7 @@ export default function FinancePage({
 
           {/* Row 4: Agenda Kas Mendatang */}
           <AgendaKasSection
+            accounts={state.accounts}
             agendas={state.agendas}
             archivedAgendas={state.archivedAgendas}
             filter={state.agendaFilter}

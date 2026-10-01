@@ -7,10 +7,12 @@ namespace LifeOS.Api.Services;
 public class AccountService
 {
     private readonly ApplicationDbContext _db;
+    private readonly BalanceCalculator _balances;
 
-    public AccountService(ApplicationDbContext db)
+    public AccountService(ApplicationDbContext db, BalanceCalculator balances)
     {
         _db = db;
+        _balances = balances;
     }
 
     public async Task<Account> CreateAccountAsync(CreateAccountCommand command, CancellationToken ct = default)
@@ -69,44 +71,29 @@ public class AccountService
             return new AccountListProjection
             {
                 Accounts = [],
-                TotalBalance = 0,
-                TotalAllocated = 0,
-                TotalAvailable = 0
+                TotalActualBalance = 0,
+                TotalSetAsideAmount = 0,
+                TotalAvailableBalance = 0
             };
         }
 
         var accountIds = accounts.Select(a => a.Id).ToList();
-
-        // Efficient EF Core grouping for balance calculation
-        var balances = await _db.TransactionEntries
-            .Where(te => accountIds.Contains(te.AccountId))
-            .GroupBy(te => te.AccountId)
-            .Select(g => new { AccountId = g.Key, Balance = g.Sum(te => te.Amount) })
-            .ToListAsync(ct);
-
-        // Efficient EF Core grouping for allocated calculation
-        var allocated = await _db.Allocations
-            .Where(a => accountIds.Contains(a.AccountId) && a.Status == AllocationStatus.Active)
-            .GroupBy(a => a.AccountId)
-            .Select(g => new { AccountId = g.Key, Allocated = g.Sum(a => a.Amount) })
-            .ToListAsync(ct);
-
-        var balanceDict = balances.ToDictionary(b => b.AccountId, b => b.Balance);
-        var allocatedDict = allocated.ToDictionary(a => a.AccountId, a => a.Allocated);
+        var balances = await _balances.GetActualBalancesAsync(accountIds, ct);
+        var setAsides = await _balances.GetActiveSetAsidesAsync(accountIds, ct);
 
         var projections = accounts.Select(a =>
         {
-            var balance = balanceDict.GetValueOrDefault(a.Id, 0m);
-            var alloc = allocatedDict.GetValueOrDefault(a.Id, 0m);
+            var actual = balances.GetValueOrDefault(a.Id, 0m);
+            var reserved = setAsides.GetValueOrDefault(a.Id, 0m);
             return new AccountProjection
             {
                 Id = a.Id,
                 Name = a.Name,
                 Type = a.Type,
                 IsArchived = a.IsArchived,
-                Balance = balance,
-                Allocated = alloc,
-                Available = balance - alloc,
+                ActualBalance = actual,
+                SetAsideAmount = reserved,
+                AvailableBalance = actual - reserved,
                 CreatedAt = a.CreatedAt
             };
         }).ToList();
@@ -114,9 +101,9 @@ public class AccountService
         return new AccountListProjection
         {
             Accounts = projections,
-            TotalBalance = projections.Sum(p => p.Balance),
-            TotalAllocated = projections.Sum(p => p.Allocated),
-            TotalAvailable = projections.Sum(p => p.Available)
+            TotalActualBalance = projections.Sum(p => p.ActualBalance),
+            TotalSetAsideAmount = projections.Sum(p => p.SetAsideAmount),
+            TotalAvailableBalance = projections.Sum(p => p.AvailableBalance)
         };
     }
 
@@ -131,13 +118,8 @@ public class AccountService
         if (account is null)
             throw new ValidationException("Account not found in current Scope.");
 
-        var balance = await _db.TransactionEntries
-            .Where(te => te.AccountId == accountId)
-            .SumAsync(te => te.Amount, ct);
-
-        var allocated = await _db.Allocations
-            .Where(a => a.AccountId == accountId && a.Status == AllocationStatus.Active)
-            .SumAsync(a => a.Amount, ct);
+        var actual = await _balances.GetActualBalanceAsync(accountId, ct);
+        var reserved = await _balances.GetActiveSetAsideAsync(accountId, ct);
 
         return new AccountProjection
         {
@@ -145,9 +127,9 @@ public class AccountService
             Name = account.Name,
             Type = account.Type,
             IsArchived = account.IsArchived,
-            Balance = balance,
-            Allocated = allocated,
-            Available = balance - allocated,
+            ActualBalance = actual,
+            SetAsideAmount = reserved,
+            AvailableBalance = actual - reserved,
             CreatedAt = account.CreatedAt
         };
     }
@@ -193,22 +175,18 @@ public class AccountService
         {
             if (command.IsArchived.Value)
             {
-                // Archive validation: balance must be 0 AND no active allocations
-                var balance = await _db.TransactionEntries
-                    .Where(te => te.AccountId == accountId)
-                    .SumAsync(te => te.Amount, ct);
+                // Archive validation: balance must be 0 AND no active set-asides
+                var balance = await _balances.GetActualBalanceAsync(accountId, ct);
 
                 if (balance != 0)
                     throw new ValidationException(
                         $"Akun belum bisa diarsipkan karena saldonya masih Rp{balance:N0}. Kosongkan saldo terlebih dahulu.");
 
-                var activeAllocated = await _db.Allocations
-                    .Where(a => a.AccountId == accountId && a.Status == AllocationStatus.Active)
-                    .SumAsync(a => a.Amount, ct);
+                var activeSetAside = await _balances.GetActiveSetAsideAsync(accountId, ct);
 
-                if (activeAllocated != 0)
+                if (activeSetAside != 0)
                     throw new ValidationException(
-                        $"Akun belum bisa diarsipkan karena masih ada alokasi aktif sebesar Rp{activeAllocated:N0}. Hapus atau pindahkan alokasi terlebih dahulu.");
+                        $"Akun belum bisa diarsipkan karena masih ada uang yang disisihkan sebesar Rp{activeSetAside:N0}. Tarik atau tutup pos terlebih dahulu.");
             }
 
             account.IsArchived = command.IsArchived.Value;

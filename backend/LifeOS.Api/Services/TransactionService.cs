@@ -1,8 +1,6 @@
 using LifeOS.Api.Data;
 using LifeOS.Api.Models;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
-using IsolationLevel = System.Data.IsolationLevel;
 
 namespace LifeOS.Api.Services;
 
@@ -10,50 +8,64 @@ public class TransactionService
 {
     private readonly ApplicationDbContext _db;
 
-    private const int MaxSerializationRetries = 3;
-
     public TransactionService(ApplicationDbContext db)
     {
         _db = db;
     }
 
-    public async Task<(Transaction transaction, List<TransactionEntry> entries)> CreateTransactionAsync(
+    public Task<(Transaction transaction, List<TransactionEntry> entries)> CreateTransactionAsync(
         CreateTransactionCommand command,
         CancellationToken ct = default)
-    {
-        // Retry loop handles PostgreSQL serialization failures (SQLSTATE 40001).
-        // Under SERIALIZABLE isolation, concurrent transactions that read overlapping
-        // rows can cause one to fail at commit time. Retrying the entire transaction
-        // allows the loser to re-read fresh data and succeed.
-        for (var attempt = 1; ; attempt++)
-        {
-            await using var dbTransaction = await _db.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable, ct);
+        => SerializableCommandRunner.RunAsync(_db, token => ExecuteInTransactionAsync(command, token), ct);
 
-            try
+    /// <summary>
+    /// Membatalkan/mengoreksi transaksi yang sudah diposting TANPA mengubah histori.
+    ///
+    /// Transaksi asli tetap utuh dan tidak pernah dimutasi. Yang dibuat adalah satu
+    /// Transaction Reversal baru dengan entry berlawanan, dihubungkan lewat
+    /// RelatedTransactionId sehingga jejak audit tetap dapat ditelusuri.
+    /// </summary>
+    public Task<Transaction> ReverseTransactionAsync(
+        ReverseTransactionCommand command,
+        CancellationToken ct = default)
+        => SerializableCommandRunner.RunAsync(_db, async token =>
+        {
+            var original = await _db.Transactions
+                .FirstOrDefaultAsync(t => t.Id == command.TransactionId && t.ScopeId == command.ScopeId, token);
+
+            if (original is null)
+                throw new ValidationException("Transaction not found in current Scope.");
+
+            if (command.Reason is not null && command.Reason.Trim().Length > 512)
+                throw new ValidationException("Reversal reason must not exceed 512 characters.");
+
+            var entries = await _db.TransactionEntries
+                .Where(te => te.TransactionId == original.Id)
+                .Select(te => new { te.AccountId, te.Amount })
+                .ToListAsync(token);
+
+            if (entries.Count == 0)
+                throw new ValidationException("Transaction has no entries to reverse.");
+
+            var create = new CreateTransactionCommand
             {
-                var result = await ExecuteInTransactionAsync(command, ct);
-                await dbTransaction.CommitAsync(ct);
-                return result;
-            }
-            catch (Exception ex) when (IsSerializationFailure(ex) && attempt < MaxSerializationRetries)
-            {
-                await SafeRollbackAsync(dbTransaction, ct);
-                // Brief yield to let the winning transaction release its locks
-                await Task.Yield();
-            }
-            catch (Exception ex) when (IsSerializationFailure(ex))
-            {
-                await SafeRollbackAsync(dbTransaction, ct);
-                throw new SerializationConflictException();
-            }
-            catch (Exception)
-            {
-                await SafeRollbackAsync(dbTransaction, ct);
-                throw;
-            }
-        }
-    }
+                ScopeId = command.ScopeId,
+                Type = TransactionType.Reversal,
+                Amount = original.Amount,
+                Description = string.IsNullOrWhiteSpace(command.Reason)
+                    ? "Reversal"
+                    : command.Reason.Trim(),
+                CategoryName = original.CategoryName,
+                OccurredOn = command.OccurredOn ?? DateOnly.FromDateTime(DateTime.UtcNow),
+                RelatedTransactionId = original.Id,
+                Entries = entries
+                    .Select(e => new CreateTransactionEntryCommand { AccountId = e.AccountId, Amount = -e.Amount })
+                    .ToList()
+            };
+
+            var (reversal, _) = await ExecuteInTransactionAsync(create, token);
+            return reversal;
+        }, ct);
 
     private async Task<(Transaction transaction, List<TransactionEntry> entries)> ExecuteInTransactionAsync(
         CreateTransactionCommand command,
@@ -115,48 +127,6 @@ public class TransactionService
         return (transaction, entries);
     }
 
-    private static bool IsSerializationFailure(Exception ex)
-    {
-        // PostgreSQL serialization failure: SQLSTATE 40001
-        // Detected via NpgsqlException which carries the SQLSTATE code.
-        // Check both the exception and its inner exception, because when PostgreSQL
-        // aborts a SERIALIZABLE transaction, the Npgsql driver may wrap the
-        // serialization failure inside an InvalidOperationException.
-        return FindNpgsqlSerializationFailure(ex) is not null;
-    }
-
-    private static NpgsqlException? FindNpgsqlSerializationFailure(Exception ex)
-    {
-        var current = ex;
-        while (current is not null)
-        {
-            if (current is NpgsqlException npgsqlEx
-                && npgsqlEx.SqlState == PostgresErrorCodes.SerializationFailure)
-            {
-                return npgsqlEx;
-            }
-            current = current.InnerException;
-        }
-        return null;
-    }
-
-    private static async Task SafeRollbackAsync(
-        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction,
-        CancellationToken ct)
-    {
-        // When PostgreSQL aborts a SERIALIZABLE transaction, the transaction
-        // object may already be completed. RollbackAsync would throw
-        // InvalidOperationException. Silently ignore that case.
-        try
-        {
-            await transaction.RollbackAsync(ct);
-        }
-        catch (InvalidOperationException)
-        {
-            // Transaction already completed/aborted by PostgreSQL — nothing to do.
-        }
-    }
-
     public async Task<decimal> GetAccountBalanceAsync(Guid accountId, Guid scopeId, CancellationToken ct = default)
     {
         var account = await _db.Accounts
@@ -212,13 +182,13 @@ public class TransactionService
         if (balance + command.Entries[0].Amount < 0)
             throw new ValidationException("Insufficient balance.");
 
-        var allocated = await _db.Allocations
-            .Where(a => a.AccountId == accountId && a.Status == AllocationStatus.Active)
-            .SumAsync(a => a.Amount, ct);
+        var allocated = await _db.SetAsideEntries
+            .Where(se => se.SetAside.AccountId == accountId && se.SetAside.Status == SetAsideStatus.Active)
+            .SumAsync(se => se.Amount, ct);
 
         var available = balance - allocated;
         if (available + command.Entries[0].Amount < 0)
-            throw new ValidationException("Insufficient available balance. Funds are reserved by active allocations.");
+            throw new ValidationException("Insufficient available balance. Funds are reserved by active set-asides.");
 
         return [BuildEntry(command.Entries[0], transaction.Id)];
     }
@@ -263,13 +233,13 @@ public class TransactionService
         if (sourceBalance + source.Amount < 0)
             throw new ValidationException("Insufficient balance in source Account.");
 
-        var sourceAllocated = await _db.Allocations
-            .Where(a => a.AccountId == source.AccountId && a.Status == AllocationStatus.Active)
-            .SumAsync(a => a.Amount, ct);
+        var sourceAllocated = await _db.SetAsideEntries
+            .Where(se => se.SetAside.AccountId == source.AccountId && se.SetAside.Status == SetAsideStatus.Active)
+            .SumAsync(se => se.Amount, ct);
 
         var sourceAvailable = sourceBalance - sourceAllocated;
         if (sourceAvailable + source.Amount < 0)
-            throw new ValidationException("Insufficient available balance in source Account. Funds are reserved by active allocations.");
+            throw new ValidationException("Insufficient available balance in source Account. Funds are reserved by active set-asides.");
 
         return [BuildEntry(source, transaction.Id), BuildEntry(destination, transaction.Id)];
     }
@@ -331,16 +301,21 @@ public class TransactionService
         if (alreadyReversed)
             throw new ValidationException("This transaction has already been reversed.");
 
-        if (command.Entries.Count != 1)
-            throw new ValidationException("Reversal must have exactly one entry.");
+        if (command.Entries.Count == 0)
+            throw new ValidationException("Reversal must have at least one entry.");
 
-        if (command.Entries[0].Amount == 0)
-            throw new ValidationException("Reversal entry Amount must be non-zero.");
+        // Reversal membalik semua entry transaksi asli, jadi jumlah entry mengikuti
+        // transaksi yang dikoreksi (1 untuk Income/Expense, 2 untuk Transfer).
+        foreach (var entry in command.Entries)
+        {
+            if (entry.Amount == 0)
+                throw new ValidationException("Reversal entry Amount must be non-zero.");
+        }
 
         if (command.FeeAmount.HasValue)
             throw new ValidationException("FeeAmount is not applicable for Reversal.");
 
-        return [BuildEntry(command.Entries[0], transaction.Id)];
+        return command.Entries.Select(e => BuildEntry(e, transaction.Id)).ToList();
     }
 
     private List<TransactionEntry> ValidateAdjustment(
@@ -376,9 +351,10 @@ public class TransactionService
 
     public async Task<List<TransactionProjection>> GetTransactionsAsync(
         Guid scopeId,
+        int? limit = null,
         CancellationToken ct = default)
     {
-        var result = await _db.Transactions
+        var query = _db.Transactions
             .Where(t => t.ScopeId == scopeId)
             .OrderByDescending(t => t.OccurredOn)
             .ThenByDescending(t => t.CreatedAt)
@@ -393,8 +369,12 @@ public class TransactionService
                 CreatedAt = t.CreatedAt,
                 RelatedTransactionId = t.RelatedTransactionId,
                 FeeAmount = t.FeeAmount
-            })
-            .ToListAsync(ct);
+            });
+
+        if (limit is > 0)
+            query = query.Take(limit.Value);
+
+        var result = await query.ToListAsync(ct);
 
         // Load entries separately to avoid N+1 and use efficient batch query
         var transactionIds = result.Select(t => t.Id).ToList();
@@ -422,7 +402,40 @@ public class TransactionService
             tx.Entries = entriesByTransaction.GetValueOrDefault(tx.Id, []);
         }
 
+        await ApplyReversalInfoAsync(result, ct);
+
         return result;
+    }
+
+    /// <summary>
+    /// Menandai transaksi yang sudah dibatalkan beserta alasan pembatalannya,
+    /// supaya histori tetap dapat ditelusuri tanpa mengubah transaksi asli.
+    /// </summary>
+    private async Task ApplyReversalInfoAsync(List<TransactionProjection> transactions, CancellationToken ct)
+    {
+        if (transactions.Count == 0) return;
+
+        var ids = transactions.Select(t => t.Id).ToList();
+        var reversals = await _db.Transactions
+            .Where(t => t.Type == TransactionType.Reversal
+                && t.RelatedTransactionId != null
+                && ids.Contains(t.RelatedTransactionId.Value))
+            .Select(t => new { t.RelatedTransactionId, t.Description })
+            .ToListAsync(ct);
+
+        var byOriginal = reversals
+            .Where(r => r.RelatedTransactionId.HasValue)
+            .GroupBy(r => r.RelatedTransactionId!.Value)
+            .ToDictionary(g => g.Key, g => g.First().Description);
+
+        foreach (var tx in transactions)
+        {
+            if (byOriginal.TryGetValue(tx.Id, out var reason))
+            {
+                tx.IsReversed = true;
+                tx.ReversalReason = reason;
+            }
+        }
     }
 
     public async Task<TransactionProjection?> GetTransactionByIdAsync(
@@ -463,6 +476,8 @@ public class TransactionService
                 })
             .ToListAsync(ct);
 
+        await ApplyReversalInfoAsync([transaction], ct);
+
         return transaction;
     }
 }
@@ -479,6 +494,12 @@ public class TransactionProjection
     public Guid? RelatedTransactionId { get; set; }
     public decimal? FeeAmount { get; set; }
     public List<TransactionEntryProjection> Entries { get; set; } = [];
+
+    /// <summary>True bila transaksi ini sudah dibatalkan lewat Reversal.</summary>
+    public bool IsReversed { get; set; }
+
+    /// <summary>Alasan pembatalan, diambil dari transaksi Reversal terkait.</summary>
+    public string? ReversalReason { get; set; }
 }
 
 public class TransactionEntryProjection

@@ -44,6 +44,7 @@ public class EnumSerializationTests
     [InlineData("\"Cash\"", AccountType.Cash)]
     [InlineData("\"Bank\"", AccountType.Bank)]
     [InlineData("\"EWallet\"", AccountType.EWallet)]
+    [InlineData("\"Credit\"", AccountType.Credit)]
     public void AccountType_DeserializesFromString(string json, AccountType expected)
     {
         var result = JsonSerializer.Deserialize<AccountType>(json, _options);

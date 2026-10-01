@@ -12,7 +12,7 @@ public class AccountServiceTests : IDisposable
     private readonly SqliteConnection _connection;
     private readonly AccountService _sut;
     private readonly TransactionService _txService;
-    private readonly AllocationService _allocService;
+    private readonly SetAsideService _allocService;
     private readonly Guid _scopeId;
 
     public AccountServiceTests()
@@ -26,9 +26,9 @@ public class AccountServiceTests : IDisposable
 
         _db = new ApplicationDbContext(options);
         _db.Database.EnsureCreated();
-        _sut = new AccountService(_db);
+        _sut = new AccountService(_db, new BalanceCalculator(_db));
         _txService = new TransactionService(_db);
-        _allocService = new AllocationService(_db);
+        _allocService = new SetAsideService(_db, new BalanceCalculator(_db));
 
         // Seed: Scope
         var scope = new Scope { Type = ScopeType.Owner };
@@ -173,7 +173,7 @@ public class AccountServiceTests : IDisposable
         var account = await _sut.CreateAccountAsync(command);
 
         var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
-        Assert.Equal(0m, projection.Balance);
+        Assert.Equal(0m, projection.ActualBalance);
     }
 
     // ───────────────────────── Duplicate Name Rejection ─────────────────────────
@@ -427,7 +427,7 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Single(result.Accounts);
-        Assert.Equal(500_000m, result.Accounts[0].Balance);
+        Assert.Equal(500_000m, result.Accounts[0].ActualBalance);
     }
 
     [Fact]
@@ -442,7 +442,7 @@ public class AccountServiceTests : IDisposable
 
         await SeedBalance(account.Id, 500_000m);
 
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
             AccountId = account.Id,
@@ -453,7 +453,7 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Single(result.Accounts);
-        Assert.Equal(300_000m, result.Accounts[0].Allocated);
+        Assert.Equal(300_000m, result.Accounts[0].SetAsideAmount);
     }
 
     [Fact]
@@ -467,7 +467,7 @@ public class AccountServiceTests : IDisposable
         });
 
         await SeedBalance(account.Id, 500_000m);
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
             AccountId = account.Id,
@@ -478,14 +478,16 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Single(result.Accounts);
-        Assert.Equal(500_000m, result.Accounts[0].Balance);
-        Assert.Equal(200_000m, result.Accounts[0].Allocated);
-        Assert.Equal(300_000m, result.Accounts[0].Available);
+        Assert.Equal(500_000m, result.Accounts[0].ActualBalance);
+        Assert.Equal(200_000m, result.Accounts[0].SetAsideAmount);
+        Assert.Equal(300_000m, result.Accounts[0].AvailableBalance);
     }
 
     [Fact]
-    public async Task GetAccounts_NegativeAvailablePreserved()
+    public async Task GetAccounts_SetAsideBeyondAvailable_IsRejected()
     {
+        // Available balance is a real constraint: a set-aside may never reserve more
+        // than the account actually has free. This keeps `Available` from going negative.
         var account = await _sut.CreateAccountAsync(new CreateAccountCommand
         {
             ScopeId = _scopeId,
@@ -496,7 +498,7 @@ public class AccountServiceTests : IDisposable
         await SeedBalance(account.Id, 100_000m);
 
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
-            _allocService.CreateAllocationAsync(new CreateAllocationCommand
+            _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
             {
                 ScopeId = _scopeId,
                 AccountId = account.Id,
@@ -504,7 +506,13 @@ public class AccountServiceTests : IDisposable
                 Amount = 300_000m
             }));
 
-        Assert.Contains("Dana tidak mencukupi", ex.Message);
+        Assert.Contains("Insufficient available balance", ex.Message);
+
+        // Nothing was reserved.
+        var result = await _sut.GetAccountsAsync(_scopeId);
+        Assert.Equal(100_000m, result.Accounts[0].ActualBalance);
+        Assert.Equal(0m, result.Accounts[0].SetAsideAmount);
+        Assert.Equal(100_000m, result.Accounts[0].AvailableBalance);
     }
 
     [Fact]
@@ -520,7 +528,7 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Single(result.Accounts);
-        Assert.Equal(0m, result.Accounts[0].Balance);
+        Assert.Equal(0m, result.Accounts[0].ActualBalance);
     }
 
     [Fact]
@@ -541,7 +549,7 @@ public class AccountServiceTests : IDisposable
 
         await SeedBalance(accountA.Id, 500_000m);
         await SeedBalance(accountB.Id, 300_000m);
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
             AccountId = accountA.Id,
@@ -552,9 +560,9 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Equal(2, result.Accounts.Count);
-        Assert.Equal(800_000m, result.TotalBalance);
-        Assert.Equal(100_000m, result.TotalAllocated);
-        Assert.Equal(700_000m, result.TotalAvailable);
+        Assert.Equal(800_000m, result.TotalActualBalance);
+        Assert.Equal(100_000m, result.TotalSetAsideAmount);
+        Assert.Equal(700_000m, result.TotalAvailableBalance);
     }
 
     [Fact]
@@ -588,7 +596,7 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId, includeArchived: false);
 
         Assert.Single(result.Accounts);
-        Assert.Equal(500_000m, result.TotalBalance);
+        Assert.Equal(500_000m, result.TotalActualBalance);
     }
 
     // ───────────────────────── Get by ID ─────────────────────────
@@ -609,7 +617,7 @@ public class AccountServiceTests : IDisposable
 
         Assert.Equal(account.Id, projection.Id);
         Assert.Equal("Detail Account", projection.Name);
-        Assert.Equal(250_000m, projection.Balance);
+        Assert.Equal(250_000m, projection.ActualBalance);
     }
 
     [Fact]
@@ -724,7 +732,7 @@ public class AccountServiceTests : IDisposable
 
         // Verify balance is unchanged
         var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
-        Assert.Equal(100_000m, projection.Balance);
+        Assert.Equal(100_000m, projection.ActualBalance);
     }
 
     [Fact]
@@ -1044,7 +1052,7 @@ public class AccountServiceTests : IDisposable
 
         // Verify balance is zero
         var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
-        Assert.Equal(0m, projection.Balance);
+        Assert.Equal(0m, projection.ActualBalance);
 
         // Archive should succeed despite transaction history
         var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
@@ -1087,7 +1095,7 @@ public class AccountServiceTests : IDisposable
         });
 
         await SeedBalance(account.Id, 500_000m);
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
             AccountId = account.Id,
@@ -1118,7 +1126,7 @@ public class AccountServiceTests : IDisposable
         });
 
         await SeedBalance(account.Id, 500_000m);
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
             AccountId = account.Id,
@@ -1182,7 +1190,7 @@ public class AccountServiceTests : IDisposable
 
         // Balance unchanged
         var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
-        Assert.Equal(250_000m, projection.Balance);
+        Assert.Equal(250_000m, projection.ActualBalance);
 
         // No new transactions created
         var txCountAfter = await _db.Transactions.CountAsync();
@@ -1344,10 +1352,10 @@ public class AccountServiceTests : IDisposable
 
         // Verify data integrity
         var projection = await _sut.GetAccountByIdAsync(account.Id, _scopeId);
-        Assert.Equal(500_000m, projection.Balance);
+        Assert.Equal(500_000m, projection.ActualBalance);
 
         // Create allocation
-        await _allocService.CreateAllocationAsync(new CreateAllocationCommand
+        await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
             AccountId = account.Id,
@@ -1357,8 +1365,8 @@ public class AccountServiceTests : IDisposable
 
         var result = await _sut.GetAccountsAsync(_scopeId);
         Assert.Single(result.Accounts);
-        Assert.Equal(500_000m, result.Accounts[0].Balance);
-        Assert.Equal(200_000m, result.Accounts[0].Allocated);
+        Assert.Equal(500_000m, result.Accounts[0].ActualBalance);
+        Assert.Equal(200_000m, result.Accounts[0].SetAsideAmount);
     }
 
     // ───────────────────────── Scope Initialization ─────────────────────────
