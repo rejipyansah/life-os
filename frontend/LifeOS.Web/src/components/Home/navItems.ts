@@ -7,7 +7,7 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
-  { id: 'beranda', label: 'Beranda', available: true },
+  { id: 'beranda', label: 'Beranda', available: false },
   { id: 'keuangan', label: 'Keuangan', available: true },
   { id: 'jurnal', label: 'Jurnal', available: false },
   { id: 'target', label: 'Target', available: false },
