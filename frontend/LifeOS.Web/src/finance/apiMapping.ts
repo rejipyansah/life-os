@@ -439,6 +439,7 @@ export function mapFinanceState(
     derived: {
       totalLiquidity: 0,
       billsDueTotal: 0,
+      scheduledExpenseCommitments: 0,
       unpaidBillsCount: 0,
       savingsCommitment: 0,
       freeCash: 0,
@@ -477,11 +478,12 @@ export function mapFinanceState(
     derived: {
       totalLiquidity: projection.totalActualBalance,
       billsDueTotal: projection.dueObligations,
+      scheduledExpenseCommitments: projection.scheduledExpenseCommitments,
       unpaidBillsCount: projection.dueObligationsCount,
       savingsCommitment: projection.totalCommittedSetAside,
       freeCash: projection.freeCash,
       commitmentTotal:
-        projection.dueObligations + projection.totalCommittedSetAside,
+        projection.totalCommittedSetAside + projection.scheduledExpenseCommitments,
       hasUnpaidBills: projection.hasUnpaidBills,
       allBillsPaid: projection.allBillsPaid,
     },

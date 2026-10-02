@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace LifeOS.Api.Services;
 
 /// <summary>
-/// Agenda Kas Mendatang (upcoming cash events).
+/// Rencana Pengeluaran/Pemasukan (upcoming cash events).
 ///
 /// An expected event is an intention, NOT a Transaction:
 ///   - it never changes the actual account balance

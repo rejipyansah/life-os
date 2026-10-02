@@ -262,7 +262,7 @@ export function useFinanceState(): FinanceStateApi {
             name: data.name,
             type: fromAccountType(data.type),
           }),
-        () => pushToast(`Rekening "${data.name}" ditambahkan.`)
+        () => pushToast(`Sumber Dana "${data.name}" ditambahkan.`)
       );
     },
     [pushToast, run]
@@ -276,7 +276,7 @@ export function useFinanceState(): FinanceStateApi {
             name: data.name,
             type: fromAccountType(data.type),
           }),
-        () => pushToast(`Rekening "${data.name}" diperbarui.`)
+        () => pushToast(`Sumber Dana "${data.name}" diperbarui.`)
       );
     },
     [pushToast, run]
@@ -290,7 +290,7 @@ export function useFinanceState(): FinanceStateApi {
         () => updateAccountRequest(id, { isArchived: true }),
         () => {
           if (target) {
-            pushToast(`Rekening "${target.name}" diarsipkan.`, 'delete');
+            pushToast(`Sumber Dana "${target.name}" diarsipkan.`, 'delete');
           }
         }
       );
@@ -314,7 +314,7 @@ export function useFinanceState(): FinanceStateApi {
           }),
         () =>
           pushToast(
-            `Transfer ${formatRupiah(amount)} ke ${target?.name ?? 'rekening'} berhasil!`,
+            `Transfer ${formatRupiah(amount)} ke ${target?.name ?? 'sumber dana'} berhasil!`,
             'swap_horiz'
           )
       );
@@ -333,7 +333,7 @@ export function useFinanceState(): FinanceStateApi {
       // Set-aside intent: a reservation, never a transaction.
       if (parsed.type === 'Alokasi Pos') {
         if (!accountId) {
-          pushToast('Rekening sumber dana tidak ditemukan.', 'error');
+          pushToast('Sumber Dana tidak ditemukan.', 'error');
           return;
         }
         void run(
@@ -363,7 +363,7 @@ export function useFinanceState(): FinanceStateApi {
       }
 
       if (!accountId) {
-        pushToast('Rekening sumber dana tidak ditemukan.', 'error');
+        pushToast('Sumber Dana tidak ditemukan.', 'error');
         return;
       }
 
@@ -517,7 +517,7 @@ export function useFinanceState(): FinanceStateApi {
     (input: CreatePosInput) => {
       const accountId = resolveAccountId(input.accountLabel);
       if (!accountId) {
-        pushToast('Rekening sumber dana tidak ditemukan.', 'error');
+        pushToast('Sumber Dana tidak ditemukan.', 'error');
         return;
       }
 
@@ -550,7 +550,7 @@ export function useFinanceState(): FinanceStateApi {
     [mapped.posItems, pushToast, run]
   );
 
-  /* ── Agenda Kas Mendatang ─────────────────────────────────── */
+  /* ── Rencana Pengeluaran/Pemasukan ─────────────────────────────────── */
 
   const skipAgenda = useCallback(
     (id: string) => {

@@ -120,6 +120,7 @@ function projection(overrides: Partial<FinanceStateProjection> = {}): FinanceSta
     dueObligations: 340_440,
     dueObligationsCount: 1,
     overdueObligationsCount: 0,
+    scheduledExpenseCommitments: 340_440,
     freeCash: 1_059_560,
     hasUnpaidBills: true,
     allBillsPaid: false,
@@ -148,10 +149,30 @@ describe('mapFinanceState', () => {
     expect(result.derived.totalLiquidity).toBe(2_000_000);
     expect(result.derived.savingsCommitment).toBe(600_000);
     expect(result.derived.billsDueTotal).toBe(340_440);
+    expect(result.derived.scheduledExpenseCommitments).toBe(340_440);
     expect(result.derived.unpaidBillsCount).toBe(1);
     expect(result.derived.commitmentTotal).toBe(600_000 + 340_440);
     expect(result.derived.hasUnpaidBills).toBe(true);
     expect(result.derived.allBillsPaid).toBe(false);
+  });
+
+  it('maps planned expense commitments even when not yet due', () => {
+    const result = mapFinanceState(
+      projection({
+        dueObligations: 0,
+        dueObligationsCount: 0,
+        scheduledExpenseCommitments: 350_000,
+        freeCash: 1_050_000,
+        hasUnpaidBills: false,
+        dueEvents: [],
+      })
+    );
+
+    expect(result.derived.scheduledExpenseCommitments).toBe(350_000);
+    expect(result.derived.billsDueTotal).toBe(0);
+    expect(result.derived.unpaidBillsCount).toBe(0);
+    expect(result.derived.commitmentTotal).toBe(600_000 + 350_000);
+    expect(result.derived.freeCash).toBe(1_050_000);
   });
 
   it('never clamps a negative free cash from the backend', () => {

@@ -10,16 +10,24 @@ namespace LifeOS.Api.Services;
 /// tidak ada Account.AvailableBalance.
 ///
 /// Formula:
-///   TotalActualBalance     = Σ actual balance akun            (= Σ TransactionEntry.Amount)
-///   TotalSetAside          = Σ saldo disisihkan aktif          (= Σ SetAsideEntry.Amount)
-///   PendingCycleFunding    = Σ funding yang dibutuhkan cycle yang belum dinormalisasi
-///   PendingCycleSurplus    = Σ surplus yang akan dikembalikan ke Uang Bebas
-///   TotalCommittedSetAside = TotalSetAside + PendingCycleFunding - PendingCycleSurplus
-///   DueObligations         = Σ agenda pengeluaran terjadwal yang jatuh tempo/sudah lewat
-///   FreeCash (Uang Bebas)  = TotalActualBalance - TotalCommittedSetAside - DueObligations
+///   TotalActualBalance           = Σ actual balance akun            (= Σ TransactionEntry.Amount)
+///   TotalSetAside                = Σ saldo disisihkan aktif          (= Σ SetAsideEntry.Amount)
+///   PendingCycleFunding          = Σ funding yang dibutuhkan cycle yang belum dinormalisasi
+///   PendingCycleSurplus          = Σ surplus yang akan dikembalikan ke Uang Bebas
+///   TotalCommittedSetAside       = TotalSetAside + PendingCycleFunding - PendingCycleSurplus
+///   DueObligations               = Σ agenda pengeluaran terjadwal yang jatuh tempo/sudah lewat
+///   ScheduledExpenseCommitments  = Σ SEMUA agenda pengeluaran terjadwal (sekali jalan & ber-siklus)
+///                                   — dikurangi dari Uang Bebas sejak dibuat,
+///                                   mirip komitmen Pos, tanpa membuat transaksi.
+///   FreeCash (Uang Bebas)        = TotalActualBalance - TotalCommittedSetAside
+///                                   - ScheduledExpenseCommitments
 ///
 /// FreeCash tidak pernah di-clamp ke 0. Nilai negatif adalah kondisi nyata yang harus
 /// ditampilkan, bukan disembunyikan.
+///
+/// Catatan: agenda yang sedang jatuh tempo TIDAK dihitung dua kali —
+/// komitmennya sudah masuk ScheduledExpenseCommitments sejak dibuat.
+/// DueObligations tetap mencakup semua tagihan jatuh tempo untuk tampilan Jatuh Tempo.
 /// </summary>
 public class FinanceStateProjection
 {
@@ -35,6 +43,12 @@ public class FinanceStateProjection
     public decimal DueObligations { get; set; }
     public int DueObligationsCount { get; set; }
     public int OverdueObligationsCount { get; set; }
+
+    /// <summary>
+    /// Komitmen agenda pengeluaran terjadwal (sekali jalan & ber-siklus) untuk cycle berjalan.
+    /// Mengurangi Uang Bebas tanpa menjadi transaksi (mirip disisihkan).
+    /// </summary>
+    public decimal ScheduledExpenseCommitments { get; set; }
 
     /// <summary>Uang Bebas. Derived, tidak disimpan, tidak pernah di-clamp.</summary>
     public decimal FreeCash { get; set; }

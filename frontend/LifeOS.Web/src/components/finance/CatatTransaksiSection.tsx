@@ -62,7 +62,7 @@ export default function CatatTransaksiSection({
 
   const handleSubmit = () => {
     if (!selectedAccount) {
-      setGuidance('Belum ada rekening aktif. Tambahkan rekening di bagian Sumber Dana.');
+      setGuidance('Belum ada sumber dana aktif. Tambahkan sumber dana di bagian Sumber Dana.');
       setParsed(null);
       return;
     }
@@ -124,7 +124,7 @@ export default function CatatTransaksiSection({
         <div className="flex items-center justify-between mb-2">
           <label className="text-xs font-semibold text-lo-text-ink flex items-center gap-1.5">
             <Icon name="account_balance_wallet" className="text-[16px] text-lo-secondary" />
-            Rekening Sumber Dana:
+            Sumber Dana:
           </label>
           <span className="text-[11px] text-lo-text-subtle">
             Aktif:{' '}
@@ -136,7 +136,7 @@ export default function CatatTransaksiSection({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {selectorAccounts.length === 0 ? (
             <p className="col-span-2 sm:col-span-4 text-xs text-lo-text-subtle px-1">
-              Belum ada rekening aktif. Tambahkan rekening di bagian Sumber Dana.
+              Belum ada sumber dana aktif. Tambahkan sumber dana di bagian Sumber Dana.
             </p>
           ) : (
             selectorAccounts.map((acc) => {
@@ -322,7 +322,7 @@ export default function CatatTransaksiSection({
               setSavedMsg(null);
               if (!selectedAccount) {
                 setGuidance(
-                  'Belum ada rekening aktif. Tambahkan rekening di bagian Sumber Dana.'
+                  'Belum ada sumber dana aktif. Tambahkan sumber dana di bagian Sumber Dana.'
                 );
                 setParsed(null);
                 return;

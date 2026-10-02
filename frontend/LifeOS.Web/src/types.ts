@@ -293,8 +293,15 @@ export interface FinanceStateProjection {
   overdueObligationsCount: number;
 
   /**
+   * Komitmen SEMUA agenda pengeluaran terjadwal (sekali jalan & ber-siklus).
+   * Mengurangi Uang Bebas sejak agenda dibuat, tanpa menjadi transaksi
+   * (mirip disisihkan).
+   */
+  scheduledExpenseCommitments: number;
+
+  /**
    * Uang Bebas — DERIVED STATE.
-   *   = totalActualBalance - totalCommittedSetAside - dueObligations
+   *   = totalActualBalance - totalCommittedSetAside - scheduledExpenseCommitments
    * Tidak pernah di-clamp ke 0.
    */
   freeCash: number;

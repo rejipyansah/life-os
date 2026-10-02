@@ -2,11 +2,15 @@
  * FINANCE DERIVED CALCULATIONS
  *
  * Core formula (from modul Uang Bebas):
- *   Uang Bebas = Total Likuiditas − Komitmen Hari Ini
- *   Komitmen Hari Ini = Σ(bill unpaid & due today) + savingsCommitment
+ *   Uang Bebas = Total Likuiditas − Komitmen
+ *   Komitmen = savingsCommitment (Pos)
+ *            + scheduledExpenseCommitments (semua rencana pengeluaran terjadwal)
  *
  * IMPORTANT: freeCash is NEVER clamped to 0.
  * If commitments exceed liquidity, freeCash will be negative.
+ *
+ * Live path reads figures straight from the backend projection (apiMapping).
+ * `deriveFinanceState` is a legacy/tests helper.
  */
 
 import type {
@@ -20,6 +24,7 @@ import type {
 export interface FinanceDerived {
   totalLiquidity: number;
   billsDueTotal: number;
+  scheduledExpenseCommitments: number;
   unpaidBillsCount: number;
   savingsCommitment: number;
   freeCash: number;
@@ -39,12 +44,16 @@ export function deriveFinanceState(input: {
   const billsDueTotal = unpaidBills.reduce((sum, b) => sum + b.amount, 0);
   const unpaidBillsCount = unpaidBills.length;
 
-  const commitmentTotal = billsDueTotal + input.savingsCommitment;
+  // Legacy helper: unpaid bills stand in for planned expense commitments.
+  const scheduledExpenseCommitments = billsDueTotal;
+
+  const commitmentTotal = scheduledExpenseCommitments + input.savingsCommitment;
   const freeCash = totalLiquidity - commitmentTotal;
 
   return {
     totalLiquidity,
     billsDueTotal,
+    scheduledExpenseCommitments,
     unpaidBillsCount,
     savingsCommitment: input.savingsCommitment,
     freeCash,

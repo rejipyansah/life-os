@@ -385,7 +385,7 @@ public class UpcomingEventServiceTests : IDisposable
         var agenda = await _sut.CreateAsync(new CreateUpcomingEventCommand
         {
             ScopeId = _scopeId,
-            Title = "Belum ada rekening",
+            Title = "Belum ada sumber dana",
             Amount = 10_000m,
             Direction = UpcomingEventDirection.Expense,
             ScheduleKind = UpcomingEventScheduleKind.Flexible

@@ -57,7 +57,7 @@ export default function SumberDanaSection({
             </span>
           </div>
           <p className="text-xs text-lo-text-subtle">
-            Tempat menyimpan dan mengalirkan kas riil sehari-hari
+            Tempat menyimpan dan menggunakan uang sehari-hari.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -122,7 +122,7 @@ export default function SumberDanaSection({
                 <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
                   <button
                     type="button"
-                    title="Sunting Rekening"
+                    title="Edit Sumber Dana"
                     onClick={() => setModal({ kind: 'account', mode: 'edit', account: acc })}
                     className="w-8 h-8 rounded-md flex items-center justify-center text-lo-text-subtle hover:text-lo-text-ink hover:bg-lo-surface-recessed transition-all cursor-pointer"
                   >
@@ -130,7 +130,7 @@ export default function SumberDanaSection({
                   </button>
                   <button
                     type="button"
-                    title="Hapus Rekening"
+                    title="Hapus"
                     onClick={() => setModal({ kind: 'delete', account: acc })}
                     className="w-8 h-8 rounded-md flex items-center justify-center text-lo-text-subtle hover:text-lo-error hover:bg-red-50 transition-all cursor-pointer"
                   >
@@ -146,10 +146,7 @@ export default function SumberDanaSection({
       <div className="pt-4 mt-4 border-t border-lo-border-hairline flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-lo-text-subtle">
         <span className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-lo-secondary" />
-          <span>Sinkronisasi kas: Real-time tanpa estimasi agregat</span>
-        </span>
-        <span className="text-[11px] bg-lo-surface-recessed px-3 py-0.5 rounded-full text-lo-text-subtle border border-lo-border-hairline/60 font-medium">
-          Kas Riil Terhubung
+          <span>Saldo akun diperbarui secara real-time</span>
         </span>
       </div>
 
@@ -189,8 +186,8 @@ export default function SumberDanaSection({
         onConfirm={() => {
           if (modal?.kind === 'delete') onDelete(modal.account.id);
         }}
-        title={`Hapus Rekening ${modal?.kind === 'delete' ? modal.account.name : ''}?`}
-        description="Rekening ini akan dihapus dari daftar sumber dana aktif. Saldo atau mutasi terkait tidak akan hilang dari riwayat."
+        title={`Hapus Sumber Dana "${modal?.kind === 'delete' ? modal.account.name : ''}"?`}
+        description="Sumber dana ini akan dihapus dari daftar sumber dana aktif. Saldo dan mutasi terkait tetap tersimpan dalam riwayat."
         icon="delete"
         actionLabel="Hapus"
         danger
@@ -219,11 +216,11 @@ function AccountModal({
     <Modal
       open
       onClose={onClose}
-      title={mode === 'edit' ? 'Sunting Rekening' : 'Tambah Rekening Baru'}
+      title={mode === 'edit' ? 'Edit Sumber Dana' : 'Tambah Sumber Dana'}
       subtitle={
         mode === 'edit'
-          ? `Memperbarui konfigurasi akun "${account?.name}"`
-          : 'Atur instrumen penyimpanan kas riil Anda'
+          ? `Perbarui informasi sumber dana Anda"`
+          : 'Tambahkan tempat Anda menyimpan uang'
       }
       maxWidth="max-w-md"
       footer={
@@ -248,7 +245,7 @@ function AccountModal({
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-[16px]" />
-            <span>{mode === 'edit' ? 'Perbarui Rekening' : 'Simpan Rekening'}</span>
+            <span>{mode === 'edit' ? 'Simpan Perubahan' : 'Simpan'}</span>
           </button>
         </>
       }
@@ -256,7 +253,7 @@ function AccountModal({
       <div className="space-y-4">
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-lo-text-ink block" htmlFor="acc-name">
-            Nama Akun / Bank
+            Nama Sumber Dana
           </label>
           <input
             id="acc-name"
@@ -276,7 +273,7 @@ function AccountModal({
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-lo-text-ink block">Tipe Kas</label>
+          <label className="text-xs font-semibold text-lo-text-ink block">Jenis Sumber Dana</label>
           <div className="p-1 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline flex items-center gap-1">
             {(['bank', 'ewallet', 'cash', 'credit'] as AccountType[]).map((t) => (
               <button
@@ -298,7 +295,7 @@ function AccountModal({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-semibold text-lo-text-ink" htmlFor="acc-role">
-              Peran / Alokasi Akun
+              Tujuan Sumber Dana
             </label>
             <span className="text-[11px] text-lo-text-subtle">Opsional</span>
           </div>
@@ -333,9 +330,9 @@ function TransferModal({
   const fromAcc = accounts.find((a) => a.id === fromId);
   const toAcc = accounts.find((a) => a.id === toId);
   const amount = parseFormattedNumber(amountStr);
-  const sameAccount = fromId === toId;
   const exceeds = fromAcc ? amount > fromAcc.balance : false;
-  const canSubmit = !sameAccount && amount > 0 && !exceeds && fromAcc && toAcc;
+  const hasEnoughAccounts = accounts.length >= 2;
+  const canSubmit = hasEnoughAccounts && amount > 0 && !exceeds && fromAcc && toAcc;
 
   const setQuick = (v: number | 'all') => {
     // Chip "+1k" menambah nominal yang sudah ada, bukan menimpa.
@@ -346,6 +343,9 @@ function TransferModal({
     setAmountStr(formatNumberString(String(next)));
   };
 
+  const pickDifferentAccount = (excludeId: string) =>
+    accounts.find((a) => a.id !== excludeId);
+
   const swap = () => {
     setFromId(toId);
     setToId(fromId);
@@ -355,8 +355,8 @@ function TransferModal({
     <Modal
       open
       onClose={onClose}
-      title="Transfer Kas"
-      subtitle="Pindahkan dana antar rekening tanpa mengubah nilai agregat kas"
+      title="Transfer Dana"
+      subtitle="Pindahkan uang antar sumber dana tanpa mengubah total saldo."
       maxWidth="max-w-md"
       footer={
         <>
@@ -374,7 +374,7 @@ function TransferModal({
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-[16px]" />
-            <span>Konfirmasi Transfer</span>
+            <span>Transfer Dana</span>
           </button>
         </>
       }
@@ -383,7 +383,7 @@ function TransferModal({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-semibold text-lo-text-ink" htmlFor="tr-from">
-              Dari Akun
+              Dari Sumber Dana
             </label>
             <span className="text-[11px] text-lo-text-subtle tabular-nums">
               Saldo: {fromAcc ? formatCurrencyRaw(fromAcc.balance) : '-'}
@@ -393,7 +393,14 @@ function TransferModal({
             id="tr-from"
             className={`${selectBase} text-xs`}
             value={fromId}
-            onChange={(e) => setFromId(e.target.value)}
+            onChange={(e) => {
+              const nextFromId = e.target.value;
+              setFromId(nextFromId);
+              if (nextFromId === toId) {
+                const fallback = pickDifferentAccount(nextFromId);
+                if (fallback) setToId(fallback.id);
+              }
+            }}
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -410,7 +417,7 @@ function TransferModal({
             title="Tukar Akun"
             className="h-7 px-3 rounded-full bg-lo-surface-recessed hover:bg-lo-accent-wash text-lo-secondary border border-lo-border-hairline flex items-center gap-1 text-[11px] font-medium transition-all active:scale-95 cursor-pointer"
           >
-            <Icon name="arrow_downward" className="text-[15px]" />
+            <Icon name="swap_vert" className="text-[15px]" />
             <span>Tukar Posisi</span>
           </button>
         </div>
@@ -418,7 +425,7 @@ function TransferModal({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-semibold text-lo-text-ink" htmlFor="tr-to">
-              Ke Akun Tujuan
+              Ke Sumber Dana
             </label>
             <span className="text-[11px] text-lo-text-subtle tabular-nums">
               Saldo: {toAcc ? formatCurrencyRaw(toAcc.balance) : '-'}
@@ -428,7 +435,15 @@ function TransferModal({
             id="tr-to"
             className={`${selectBase} text-xs`}
             value={toId}
-            onChange={(e) => setToId(e.target.value)}
+            onChange={(e) => {
+              const nextToId = e.target.value;
+              if (nextToId === fromId) {
+                const fallback = pickDifferentAccount(fromId);
+                if (fallback) setToId(fallback.id);
+              } else {
+                setToId(nextToId);
+              }
+            }}
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -438,10 +453,10 @@ function TransferModal({
           </select>
         </div>
 
-        {sameAccount ? (
-          <div className="flex items-center gap-1.5 text-xs text-lo-error bg-red-50 p-2.5 rounded-xl border border-red-200">
+        {!hasEnoughAccounts ? (
+          <div className="flex items-center gap-1.5 text-xs text-lo-text-subtle bg-lo-surface-recessed p-2.5 rounded-xl border border-lo-border-hairline">
             <Icon name="info" className="text-[16px] shrink-0" />
-            <span>Rekening asal dan tujuan tidak boleh sama.</span>
+            <span>Tambahkan sumber dana lain untuk melakukan transfer.</span>
           </div>
         ) : null}
 

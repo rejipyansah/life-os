@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import {
+  formatCurrency,
   formatCurrencyRaw,
   type BillDue,
   type FinanceDerived,
@@ -42,8 +43,7 @@ export function UangBebasCard({
             {formatCurrencyRaw(derived.freeCash)}
           </h1>
           <p className="text-xs text-lo-text-subtle leading-relaxed">
-            Nominal riil yang aman dibelanjakan hari ini tanpa mengganggu pos tabungan
-            maupun tagihan.
+            Jumlah yang aman dibelanjakan hari ini tanpa mengganggu tabungan maupun tagihan.
           </p>
         </div>
       </div>
@@ -58,11 +58,11 @@ export function UangBebasCard({
             className="text-[17px] text-lo-secondary group-hover:scale-110 transition-transform"
           />
           <span className="underline underline-offset-4 decoration-lo-outline-variant group-hover:decoration-lo-secondary">
-            Lihat Formula Perhitungan
+            Lihat Cara Menghitung
           </span>
         </button>
         <span className="text-[11px] text-lo-text-subtle tabular-nums">
-          Diperbarui otomatis · Akurat
+          Diperbarui otomatis
         </span>
       </div>
     </div>
@@ -152,7 +152,7 @@ export function JatuhTempoCard({
       <div className="pt-5 mt-5 border-t border-lo-border-hairline flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-lo-text-subtle">
         <div className="flex items-center gap-1.5">
           <Icon name="verified_user" className="text-sm text-lo-secondary" />
-          <span>Pembayaran langsung dipotong dari rekening sumber terpilih.</span>
+          <span>Pembayaran langsung dipotong dari sumber dana sumber terpilih.</span>
         </div>
         <span className="text-[11px] sm:text-right">Bebas denda keterlambatan</span>
       </div>
@@ -256,6 +256,26 @@ function BillRow({
 
 /* ── Formula modal ── */
 
+function CalcLine({
+  label,
+  amount,
+  deduct = false,
+}: {
+  label: string;
+  amount: number;
+  deduct?: boolean;
+}) {
+  const showMinus = deduct && amount > 0;
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <span className="text-[13px] sm:text-sm font-medium text-lo-text-ink">{label}</span>
+      <span className="text-[13px] sm:text-sm font-semibold tabular-nums text-lo-text-ink shrink-0">
+        {showMinus ? `−${formatCurrencyRaw(amount)}` : formatCurrencyRaw(amount)}
+      </span>
+    </div>
+  );
+}
+
 export function FormulaModal({
   open,
   onClose,
@@ -265,85 +285,45 @@ export function FormulaModal({
   onClose: () => void;
   derived: FinanceDerived;
 }) {
+  const free = derived.freeCash;
+
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="Kalkulasi Uang Bebas Hari Ini"
-      subtitle="Formula Sadar & Hening"
-      icon="calculate"
+      title="Kenapa uang saya yang bisa dipakai cuma segini?"
       maxWidth="max-w-lg"
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full sm:w-auto sm:min-w-36 px-7 py-3 rounded-full bg-lo-primary hover:bg-lo-primary-hover text-white text-sm font-semibold shadow-xs transition-all cursor-pointer active:scale-95"
+        >
+          Oke, paham
+        </button>
+      }
     >
-      <div className="space-y-6">
-        <div className="grid grid-cols-3 gap-2.5 text-center text-xs">
-          <div className="p-3 rounded-xl bg-lo-surface-cream border border-lo-border-subtle">
-            <span className="text-[10px] text-lo-text-subtle block mb-1">1. Total Likuiditas</span>
-            <span className="font-semibold text-lo-text-ink tabular-nums text-xs sm:text-sm">
-              {formatCurrencyRaw(derived.totalLiquidity)}
-            </span>
-          </div>
-          <div className="p-3 rounded-xl bg-lo-warning-soft border border-lo-warning/20">
-            <span className="text-[10px] text-lo-warning block mb-1">2. Komitmen Hari Ini</span>
-            <span className="font-semibold text-lo-warning tabular-nums text-xs sm:text-sm">
-              − {formatCurrencyRaw(derived.commitmentTotal)}
-            </span>
-          </div>
-          <div className="p-3 rounded-xl bg-lo-accent-wash/60 border border-lo-secondary/20">
-            <span className="text-[10px] text-lo-secondary font-medium block mb-1">3. Uang Bebas</span>
-            <span className="font-bold text-lo-secondary tabular-nums text-xs sm:text-sm">
-              {formatCurrencyRaw(derived.freeCash)}
-            </span>
-          </div>
+      <div className="rounded-2xl bg-white border border-lo-border-subtle p-5 sm:p-6 shadow-xs">
+        <div className="divide-y divide-lo-border-hairline/70">
+          <CalcLine label="Uang di sumber dana" amount={derived.totalLiquidity} />
+          <CalcLine
+            label="Uang yang disisihkan"
+            amount={derived.savingsCommitment}
+            deduct
+          />
+          <CalcLine
+            label="Uang untuk kebutuhan mendatang"
+            amount={derived.scheduledExpenseCommitments}
+            deduct
+          />
         </div>
-
-        <div className="p-4 rounded-xl bg-lo-surface-cream border border-lo-border-hairline space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-lo-secondary" />
-              <span className="text-lo-text-ink font-medium">Total Kas Likuid Terverifikasi</span>
-            </div>
-            <span className="font-semibold text-lo-text-ink tabular-nums text-sm">
-              {formatCurrencyRaw(derived.totalLiquidity)}
-            </span>
-          </div>
-          <div className="pl-3.5 space-y-2 border-l-2 border-lo-border-hairline text-xs">
-            <div className="flex items-center justify-between text-lo-warning">
-              <span>[-] Tagihan Jatuh Tempo (WiFi &amp; Listrik)</span>
-              <span className="font-semibold tabular-nums">
-                − {formatCurrencyRaw(derived.billsDueTotal)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-lo-text-subtle">
-              <span>[-] Tabungan Wajib &amp; Pos Alokasi Rutin</span>
-              <span className="font-semibold tabular-nums">
-                − {formatCurrencyRaw(derived.savingsCommitment)}
-              </span>
-            </div>
-          </div>
-          <div className="pt-3 flex items-center justify-between border-t border-lo-border-hairline">
-            <div className="space-y-0.5">
-              <span className="font-bold text-xs text-lo-primary flex items-center gap-1.5">
-                <Icon name="verified" className="text-[16px] text-lo-secondary" />
-                Uang Bebas Bersih Siap Pakai
-              </span>
-              <span className="text-[11px] text-lo-text-subtle block">
-                Aman tanpa khawatir mengganggu pos lain
-              </span>
-            </div>
-            <span className="font-headline text-lg font-semibold text-lo-secondary tabular-nums">
-              {formatCurrencyRaw(derived.freeCash)}
-            </span>
-          </div>
-        </div>
-
-        <div className="pt-1 flex items-center justify-between gap-4">
-          <p className="text-[11px] text-lo-text-subtle leading-relaxed flex items-center gap-1.5">
-            <Icon name="auto_mode" className="text-sm text-lo-secondary shrink-0" />
-            <span>Nilai ini terupdate seketika tiap tagihan lunas.</span>
-          </p>
-          <button type="button" onClick={onClose} className={btnPrimary}>
-            Saya Mengerti
-          </button>
+        <div className="mt-4 pt-4 border-t border-lo-border-hairline flex items-center justify-between gap-3">
+          <span className="text-sm font-semibold text-lo-text-ink">
+            Uang yang Bisa Dipakai
+          </span>
+          <span className="font-headline text-lg sm:text-xl font-bold tabular-nums tracking-tight text-lo-secondary select-all">
+            {formatCurrency(free)}
+          </span>
         </div>
       </div>
     </Modal>

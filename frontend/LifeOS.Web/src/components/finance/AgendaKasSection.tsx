@@ -85,7 +85,7 @@ export default function AgendaKasSection({
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-lo-secondary" />
             <h2 className="font-headline text-xl sm:text-2xl font-medium text-lo-text-ink tracking-tight">
-              Agenda Kas Mendatang
+              Rencana Pengeluaran/Pemasukan
             </h2>
           </div>
           <span className="px-2.5 py-0.5 rounded-full bg-lo-accent-wash text-lo-secondary text-xs font-medium">
@@ -97,7 +97,7 @@ export default function AgendaKasSection({
             className="ml-auto sm:ml-2 px-3.5 py-1.5 rounded-full bg-lo-primary hover:bg-lo-secondary text-white text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
           >
             <Icon name="add" className="text-[16px]" />
-            <span>Buat Agenda</span>
+            <span>Buat Rencana</span>
           </button>
         </div>
         <button
@@ -106,7 +106,7 @@ export default function AgendaKasSection({
           className="text-xs text-lo-text-subtle hover:text-lo-text-ink flex items-center gap-1.5 cursor-pointer transition-colors self-start sm:self-auto py-1"
         >
           <Icon name="history" className="text-[17px]" />
-          <span>Lihat Arsip Selesai</span>
+          <span>Lihat rencana yang Selesai</span>
         </button>
       </header>
 
@@ -140,8 +140,8 @@ export default function AgendaKasSection({
         {pageItems.length === 0 ? (
           <EmptyState
             icon="event_busy"
-            title="Tidak ada agenda dalam filter ini"
-            hint='Buat rencana kas baru dengan menekan tombol "+ Buat Agenda" di atas.'
+            title="Belum ada Rencana Pengeluaran/Pemasukan"
+            hint='Buat rencana untuk kebutuhan yang akan datang.'
           />
         ) : (
           pageItems.map((a) => (
@@ -364,9 +364,19 @@ function CreateAgendaModal({
   const selectedAccount =
     selectableAccounts.find((a) => a.name === accountLabel) ?? selectableAccounts[0];
 
+  // Pengeluaran selalu terjadwal (tanggal wajib).
+  // Pemasukan terjadwal: tanggal + siklus.
+  // Pemasukan fleksibel: tanpa tanggal & siklus (waktunya belum pasti).
+  const showScheduleKind = isIncome;
+  const needsDate = !isIncome || agendaType === 'scheduled';
+  const needsCycle = !isIncome || agendaType === 'scheduled';
+
   const amountNum = parseInt(amount.replace(/\D/g, ''), 10) || 0;
   const canSubmit =
-    title.trim().length > 0 && amountNum > 0 && date.length > 0 && !!selectedAccount;
+    title.trim().length > 0 &&
+    amountNum > 0 &&
+    (!needsDate || date.length > 0) &&
+    !!selectedAccount;
 
   const reset = () => {
     setIsIncome(false);
@@ -387,8 +397,8 @@ function CreateAgendaModal({
         reset();
         onClose();
       }}
-      title="Buat Agenda Kas"
-      subtitle="Atur jadwal rencana penerimaan atau pembayaran kas berikutnya."
+      title="Buat Rencana Pengeluaran/Pemasukan"
+      subtitle="Atur penerimaan atau pembayaran yang akan datang."
       maxWidth="max-w-lg"
       footer={
         <>
@@ -410,11 +420,11 @@ function CreateAgendaModal({
                 title: title.trim(),
                 amount: amountNum,
                 isIncome,
-                rawDate: date,
+                rawDate: needsDate ? date : '',
                 accountLabel: selectedAccount?.name ?? '',
                 categoryLabel: isIncome ? 'Pemasukan Kas' : category,
-                repeat,
-                type: agendaType,
+                repeat: needsCycle ? repeat : 'Satu Kali',
+                type: !isIncome ? 'scheduled' : agendaType,
                 note: note.trim() || undefined,
               });
               reset();
@@ -422,7 +432,7 @@ function CreateAgendaModal({
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-[15px]" />
-            <span>Simpan Agenda</span>
+            <span>Simpan</span>
           </button>
         </>
       }
@@ -430,13 +440,15 @@ function CreateAgendaModal({
       <div className="space-y-4">
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-lo-text-ink">Arah Arus Kas</span>
-            <span className="text-[11px] text-lo-text-subtle">Pilih jenis agenda</span>
+            <span className="text-xs font-medium text-lo-text-ink">Jenis Rencana</span>
           </div>
           <div className="grid grid-cols-2 p-1 bg-lo-surface-recessed rounded-xl gap-1">
             <button
               type="button"
-              onClick={() => setIsIncome(false)}
+              onClick={() => {
+                setIsIncome(false);
+                setAgendaType('scheduled');
+              }}
               className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
                 !isIncome
                   ? 'bg-white text-lo-text-ink shadow-xs'
@@ -465,9 +477,8 @@ function CreateAgendaModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-title">
-                Nama Agenda
+                Nama Rencana <span className="text-lo-secondary">*</span>
               </label>
-              <span className="text-[11px] text-lo-text-subtle">Wajib</span>
             </div>
             <input
               id="agd-title"
@@ -481,9 +492,8 @@ function CreateAgendaModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-amount">
-                Nominal Rencana
+                Jumlah (Rp)<span className="text-lo-secondary">*</span>
               </label>
-              <span className="text-[11px] text-lo-text-subtle">Dalam Rupiah (Rp)</span>
             </div>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-lo-text-subtle">
@@ -507,9 +517,8 @@ function CreateAgendaModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-category">
-                Kategori Pengeluaran
+                Kategori Pengeluaran<span className="text-lo-secondary">*</span>
               </label>
-              <span className="text-[11px] text-lo-text-subtle">Wajib</span>
             </div>
             <select
               id="agd-category"
@@ -528,47 +537,52 @@ function CreateAgendaModal({
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-date">
-                Jadwal Tanggal
-              </label>
-              <span className="text-[11px] text-lo-text-subtle">Wajib</span>
-            </div>
-            <input
-              id="agd-date"
-              type="date"
-              className={`${selectBase} text-xs`}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+        {needsDate || needsCycle ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {needsDate ? (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-date">
+                    Tanggal<span className="text-lo-secondary">*</span>
+                  </label>
+                </div>
+                <input
+                  id="agd-date"
+                  type="date"
+                  className={`${selectBase} text-xs`}
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              </div>
+            ) : null}
+            {needsCycle ? (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-repeat">
+                    Siklus
+                  </label>
+                </div>
+                <select
+                  id="agd-repeat"
+                  className={`${selectBase} text-xs`}
+                  value={repeat}
+                  onChange={(e) => setRepeat(e.target.value)}
+                >
+                  <option value="Bulanan">Bulanan</option>
+                  <option value="Mingguan">Mingguan</option>
+                  <option value="Tahunan">Tahunan</option>
+                  <option value="Satu Kali">Satu Kali</option>
+                </select>
+              </div>
+            ) : null}
           </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-repeat">
-                Siklus
-              </label>
-            </div>
-            <select
-              id="agd-repeat"
-              className={`${selectBase} text-xs`}
-              value={repeat}
-              onChange={(e) => setRepeat(e.target.value)}
-            >
-              <option value="Bulanan">Bulanan</option>
-              <option value="Mingguan">Mingguan</option>
-              <option value="Tahunan">Tahunan</option>
-              <option value="Satu Kali">Satu Kali</option>
-            </select>
-          </div>
-        </div>
+        ) : null}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-account">
-                Rekening Kas
+                Sumber Dana
               </label>
             </div>
             <select
@@ -579,7 +593,7 @@ function CreateAgendaModal({
             >
               {selectableAccounts.length === 0 && (
                 <option value="" disabled>
-                  Belum ada rekening aktif
+                  Belum ada sumber dana
                 </option>
               )}
               {selectableAccounts.map((a) => (
@@ -589,28 +603,30 @@ function CreateAgendaModal({
               ))}
             </select>
           </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-type">
-                Kelompok Tampilan
-              </label>
+          {showScheduleKind ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-type">
+                  Jenis Jadwal
+                </label>
+              </div>
+              <select
+                id="agd-type"
+                className={`${selectBase} text-xs`}
+                value={agendaType}
+                onChange={(e) => setAgendaType(e.target.value as 'scheduled' | 'flexible')}
+              >
+                <option value="scheduled">Terjadwal</option>
+                <option value="flexible">Fleksibel</option>
+              </select>
             </div>
-            <select
-              id="agd-type"
-              className={`${selectBase} text-xs`}
-              value={agendaType}
-              onChange={(e) => setAgendaType(e.target.value as 'scheduled' | 'flexible')}
-            >
-              <option value="scheduled">Terjadwal</option>
-              <option value="flexible">Fleksibel</option>
-            </select>
-          </div>
+          ) : null}
         </div>
 
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-note">
-              Catatan Singkat
+              Catatan
             </label>
             <span className="text-[11px] text-lo-text-subtle italic">opsional</span>
           </div>

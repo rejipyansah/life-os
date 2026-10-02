@@ -397,17 +397,13 @@ function HistoryModal({
               value={accountFilter}
               onChange={(e) => setAccountFilter(e.target.value)}
             >
-              <option value="all">Semua Rekening</option>
+              <option value="all">Semua Sumber Dana</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.name}>
                   {a.name}
                 </option>
               ))}
             </select>
-            <Icon
-              name="expand_more"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[16px] text-lo-text-subtle pointer-events-none"
-            />
           </div>
         </div>
       </div>
@@ -422,7 +418,7 @@ function HistoryModal({
               Tidak ada transaksi yang sesuai kata kunci
             </p>
             <p className="text-xs text-lo-text-subtle mt-1">
-              Coba gunakan kata kunci pencarian atau sesuaikan filter rekening &amp; arah kas.
+              Coba gunakan kata kunci pencarian atau sesuaikan filter sumber dana &amp; arah kas.
             </p>
           </div>
         ) : (
@@ -534,13 +530,13 @@ function VoidModal({
             {isIncome ? (
               <>
                 Pemasukan sebesar <span className="font-medium font-headline">{absAmount}</span>{' '}
-                akan dikurangkan kembali dari rekening <strong>{tx.accountLabel}</strong>.
+                akan dikurangkan kembali dari sumber dana <strong>{tx.accountLabel}</strong>.
               </>
             ) : (
               <>
                 Pengeluaran sebesar{' '}
                 <span className="font-medium font-headline">{absAmount}</span> akan
-                dikembalikan seutuhnya ke saldo rekening <strong>{tx.accountLabel}</strong> dan
+                dikembalikan seutuhnya ke saldo sumber dana <strong>{tx.accountLabel}</strong> dan
                 uang bebas Anda.
               </>
             )}

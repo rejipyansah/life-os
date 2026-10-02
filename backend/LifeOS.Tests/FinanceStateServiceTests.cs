@@ -225,7 +225,7 @@ public class FinanceStateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PostponedEvent_IsNoLongerADueObligation()
+    public async Task PostponedEvent_IsNoLongerADueObligation_ButStillCommitsFreeCash()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
@@ -246,14 +246,16 @@ public class FinanceStateServiceTests : IDisposable
         await _events.PostponeAsync(agenda.Id, new PostponeUpcomingEventCommand { ScopeId = _scopeId });
 
         var state = await _sut.GetStateAsync(_scopeId);
+        // Keluar dari Jatuh Tempo…
         Assert.Equal(0m, state.DueObligations);
-        Assert.Equal(1_000_000m, state.FreeCash);
-        // Masih direncanakan, hanya belum jatuh tempo.
+        // …tapi tetap direncanakan, jadi Uang Bebas masih terikat.
+        Assert.Equal(340_440m, state.ScheduledExpenseCommitments);
+        Assert.Equal(659_560m, state.FreeCash);
         Assert.Single(state.UpcomingEvents);
     }
 
     [Fact]
-    public async Task FutureEvent_DoesNotReduceFreeCash()
+    public async Task FutureEvent_ReducesFreeCash_AsPlannedCommitment()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
@@ -270,9 +272,92 @@ public class FinanceStateServiceTests : IDisposable
         });
 
         var state = await _sut.GetStateAsync(_scopeId);
+        // Belum jatuh tempo — tidak muncul di Jatuh Tempo…
         Assert.Equal(0m, state.DueObligations);
-        Assert.Equal(1_000_000m, state.FreeCash);
+        // …tapi tetap mengikat Uang Bebas sebagai rencana, mirip disisihkan.
+        Assert.Equal(1_200_000m, state.ScheduledExpenseCommitments);
+        Assert.Equal(-200_000m, state.FreeCash);
         Assert.Single(state.UpcomingEvents);
+        Assert.DoesNotContain(state.RecentTransactions, t => t.Description == "Sewa");
+    }
+
+    [Fact]
+    public async Task CyclingExpense_AlwaysReducesFreeCash_EvenBeforeDueDate()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Title = "Internet Bulanan",
+            Amount = 350_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+
+        Assert.Equal(0m, state.DueObligations);
+        Assert.Equal(350_000m, state.ScheduledExpenseCommitments);
+        // Mirip disisihkan: Uang Bebas turun, tapi belum jadi transaksi.
+        Assert.Equal(650_000m, state.FreeCash);
+        Assert.DoesNotContain(state.RecentTransactions, t => t.Description == "Internet Bulanan");
+        Assert.Single(state.RecentTransactions);
+    }
+
+    [Fact]
+    public async Task ExpenseDueToday_DoesNotDoubleCountInFreeCash()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Title = "Internet Bulanan",
+            Amount = 350_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+
+        // Jatuh Tempo tetap menampilkan tagihan ini…
+        Assert.Equal(350_000m, state.DueObligations);
+        // …tapi freeCash hanya mengurangi sekali lewat ScheduledExpenseCommitments.
+        Assert.Equal(350_000m, state.ScheduledExpenseCommitments);
+        Assert.Equal(650_000m, state.FreeCash);
+    }
+
+    [Fact]
+    public async Task CyclingIncome_NeverReducesFreeCash()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            Title = "Gaji Bulanan",
+            Amount = 5_000_000m,
+            Direction = UpcomingEventDirection.Income,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+
+        Assert.Equal(0m, state.ScheduledExpenseCommitments);
+        Assert.Equal(1_000_000m, state.FreeCash);
     }
 
     [Fact]

@@ -101,12 +101,20 @@ public class FinanceStateService
             .Where(e => e.Direction == UpcomingEventDirection.Expense)
             .Sum(e => e.Amount);
 
+        // SEMUA agenda pengeluaran terjadwal (sekali jalan & ber-siklus) mengikat
+        // Uang Bebas sejak dibuat — mirip komitmen Pos, derived saja, tanpa transaksi.
+        // Yang sedang jatuh tempo tidak dihitung dua kali karena komitmennya sudah
+        // masuk di sini sejak awal. DueObligations tetap untuk tampilan Jatuh Tempo.
+        var scheduledExpenseCommitments = scheduledEvents
+            .Where(e => e.Direction == UpcomingEventDirection.Expense)
+            .Sum(e => e.Amount);
+
         var totalActual = accountProjections.Sum(a => a.ActualBalance);
         var totalSetAside = accountProjections.Sum(a => a.SetAsideAmount);
         var pendingFunding = accountProjections.Sum(a => a.PendingCycleFunding);
         var pendingSurplus = accountProjections.Sum(a => a.PendingCycleSurplus);
         var totalCommitted = totalSetAside + pendingFunding - pendingSurplus;
-        var freeCash = totalActual - totalCommitted - dueObligations;
+        var freeCash = totalActual - totalCommitted - scheduledExpenseCommitments;
 
         var recentTransactions = await _transactions.GetTransactionsAsync(scopeId, limit: 20, ct: ct);
 
@@ -122,6 +130,7 @@ public class FinanceStateService
             DueObligations = dueObligations,
             DueObligationsCount = dueEvents.Count(e => e.Direction == UpcomingEventDirection.Expense),
             OverdueObligationsCount = dueEvents.Count(e => e.Direction == UpcomingEventDirection.Expense && e.IsOverdue),
+            ScheduledExpenseCommitments = scheduledExpenseCommitments,
             FreeCash = freeCash,
             HasUnpaidBills = dueEvents.Any(e => e.Direction == UpcomingEventDirection.Expense),
             AllBillsPaid = events.Any(e => e.Direction == UpcomingEventDirection.Expense)

@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace LifeOS.Api.Models;
 
 /// <summary>
-/// Agenda Kas Mendatang — an expected/upcoming financial event.
+/// Rencana Pengeluaran/Pemasukan — an expected/upcoming financial event.
 /// It is NOT a Transaction. It never changes the actual balance until it is realized.
 /// </summary>
 public class UpcomingEvent

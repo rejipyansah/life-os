@@ -136,7 +136,7 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Tutup modal"
-            className="w-8 h-8 rounded-full bg-lo-surface-recessed hover:bg-lo-border-hairline flex items-center justify-center text-lo-text-subtle hover:text-lo-text-ink transition-colors cursor-pointer border border-lo-border-hairline/60 shrink-0"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-lo-text-subtle/70 hover:text-lo-text-ink hover:bg-lo-surface-recessed transition-colors cursor-pointer shrink-0"
           >
             <Icon name="close" className="text-base" />
           </button>
@@ -257,7 +257,7 @@ export function ConfirmDialog({
             ) : null}
             {detailAccount ? (
               <div className="flex justify-between items-center text-lo-text-subtle">
-                <span>Rekening &amp; Tanggal</span>
+                <span>Sumber Dana &amp; Tanggal</span>
                 <span className="text-lo-text-ink text-right">{detailAccount}</span>
               </div>
             ) : null}
@@ -380,11 +380,7 @@ export function Pagination({
             <Icon name="chevron_right" className="text-base" />
           </button>
         </div>
-      ) : (
-        <div className="order-1 sm:order-2 text-lo-text-subtle">
-          {infoLabel(from, to, totalItems)}
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
