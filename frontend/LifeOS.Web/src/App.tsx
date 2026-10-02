@@ -39,7 +39,7 @@ function App() {
         if (cancelled) return;
 
         if (auth) {
-          setState('home');
+          setState('finance');
           setIsGuest(false);
           return;
         }
@@ -54,7 +54,7 @@ function App() {
         if (guestResult.isNew) {
           setState('entry');
         } else {
-          setState('home');
+          setState('finance');
         }
       })
       .catch(() => {
@@ -70,7 +70,7 @@ function App() {
 
   const handleEnter = (guest: boolean) => {
     setIsGuest(guest);
-    setState('home');
+    setState('finance');
   };
 
   const handleRequestLogin = (origin: 'entry' | 'finance') => {
@@ -85,7 +85,7 @@ function App() {
   };
 
   const handleFinanceBackToHome = () => {
-    setState('home');
+    setState('finance');
   };
 
   const handleFinanceNavigate = (dest: NavDestination) => {
@@ -123,7 +123,7 @@ function App() {
               setState('entry');
             } else {
               setIsGuest(true);
-              setState('home');
+              setState('finance');
             }
           }}
         />
