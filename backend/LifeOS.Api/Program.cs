@@ -51,7 +51,8 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(
                 "http://localhost:5173",
-                "https://life-os.rejipyansah.workers.dev"
+                "https://life-os.rejipyansah.workers.dev",
+                "https://life-os.rejip.my.id"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
