@@ -43,20 +43,20 @@ export default function ObservationCard({ className = '' }: ObservationCardProps
 
       {/* Desktop: full comparison box */}
       <div className="hidden lg:block rounded-2xl bg-[#f4f8f3] p-5 space-y-4 border border-[#dce6dc]">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <span className="text-[11px] text-lo-text-subtle uppercase tracking-wider font-semibold">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 min-w-0">
+          <div className="space-y-1 min-w-0">
+            <span className="block text-[11px] text-lo-text-subtle uppercase tracking-wider font-semibold">
               Bulan ini
             </span>
-            <div className="font-body text-2xl text-[#18241D] font-semibold tracking-tight">
+            <div className="font-body text-lg sm:text-xl text-[#18241D] font-semibold tracking-tight whitespace-nowrap">
               Rp3.420.000
             </div>
           </div>
-          <div className="space-y-1">
-            <span className="text-[11px] text-lo-text-subtle uppercase tracking-wider font-semibold">
+          <div className="space-y-1 min-w-0">
+            <span className="block text-[11px] text-lo-text-subtle uppercase tracking-wider font-semibold">
               Bulan lalu
             </span>
-            <div className="font-body text-2xl text-lo-text-subtle font-semibold tracking-tight opacity-75">
+            <div className="font-body text-lg sm:text-xl text-lo-text-subtle font-semibold tracking-tight opacity-75 whitespace-nowrap">
               Rp3.870.000
             </div>
           </div>
