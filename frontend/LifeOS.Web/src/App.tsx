@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-import { getAuthMe, resumeGuestSession } from './api';
+import { getAuthMe, logout, resumeGuestSession } from './api';
 
 import EntryScreen from './components/EntryScreen';
 import LoginScreen from './components/LoginScreen';
@@ -73,6 +73,17 @@ function App() {
     setState('finance');
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Cookie mungkin sudah expired; tetap anggap logout sukses.
+    }
+    sessionStorage.setItem('just_logged_out', '1');
+    setIsGuest(false);
+    setState('entry');
+  };
+
   const handleRequestLogin = (origin: 'entry' | 'finance') => {
     setLoginOrigin(origin);
     setState('login');
@@ -136,6 +147,8 @@ function App() {
       <div className="h-dvh flex flex-col overflow-y-auto">
         <HomeScreen
           onNavigate={handleHomeNavigate}
+          isGuest={isGuest}
+          onLogout={handleLogout}
         />
       </div>
     );
@@ -148,6 +161,7 @@ function App() {
         onRequestLogin={() => handleRequestLogin('finance')}
         onBackToHome={handleFinanceBackToHome}
         onNavigate={handleFinanceNavigate}
+        onLogout={handleLogout}
       />
     </div>
   );

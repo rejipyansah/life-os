@@ -16,9 +16,11 @@ import AppFooter from './AppFooter';
 
 interface HomeScreenProps {
   onNavigate: (dest: NavDestination) => void;
+  isGuest?: boolean;
+  onLogout?: () => void;
 }
 
-export default function HomeScreen({ onNavigate }: HomeScreenProps) {
+export default function HomeScreen({ onNavigate, isGuest, onLogout }: HomeScreenProps) {
   const [activeNav, setActiveNav] = useState<NavDestination>('beranda');
 
   const handleNavigate = (dest: NavDestination) => {
@@ -28,7 +30,12 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
 
   return (
     <div className="min-h-screen bg-[#f5fbf4]">
-      <Navigation active={activeNav} onNavigate={handleNavigate} />
+      <Navigation
+        active={activeNav}
+        onNavigate={handleNavigate}
+        showLogout={!isGuest}
+        onLogout={onLogout}
+      />
 
       {/* Mobile: single column */}
       <main className="md:hidden pt-16 pb-24 min-h-screen bg-[#f5fbf4]">

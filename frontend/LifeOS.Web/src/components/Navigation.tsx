@@ -4,6 +4,8 @@ interface NavigationProps {
   active: NavDestination;
   onNavigate: (dest: NavDestination) => void;
   brand?: string;
+  showLogout?: boolean;
+  onLogout?: () => void;
 }
 
 function BerandaIcon({ className }: { className?: string }) {
@@ -56,9 +58,37 @@ const iconMap: Record<NavDestination, React.ComponentType<{ className?: string }
   target: FlagIcon,
 };
 
-export default function Navigation({ active, onNavigate, brand }: NavigationProps) {
+const logoutButtonClass =
+  'px-3 py-1.5 rounded-lg text-sm font-medium text-lo-error hover:bg-lo-error/10 transition-colors cursor-pointer';
+
+export default function Navigation({
+  active,
+  onNavigate,
+  brand,
+  showLogout,
+  onLogout,
+}: NavigationProps) {
+  const showLogoutButton = Boolean(showLogout && onLogout);
+
   return (
     <>
+      {/* Mobile: top bar (logo + logout) */}
+      <nav className="md:hidden fixed top-0 left-0 right-0 z-50 h-12 bg-[#f5fbf4] border-b border-[#D5E0D3]/60">
+        <div className="w-full h-full px-5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <img src="/life-os-logo.png" alt="" className="w-5 h-5 rounded-full object-cover" />
+            <span className="font-headline text-sm tracking-tight text-lo-primary font-semibold">
+              {brand ?? 'Life OS'}
+            </span>
+          </div>
+          {showLogoutButton && (
+            <button type="button" onClick={onLogout} className={logoutButtonClass}>
+              Keluar
+            </button>
+          )}
+        </div>
+      </nav>
+
       {/* Mobile: bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#f5fbf4] border-t border-[#D5E0D3]/60">
         <div className="flex items-center justify-around h-16 px-1">
@@ -118,6 +148,11 @@ export default function Navigation({ active, onNavigate, brand }: NavigationProp
               })}
             </div>
           </div>
+          {showLogoutButton && (
+            <button type="button" onClick={onLogout} className={`${logoutButtonClass} ml-auto`}>
+              Keluar
+            </button>
+          )}
         </div>
       </nav>
     </>

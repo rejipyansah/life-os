@@ -17,11 +17,14 @@ interface FinancePageProps {
   onRequestLogin?: () => void;
   onNavigate?: (dest: NavDestination) => void;
   isGuest?: boolean;
+  onLogout?: () => void;
 }
 
 export default function FinancePage({
   onBackToHome,
   onNavigate,
+  isGuest,
+  onLogout,
 }: FinancePageProps) {
   const state = useFinanceState();
   const [formulaOpen, setFormulaOpen] = useState(false);
@@ -36,7 +39,12 @@ export default function FinancePage({
 
   return (
     <div className="flex-1 flex flex-col bg-lo-surface font-body text-lo-text-ink">
-      <Navigation active="keuangan" onNavigate={handleNavigate} />
+      <Navigation
+        active="keuangan"
+        onNavigate={handleNavigate}
+        showLogout={!isGuest}
+        onLogout={onLogout}
+      />
 
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
         <div className="flex flex-col gap-6">
