@@ -1,10 +1,11 @@
 /**
  * FINANCE DERIVED CALCULATIONS
  *
- * Core formula (from modul Uang Bebas):
- *   Uang Bebas = Total Likuiditas − Komitmen
- *   Komitmen = savingsCommitment (Pos)
- *            + scheduledExpenseCommitments (semua rencana pengeluaran terjadwal)
+ * DUA ANGKA TERPISAH — jangan disamakan:
+ *   TotalAvailable = TotalLikuiditas − TotalDisisihkan
+ *     Uang yang belum dialokasikan ke Dana yang Disisihkan.
+ *   FreeCash (Uang Bebas) = TotalLikuiditas − KomitmenPos − KomitmenRencana
+ *     Uang yang benar-benar bebas dibelanjakan setelah semua komitmen.
  *
  * IMPORTANT: freeCash is NEVER clamped to 0.
  * If commitments exceed liquidity, freeCash will be negative.
@@ -27,6 +28,16 @@ export interface FinanceDerived {
   scheduledExpenseCommitments: number;
   unpaidBillsCount: number;
   savingsCommitment: number;
+  /**
+   * TotalAvailable = totalLiquidity − savingsCommitment.
+   * Uang yang belum dialokasikan ke Dana yang Disisihkan.
+   * BERBEDA dari freeCash.
+   */
+  totalAvailable: number;
+  /**
+   * FreeCash (Uang Bebas) = totalLiquidity − commitmentTotal.
+   * Uang yang benar-benar bebas setelah semua komitmen. BERBEDA dari totalAvailable.
+   */
   freeCash: number;
   commitmentTotal: number;
   hasUnpaidBills: boolean;
@@ -48,6 +59,8 @@ export function deriveFinanceState(input: {
   const scheduledExpenseCommitments = billsDueTotal;
 
   const commitmentTotal = scheduledExpenseCommitments + input.savingsCommitment;
+  // DUA ANGKA TERPISAH.
+  const totalAvailable = totalLiquidity - input.savingsCommitment;
   const freeCash = totalLiquidity - commitmentTotal;
 
   return {
@@ -56,6 +69,7 @@ export function deriveFinanceState(input: {
     scheduledExpenseCommitments,
     unpaidBillsCount,
     savingsCommitment: input.savingsCommitment,
+    totalAvailable,
     freeCash,
     commitmentTotal,
     hasUnpaidBills: unpaidBillsCount > 0,

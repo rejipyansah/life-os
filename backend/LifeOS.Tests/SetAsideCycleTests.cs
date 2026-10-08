@@ -39,6 +39,36 @@ public class SetAsideCycleTests
         var start = new DateOnly(2026, 2, 1);
 
         Assert.Equal(new DateOnly(2026, 2, 28), SetAsideCycle.CycleEnd(start, SetAsideCycleKind.Monthly));
+        Assert.Equal(
+            new DateOnly(2028, 2, 29),
+            SetAsideCycle.CycleEnd(new DateOnly(2028, 2, 1), SetAsideCycleKind.Monthly));
+    }
+
+    [Fact]
+    public void Monthly_CycleAlwaysUsesCalendarMonth_RegardlessOfCreationDate()
+    {
+        var createdOn = new DateOnly(2026, 10, 8);
+
+        Assert.Equal(new DateOnly(2026, 10, 1),
+            SetAsideCycle.CurrentCycleStart(createdOn, SetAsideCycleKind.Monthly, createdOn));
+        Assert.Equal(new DateOnly(2026, 10, 31),
+            SetAsideCycle.CycleEnd(createdOn, SetAsideCycleKind.Monthly));
+        Assert.Equal(new DateOnly(2026, 11, 1),
+            SetAsideCycle.NextCycleStart(createdOn, SetAsideCycleKind.Monthly));
+        Assert.Equal(new DateOnly(2026, 3, 1),
+            SetAsideCycle.CurrentCycleStart(
+                new DateOnly(2026, 1, 31), SetAsideCycleKind.Monthly, new DateOnly(2026, 3, 12)));
+    }
+
+    [Fact]
+    public void BusinessDate_UsesWibMidnightForCycleWindows()
+    {
+        Assert.Equal(
+            new DateTime(2026, 9, 30, 17, 0, 0, DateTimeKind.Utc),
+            BusinessDate.StartOfDayUtc(new DateOnly(2026, 10, 1)));
+        Assert.Equal(
+            DateOnly.FromDateTime(DateTime.UtcNow.AddHours(7)),
+            BusinessDate.TodayWib);
     }
 
     [Fact]
@@ -108,5 +138,20 @@ public class SetAsideCycleTests
 
         Assert.Equal(new DateOnly(2026, 9, 1), from);
         Assert.Equal(new DateOnly(2026, 9, 30), to);
+    }
+
+    [Fact]
+    public void UsageWindow_MonthlyUsesCalendarMonthEvenForLegacyMidMonthAnchor()
+    {
+        var setAside = new SetAside
+        {
+            CycleKind = SetAsideCycleKind.Monthly,
+            CycleAnchorDate = new DateOnly(2026, 10, 8)
+        };
+
+        var (from, to) = SetAsideCycle.UsageWindow(setAside, new DateOnly(2026, 10, 2));
+
+        Assert.Equal(new DateOnly(2026, 10, 1), from);
+        Assert.Equal(new DateOnly(2026, 10, 31), to);
     }
 }

@@ -2,10 +2,19 @@ using LifeOS.Api.Models;
 
 namespace LifeOS.Api.Services;
 
+/// <summary>
+/// Rencana Pengeluaran/Pemasukan. Rencana TIDAK terikat ke Sumber Dana.
+/// Akun hanya dipilih SAAT realizasi (lihat <see cref="RealizeUpcomingEventCommand.AccountId"/>).
+/// </summary>
 public class CreateUpcomingEventCommand
 {
     public Guid ScopeId { get; set; }
+
+    /// <summary>
+    /// Tidak dipakai untuk create. Field wire legacy; Rencana tidak terikat Sumber Dana.
+    /// </summary>
     public Guid? AccountId { get; set; }
+
     public string Title { get; set; } = "";
     public decimal Amount { get; set; }
     public UpcomingEventDirection Direction { get; set; } = UpcomingEventDirection.Expense;
@@ -19,8 +28,6 @@ public class CreateUpcomingEventCommand
 public class UpdateUpcomingEventCommand
 {
     public Guid ScopeId { get; set; }
-    public Guid? AccountId { get; set; }
-    public bool ClearAccount { get; set; }
     public string? Title { get; set; }
     public decimal? Amount { get; set; }
     public UpcomingEventDirection? Direction { get; set; }
@@ -46,9 +53,22 @@ public class SettleUpcomingEventCommand
     public string? Reason { get; set; }
 }
 
+/// <summary>
+/// Realisasi Rencana menjadi transaksi nyata.
+///
+/// AccountId = Sumber Dana tempat uang benar-benar keluar/masuk. WAJIB dipilih
+/// saat realizasi — bukan terikat permanen dari saat rencana dibuat.
+/// SetAsideId = Dana yang Disisihkan opsional yang digunakan (alokasi).
+/// </summary>
 public class RealizeUpcomingEventCommand
 {
     public Guid ScopeId { get; set; }
+
+    /// <summary>Sumber Dana tempat uang keluar/masuk. Wajib.</summary>
+    public Guid? AccountId { get; set; }
+
+    /// <summary>Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas.</summary>
+    public Guid? SetAsideId { get; set; }
 
     /// <summary>Tanggal kejadian riil. Default hari ini.</summary>
     public DateOnly? OccurredOn { get; set; }
@@ -63,8 +83,16 @@ public class RealizeUpcomingEventCommand
 public class UpcomingEventProjection
 {
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// LEGACY ONLY — hanya untuk data lama yang masih menyimpan akun.
+    /// Rencana baru tidak pernah mengisinya. Tidak dipakai untuk perhitungan.
+    /// </summary>
     public Guid? AccountId { get; set; }
+
+    /// <summary>LEGACY ONLY. Tidak dipakai untuk perhitungan.</summary>
     public string? AccountName { get; set; }
+
     public string Title { get; set; } = "";
     public decimal Amount { get; set; }
     public UpcomingEventDirection Direction { get; set; }

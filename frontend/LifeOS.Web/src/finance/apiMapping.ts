@@ -77,7 +77,15 @@ export function formatDateShort(dateString: string): string {
 }
 
 export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
 function timePeriodFor(isoDate: string): TimePeriod {
@@ -181,7 +189,7 @@ export function fromCycleLabel(label: string | undefined): ApiCycleKind {
 
 export function toCreateSetAsideCommand(
   input: CreatePosInput,
-  accountId: string
+  sourceAccountId?: string
 ): CreateSetAsideCommand {
   const targetAmount = input.targetAmount ?? input.plafon ?? null;
   const cycleKind =
@@ -190,7 +198,7 @@ export function toCreateSetAsideCommand(
 
   // Pendanaan awal bukan input user.
   // Rutinitas Bertahap, Berkala & Sekali Pakai: dana langsung disisihkan
-  // = plafon/target dari Uang Bebas rekening sumber.
+  // = plafon/target dari uang yang belum dialokasikan.
   // Tabungan: saldo awal 0 (diisi lewat Top-Up).
   const preparesInitialFunds =
     input.category === 'routine_incremental' ||
@@ -199,7 +207,8 @@ export function toCreateSetAsideCommand(
   const amount = preparesInitialFunds ? (targetAmount ?? 0) : (input.amount ?? 0);
 
   return {
-    accountId,
+    // SourceAccountId hanya divalidasi sekali pakai — TIDAK disimpan di SetAside.
+    sourceAccountId: sourceAccountId ?? null,
     name: input.name,
     note: input.description || undefined,
     kind: fromPosCategory(input.category),
@@ -283,13 +292,17 @@ export function mapPosItem(item: SetAsideProjection): PosItem {
     name: item.name,
     description: item.note ?? '',
     category,
-    accountLabel: item.accountName,
+    // LEGACY ONLY — alokasi tidak terikat Sumber Dana; pos baru tanpa akun.
+    accountLabel: item.accountName ?? undefined,
+    // Hint non-binding untuk pre-select pada proses manual (top-up/pakai).
+    defaultSourceAccountId: item.defaultSourceAccountId ?? undefined,
     amount: item.amount,
     targetAmount: item.targetAmount ?? undefined,
     // A cycling set-aside's plafon is its per-cycle target balance.
     plafon: hasCycle ? item.targetAmount ?? undefined : undefined,
     usedAmount: item.usedAmount,
     cycle,
+    cycleExecuted: item.isCycleExecuted,
     cycleLabel:
       cycle && item.currentCycleEnd
         ? `${cycle} · s.d. ${formatDateShort(item.currentCycleEnd)}`
@@ -297,6 +310,9 @@ export function mapPosItem(item: SetAsideProjection): PosItem {
     status: item.isUnderfunded ? 'Kurang pendanaan' : undefined,
     icon: POS_ICON[category],
     archived: item.status === 'Closed',
+    closeReason: item.closeReason ?? undefined,
+    cycleKind: item.cycleKind,
+    createdAt: item.createdAt,
   };
 }
 
@@ -309,7 +325,8 @@ export function mapAgenda(event: UpcomingEventProjection): AgendaItem {
     isIncome,
     displayDate: formatDateDisplay(event.dueDate ?? ''),
     rawDate: event.dueDate ?? '',
-    accountLabel: event.accountName ?? 'Tanpa rekening',
+    // LEGACY ONLY — Rencana tidak terikat Sumber Dana; rencana baru tanpa akun.
+    accountLabel: event.accountName ?? undefined,
     categoryLabel: event.categoryName ?? (isIncome ? 'Pemasukan Kas' : 'Lainnya'),
     repeat: toRepeatLabel(event.recurrence),
     type: event.scheduleKind === 'Scheduled' ? 'scheduled' : 'flexible',
@@ -333,7 +350,8 @@ export function mapArchivedAgenda(event: UpcomingEventProjection): ArchivedAgend
     // Only realized/skipped/cancelled events reach the archive; the date shown is
     // the event's own schedule, formatted from real data.
     date: formatDateDisplay(event.dueDate ?? ''),
-    accountLabel: event.accountName ?? 'Tanpa rekening',
+    // LEGACY ONLY.
+    accountLabel: event.accountName ?? undefined,
     status: ARCHIVE_STATUS[event.status],
   };
 }
@@ -342,6 +360,9 @@ export function mapArchivedAgenda(event: UpcomingEventProjection): ArchivedAgend
  * Jatuh Tempo = scheduled expense events that are due or overdue.
  * Expected events never move money until they are realized, so they surface here
  * as obligations only — and leave this list the moment they are postponed.
+ *
+ * sourceAccountId = akun LEGACY dari data lama (opsional). Saat membayar,
+ * user memilih Sumber Dana aktual di modal realizasi — rencana tidak terikat akun.
  */
 export function mapBillDue(event: UpcomingEventProjection): BillDue {
   const due = event.dueDate ? formatDateShort(event.dueDate) : '';
@@ -350,7 +371,7 @@ export function mapBillDue(event: UpcomingEventProjection): BillDue {
     name: event.title,
     amount: event.amount,
     accountLabel: event.accountName ?? '-',
-    meta: `${event.accountName ?? 'Tanpa rekening'} · Tenggat ${due}`,
+    meta: `${due ? `Tenggat ${due}` : 'Tanpa tanggal'}${event.accountName ? ` · legacy: ${event.accountName}` : ''}`,
     badge: event.isOverdue ? 'Terlambat' : 'Tenggat hari ini',
     categoryLabel: event.categoryName ?? 'Rutin',
     icon: event.isOverdue ? 'bolt' : 'receipt_long',
@@ -392,6 +413,8 @@ export function mapTransaction(
     title: tx.description || tx.categoryName || TYPE_LABEL[tx.type],
     accountLabel: entry?.accountName ?? '-',
     accountId: entry?.accountId,
+    // Opsional. Alokasi Dana yang Disisihkan — independen dari Sumber Dana.
+    setAsideLabel: tx.setAsideName ?? undefined,
     date: formatDateShort(tx.occurredOn),
     time: formatTime(tx.createdAt),
     dateGroup: formatDateDisplay(tx.occurredOn),
@@ -442,6 +465,7 @@ export function mapFinanceState(
       scheduledExpenseCommitments: 0,
       unpaidBillsCount: 0,
       savingsCommitment: 0,
+      totalAvailable: 0,
       freeCash: 0,
       commitmentTotal: 0,
       hasUnpaidBills: false,
@@ -481,6 +505,8 @@ export function mapFinanceState(
       scheduledExpenseCommitments: projection.scheduledExpenseCommitments,
       unpaidBillsCount: projection.dueObligationsCount,
       savingsCommitment: projection.totalCommittedSetAside,
+      // DUA ANGKA TERPISAH — jangan disamakan.
+      totalAvailable: projection.totalAvailable,
       freeCash: projection.freeCash,
       commitmentTotal:
         projection.totalCommittedSetAside + projection.scheduledExpenseCommitments,

@@ -284,6 +284,8 @@ public static class FinanceEndpoints
         app.MapGet("/api/finance/set-asides/{id:guid}/history", async (
             HttpContext http,
             Guid id,
+            string? cursor,
+            int? pageSize,
             SetAsideService setAsideService,
             GuestTokenService guestTokenService,
             ApplicationDbContext db) =>
@@ -293,7 +295,8 @@ public static class FinanceEndpoints
 
             try
             {
-                return Results.Ok(new { items = await setAsideService.GetHistoryAsync(id, scope.ScopeId!.Value) });
+                return Results.Ok(await setAsideService.GetHistoryAsync(id, scope.ScopeId!.Value,
+                    cursor, pageSize ?? 30));
             }
             catch (ValidationException ex) { return Error(ex.Message, 404); }
         }).WithName("GetSetAsideHistory");

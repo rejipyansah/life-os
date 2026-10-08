@@ -67,7 +67,7 @@ public static class InterpretEndpoint
             raw = await interpreter.InterpretAsync(new InterpretRequest
             {
                 Input = body.Input.Trim(),
-                CurrentDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                CurrentDate = BusinessDate.TodayWib,
                 EligibleAccounts = accountNames
             }, ct);
         }
@@ -127,8 +127,13 @@ public static class InterpretEndpoint
         if (string.IsNullOrWhiteSpace(raw.SetAsideName))
             AddField(fields, "setAsideName");
 
-        if (!TryResolveAccount(raw.Account, eligibleAccounts, out _))
+        // Sumber dana untuk pos bersifat OPSIONAL (sekali pakai saat pendanaan awal).
+        // Hanya minta klarifikasi bila user menyebut akun tapi namanya tidak dikenal.
+        if (!string.IsNullOrWhiteSpace(raw.Account)
+            && !TryResolveAccount(raw.Account, eligibleAccounts, out _))
+        {
             AddField(fields, "account");
+        }
     }
 
     private static void CollectEventFields(
@@ -145,8 +150,13 @@ public static class InterpretEndpoint
         if (raw.Direction is not ("Income" or "Expense"))
             AddField(fields, "direction");
 
-        if (!TryResolveAccount(raw.Account, eligibleAccounts, out _))
+        // Rencana tidak terikat Sumber Dana — akun dipilih saat realizasi.
+        // Hanya minta klarifikasi bila user menyebut akun tapi namanya tidak dikenal.
+        if (!string.IsNullOrWhiteSpace(raw.Account)
+            && !TryResolveAccount(raw.Account, eligibleAccounts, out _))
+        {
             AddField(fields, "account");
+        }
 
         // Agenda fleksibel boleh tanpa tanggal; tanpa tanggal ia otomatis Flexible.
         if (!string.IsNullOrWhiteSpace(raw.Date) && !TryParseDate(raw.Date, out _))
@@ -236,9 +246,12 @@ public static class InterpretEndpoint
         IReadOnlyList<AccountLookup> eligibleAccounts,
         Guid scopeId)
     {
-        if (!TryResolveAccount(raw.Account, eligibleAccounts, out var accountId))
+        // SourceAccountId opsional — hanya sekali pakai saat pendanaan awal pos.
+        Guid? sourceAccountId = null;
+        if (!string.IsNullOrWhiteSpace(raw.Account)
+            && TryResolveAccount(raw.Account, eligibleAccounts, out var resolved))
         {
-            return NotFound(raw, raw.Account, eligibleAccounts);
+            sourceAccountId = resolved;
         }
 
         var preview = new InterpretSetAsideData
@@ -251,7 +264,7 @@ public static class InterpretEndpoint
         var command = new CreateSetAsideCommand
         {
             ScopeId = scopeId,
-            AccountId = accountId,
+            SourceAccountId = sourceAccountId,
             Name = raw.SetAsideName!.Trim(),
             Amount = raw.Amount!.Value,
             Kind = SetAsideKind.Saving
@@ -272,10 +285,8 @@ public static class InterpretEndpoint
         IReadOnlyList<AccountLookup> eligibleAccounts,
         Guid scopeId)
     {
-        if (!TryResolveAccount(raw.Account, eligibleAccounts, out var accountId))
-        {
-            return NotFound(raw, raw.Account, eligibleAccounts);
-        }
+        // Rencana tidak terikat Sumber Dana — AccountId tidak dikirim saat create.
+        // Akun hanya dipilih saat realizasi.
 
         DateOnly? dueDate = string.IsNullOrWhiteSpace(raw.Date) ? null : ParseDate(raw.Date!);
         var isIncome = raw.Direction == "Income";
@@ -292,7 +303,7 @@ public static class InterpretEndpoint
         var command = new CreateUpcomingEventCommand
         {
             ScopeId = scopeId,
-            AccountId = accountId,
+            // AccountId sengaja tidak diisi — rencana independen dari Sumber Dana.
             Title = raw.Title!.Trim(),
             Amount = raw.Amount!.Value,
             Direction = isIncome ? UpcomingEventDirection.Income : UpcomingEventDirection.Expense,
@@ -372,7 +383,7 @@ public static class InterpretEndpoint
         var amount = raw.Amount!.Value;
         var type = raw.TransactionType!;
         var occurredOn = string.IsNullOrWhiteSpace(raw.Date)
-            ? DateOnly.FromDateTime(DateTime.UtcNow)
+            ? BusinessDate.TodayWib
             : ParseDate(raw.Date!);
 
         if (type == "Transfer")

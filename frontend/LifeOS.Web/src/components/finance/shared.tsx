@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { FinanceToast, ProgressTone } from '../../finance';
 
@@ -101,13 +101,13 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-lo-text-ink/35 backdrop-blur-[2px] flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-lo-text-ink/40 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
       <div
-        className={`bg-lo-surface-cream ${maxWidth} w-full rounded-2xl p-6 shadow-xl border border-lo-border-hairline max-h-[90vh] overflow-y-auto animate-[fadeIn_0.2s_cubic-bezier(0.16,1,0.3,1)]`}
+        className={`bg-lo-surface-cream ${maxWidth} w-full rounded-t-3xl sm:rounded-2xl p-4 pt-5 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 shadow-xl border border-lo-border-hairline max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain animate-[fadeIn_0.2s_cubic-bezier(0.16,1,0.3,1)]`}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -143,7 +143,7 @@ export function Modal({
         </div>
         <div className="pt-4">{children}</div>
         {footer ? (
-          <div className="pt-4 mt-4 border-t border-lo-border-hairline flex items-center justify-end gap-2.5">
+          <div className="sticky bottom-[-1rem] pt-3 pb-1 mt-4 border-t border-lo-border-hairline bg-lo-surface-cream flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 [&>button]:w-full sm:[&>button]:w-auto sm:static sm:pb-0">
             {footer}
           </div>
         ) : null}
@@ -190,7 +190,7 @@ export function ToastViewport({
 interface ConfirmDialogProps {
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void | boolean | Promise<void | boolean>;
   title: string;
   description: string;
   icon?: string;
@@ -214,10 +214,17 @@ export function ConfirmDialog({
   detailAccount,
   danger = false,
 }: ConfirmDialogProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const handleClose = () => {
+    setSaving(false);
+    setError('');
+    onClose();
+  };
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={title}
       maxWidth="max-w-md"
       hideHeaderBorder
@@ -273,9 +280,19 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            onClick={() => {
-              onConfirm();
-              onClose();
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true);
+              setError('');
+              try {
+                const result = await onConfirm();
+                if (result === false) setError('Perubahan gagal disimpan. Coba lagi.');
+                else onClose();
+              } catch {
+                setError('Perubahan gagal disimpan. Coba lagi.');
+              } finally {
+                setSaving(false);
+              }
             }}
             className={`px-5 py-2 rounded-full text-xs font-medium text-white cursor-pointer transition-all shadow-sm flex items-center gap-1.5 ${
               danger
@@ -284,9 +301,10 @@ export function ConfirmDialog({
             }`}
           >
             <Icon name={danger ? 'delete' : 'check'} className="text-[15px]" />
-            <span>{actionLabel}</span>
+            <span>{saving ? 'Menyimpan…' : actionLabel}</span>
           </button>
         </div>
+        {error ? <p role="alert" className="mt-3 text-xs text-lo-error">{error}</p> : null}
       </div>
     </Modal>
   );

@@ -8,7 +8,7 @@ export interface Account {
   role: string;
   type: AccountType;
   balance: number;
-  /** Saldo tersedia = actual − set-aside. Sumber validasi funding di UI. */
+  /** Saldo aktual rekening; hanya membatasi transaksi uang riil dari rekening ini. */
   availableBalance: number;
   icon: string;
   archived: boolean;
@@ -40,16 +40,30 @@ export interface PosItem {
   name: string;
   description: string;
   category: PosCategory;
-  accountLabel: string;
+  /**
+   * LEGACY ONLY — alokasi tidak terikat Sumber Dana.
+   * Hanya ditampilkan untuk data lama; pos baru tidak memiliki akun.
+   */
+  accountLabel?: string;
+  /**
+   * Hint non-binding: sumber dana default untuk proses manual (top-up/pakai).
+   * Pre-select UI saja — bukan ikatan pos ke rekening.
+   */
+  defaultSourceAccountId?: string;
   amount: number;
   targetAmount?: number;
   plafon?: number;
   usedAmount?: number;
   cycleLabel?: string;
   cycle?: string;
+  /** Rutinitas berkala sudah dipakai pada cycle berjalan. */
+  cycleExecuted?: boolean;
   status?: string;
   icon: string;
   archived?: boolean;
+  closeReason?: string;
+  cycleKind?: SetAsideCycleKind;
+  createdAt?: string;
 }
 
 export type AgendaType = 'scheduled' | 'flexible';
@@ -61,7 +75,11 @@ export interface AgendaItem {
   isIncome: boolean;
   displayDate: string;
   rawDate: string;
-  accountLabel: string;
+  /**
+   * LEGACY ONLY — Rencana tidak terikat Sumber Dana.
+   * Hanya ditampilkan untuk data lama; rencana baru tidak memiliki akun.
+   */
+  accountLabel?: string;
   categoryLabel: string;
   repeat: string;
   type: AgendaType;
@@ -74,7 +92,8 @@ export interface ArchivedAgenda {
   title: string;
   amount: number;
   date: string;
-  accountLabel: string;
+  /** LEGACY ONLY. */
+  accountLabel?: string;
   status: string;
 }
 
@@ -85,6 +104,11 @@ export interface Transaction {
   title: string;
   accountLabel: string;
   accountId?: string;
+  /**
+   * Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas.
+   * INDEPENDEN dari accountLabel (Sumber Dana).
+   */
+  setAsideLabel?: string;
   date: string;
   time: string;
   dateGroup: string;
@@ -108,14 +132,22 @@ export interface ParsedTransaction {
   amount?: number;
   type?: 'Pengeluaran' | 'Pemasukan' | 'Alokasi Pos' | 'Transfer Kas';
   category?: string;
+  /** Sumber Dana — uang keluar/masuk dari mana. */
   account?: string;
+  /** Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas. */
+  setAsideId?: string;
+  /** Nama pos alokasi untuk tampilan. */
+  setAsideLabel?: string;
 }
 
 export interface CreatePosInput {
   name: string;
   description: string;
   category: PosCategory;
-  accountLabel: string;
+  /**
+   * Opsional. Rekening referensi/preferensi; tidak didebit dan bukan batas pendanaan.
+   */
+  sourceAccountLabel?: string;
   targetAmount?: number;
   plafon?: number;
   cycle?: string;
@@ -133,7 +165,6 @@ export interface CreateAgendaInput {
   amount: number;
   isIncome: boolean;
   rawDate: string;
-  accountLabel: string;
   categoryLabel: string;
   repeat: string;
   type: AgendaType;

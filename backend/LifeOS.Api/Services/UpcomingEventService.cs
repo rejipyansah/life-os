@@ -12,6 +12,10 @@ namespace LifeOS.Api.Services;
 ///   - it never appears in real activity
 ///   - passing its date does not turn it into income or expense
 ///
+/// Rencana TIDAK terikat ke Sumber Dana. Akun hanya dipilih saat
+/// <see cref="RealizeAsync"/> — user menentukan Sumber Dana aktual saat
+/// transaksi benar-benar dilakukan.
+///
 /// Only <see cref="RealizeAsync"/> turns an event into a real Transaction, and only when
 /// the user says the event actually happened.
 /// </summary>
@@ -19,11 +23,13 @@ public class UpcomingEventService
 {
     private readonly ApplicationDbContext _db;
     private readonly BalanceCalculator _balances;
+    private readonly SetAsideService _setAsides;
 
     public UpcomingEventService(ApplicationDbContext db, BalanceCalculator balances)
     {
         _db = db;
         _balances = balances;
+        _setAsides = new SetAsideService(db, balances);
     }
 
     // ───────────────────────── Create / Update ─────────────────────────
@@ -45,16 +51,15 @@ public class UpcomingEventService
         if (!Enum.IsDefined(command.Recurrence))
             throw new ValidationException($"Invalid recurrence: {command.Recurrence}");
 
-        if (command.AccountId.HasValue)
-            await RequireAccountAsync(command.AccountId.Value, command.ScopeId, requireActive: true, ct);
-
         ValidateSchedule(command.ScheduleKind, command.DueDate);
 
         var now = DateTime.UtcNow;
         var agenda = new UpcomingEvent
         {
             ScopeId = command.ScopeId,
-            AccountId = command.AccountId,
+            // AccountId tidak ditulis — Rencana tidak terikat Sumber Dana.
+            // Akun hanya dipilih saat realizasi.
+            AccountId = null,
             Title = title,
             Amount = command.Amount,
             Direction = command.Direction,
@@ -104,16 +109,6 @@ public class UpcomingEventService
 
         if (command.Note is not null)
             agenda.Note = NormalizeOptional(command.Note, 512);
-
-        if (command.ClearAccount)
-        {
-            agenda.AccountId = null;
-        }
-        else if (command.AccountId.HasValue)
-        {
-            await RequireAccountAsync(command.AccountId.Value, command.ScopeId, requireActive: true, ct);
-            agenda.AccountId = command.AccountId.Value;
-        }
 
         if (command.ScheduleKind.HasValue)
         {
@@ -166,7 +161,7 @@ public class UpcomingEventService
             throw new ValidationException("A flexible agenda has no date to postpone. Provide a new due date.");
 
         var newDate = command.NewDueDate
-            ?? (agenda.DueDate ?? DateOnly.FromDateTime(DateTime.UtcNow)).AddDays(1);
+            ?? (agenda.DueDate ?? BusinessDate.TodayWib).AddDays(1);
 
         if (agenda.DueDate.HasValue && newDate < agenda.DueDate.Value)
             throw new ValidationException("Postponing must move the due date forward.");
@@ -225,6 +220,10 @@ public class UpcomingEventService
     ///   Direction Income  → Transaction Income  (satu entry positif)
     ///   Direction Expense → Transaction Expense (satu entry negatif)
     ///
+    /// AccountId pada command = Sumber Dana tempat uang benar-benar keluar/masuk.
+    /// WAJIB dipilih saat realizasi — bukan terikat permanen dari saat rencana dibuat.
+    /// SetAsideId = Dana yang Disisihkan opsional yang dialokasikan/dilepas.
+    ///
     /// Sebelum ini dipanggil, agenda tidak pernah mengubah actual balance.
     /// </summary>
     public Task<RealizeUpcomingEventResult> RealizeAsync(Guid eventId, RealizeUpcomingEventCommand command, CancellationToken ct = default)
@@ -237,12 +236,14 @@ public class UpcomingEventService
         if (agenda.Status != UpcomingEventStatus.Scheduled)
             throw new ValidationException("Only a scheduled agenda can be realized.");
 
-        if (!agenda.AccountId.HasValue)
-            throw new ValidationException("This agenda has no account. Set an account before realizing it.");
+        // Sumber Dana dipilih SAAT realizasi — bukan terikat permanen dari saat dibuat.
+        if (!command.AccountId.HasValue)
+            throw new ValidationException(
+                "This realization must specify a source account (Sumber Dana). Select the actual account where money leaves/enters.");
 
-        var account = await RequireAccountAsync(agenda.AccountId.Value, command.ScopeId, requireActive: true, ct);
+        var account = await RequireAccountAsync(command.AccountId.Value, command.ScopeId, requireActive: true, ct);
 
-        var occurredOn = command.OccurredOn ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var occurredOn = command.OccurredOn ?? BusinessDate.TodayWib;
         var isExpense = agenda.Direction == UpcomingEventDirection.Expense;
 
         if (isExpense)
@@ -251,10 +252,16 @@ public class UpcomingEventService
             if (balance < agenda.Amount)
                 throw new ValidationException($"Insufficient balance in '{account.Name}'. Balance: {balance:N0}.");
 
-            var available = await _balances.GetAvailableAsync(account.Id, ct);
-            if (available < agenda.Amount)
-                throw new ValidationException(
-                    $"Insufficient available balance in '{account.Name}'. Available: {available:N0}. Funds are reserved by active set-asides.");
+            if (command.SetAsideId.HasValue)
+            {
+                var setAside = await _db.SetAsides
+                    .FirstOrDefaultAsync(sa => sa.Id == command.SetAsideId.Value
+                        && sa.ScopeId == command.ScopeId
+                        && sa.Status == SetAsideStatus.Active, ct);
+
+                if (setAside is null)
+                    throw new ValidationException("Set-aside not found or not active in current Scope.");
+            }
         }
 
         var transaction = new Transaction
@@ -276,6 +283,29 @@ public class UpcomingEventService
             Amount = isExpense ? -agenda.Amount : agenda.Amount
         });
 
+        // Alokasi Dana yang Disisihkan — independen dari Sumber Dana.
+        if (command.SetAsideId.HasValue)
+        {
+            if (isExpense)
+            {
+                var allocationEntries = await _setAsides.RecordTransactionExpenseAsync(
+                    command.SetAsideId.Value, command.ScopeId, transaction, agenda.Amount, ct);
+                _db.SetAsideEntries.AddRange(allocationEntries);
+            }
+            else
+            {
+                _db.SetAsideEntries.Add(new SetAsideEntry
+                {
+                    SetAsideId = command.SetAsideId.Value,
+                    ScopeId = command.ScopeId,
+                    Type = SetAsideEntryType.Added,
+                    Amount = agenda.Amount,
+                    TransactionId = transaction.Id,
+                    Note = "Allocation funded by realized agenda"
+                });
+            }
+        }
+
         agenda.Status = UpcomingEventStatus.Realized;
         agenda.RealizedTransactionId = transaction.Id;
         agenda.UpdatedAt = DateTime.UtcNow;
@@ -284,7 +314,7 @@ public class UpcomingEventService
 
         return new RealizeUpcomingEventResult
         {
-            Event = Project(agenda, account.Name, DateOnly.FromDateTime(DateTime.UtcNow)),
+            Event = Project(agenda, account.Name, BusinessDate.TodayWib),
             TransactionId = transaction.Id
         };
     }
@@ -297,6 +327,7 @@ public class UpcomingEventService
             .Where(ue => ue.ScopeId == scopeId)
             .ToListAsync(ct);
 
+        // Legacy account names — hanya untuk kompatibilitas data lama, bukan perhitungan.
         var accountIds = all.Where(ue => ue.AccountId.HasValue).Select(ue => ue.AccountId!.Value).Distinct().ToList();
         var accountNames = accountIds.Count == 0
             ? new Dictionary<Guid, string>()
@@ -304,7 +335,7 @@ public class UpcomingEventService
                 .Where(a => accountIds.Contains(a.Id))
                 .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         return all
             .OrderBy(ue => ue.Status == UpcomingEventStatus.Scheduled ? 0 : 1)
             .ThenBy(ue => ue.DueDate ?? DateOnly.MaxValue)
@@ -324,7 +355,7 @@ public class UpcomingEventService
             ? null
             : await _db.Accounts.Where(a => a.Id == agenda.AccountId).Select(a => a.Name).FirstOrDefaultAsync(ct);
 
-        return Project(agenda, accountName, DateOnly.FromDateTime(DateTime.UtcNow));
+        return Project(agenda, accountName, BusinessDate.TodayWib);
     }
 
     internal static UpcomingEventProjection Project(UpcomingEvent agenda, string? accountName, DateOnly today)
@@ -335,6 +366,7 @@ public class UpcomingEventService
         return new UpcomingEventProjection
         {
             Id = agenda.Id,
+            // LEGACY ONLY — Rencana baru tidak pernah mengisi akun.
             AccountId = agenda.AccountId,
             AccountName = accountName,
             Title = agenda.Title,

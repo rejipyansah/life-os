@@ -5,16 +5,19 @@ import {
   parseTransactionText,
   type Account,
   type ParsedTransaction,
+  type PosItem,
   type Transaction,
 } from '../../finance';
 import {
   cardBase,
   Icon,
   inputBase,
+  selectBase,
 } from './shared';
 
 interface CatatTransaksiSectionProps {
   accounts: Account[];
+  posItems: PosItem[];
   onSave: (parsed: ParsedTransaction) => void;
 }
 
@@ -27,23 +30,40 @@ const QUICK_PHRASES = [
 
 export default function CatatTransaksiSection({
   accounts,
+  posItems,
   onSave,
 }: CatatTransaksiSectionProps) {
   const [input, setInput] = useState('');
   const [activeAccountId, setActiveAccountId] = useState('');
+  const [activePosId, setActivePosId] = useState('');
   const [guidance, setGuidance] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedTransaction | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
 
   const selectorAccounts = accounts.filter((a) => !a.archived);
-  const selectedAccount =
-    selectorAccounts.find((a) => a.id === activeAccountId) ?? selectorAccounts[0];
+  // Tanpa fallback ke akun pertama — user harus memilih eksplisit,
+  // atau nama akun harus cocok dengan parsed account.
+  const selectedAccount = selectorAccounts.find((a) => a.id === activeAccountId);
+  const activePos = posItems.filter((p) => !p.archived);
+  const selectedPos = activePos.find((p) => p.id === activePosId);
 
   const handleAccountClick = (id: string) => {
     setActiveAccountId(id);
     const account = selectorAccounts.find((a) => a.id === id);
     if (account && parsed && parsed.status === 'SUCCESS') {
       setParsed({ ...parsed, account: account.name });
+    }
+  };
+
+  const handlePosChange = (id: string) => {
+    setActivePosId(id);
+    if (parsed && parsed.status === 'SUCCESS') {
+      const pos = activePos.find((p) => p.id === id);
+      setParsed({
+        ...parsed,
+        setAsideId: pos?.id,
+        setAsideLabel: pos?.name,
+      });
     }
   };
 
@@ -60,12 +80,43 @@ export default function CatatTransaksiSection({
     setSavedMsg(null);
   };
 
-  const handleSubmit = () => {
-    if (!selectedAccount) {
-      setGuidance('Belum ada sumber dana aktif. Tambahkan sumber dana di bagian Sumber Dana.');
+  /** Resolve Sumber Dana: pilihan eksplisit user, atau nama akun yang cocok
+   *  dengan hasil parser. Tanpa keduanya → panduan, bukan fallback diam-diam. */
+  const resolveAccount = (result: ParsedTransaction): Account | undefined => {
+    if (selectedAccount) return selectedAccount;
+    const wanted = result.account?.trim().toLowerCase();
+    if (!wanted) return undefined;
+    return selectorAccounts.find((a) => a.name.toLowerCase() === wanted);
+  };
+
+  const buildParsed = (result: ParsedTransaction): ParsedTransaction | null => {
+    const account = resolveAccount(result);
+    if (!account) {
+      setGuidance(
+        'Pilih Sumber Dana terlebih dahulu — tempat uang keluar/masuk. Tidak ada nama akun pada catatan yang cocok.'
+      );
       setParsed(null);
-      return;
+      return null;
     }
+    const next: ParsedTransaction = {
+      ...result,
+      account: account.name,
+    };
+    // "Alokasi Pos" membuat pos baru — pilihan pos yang ada tidak relevan di sini.
+    if (
+      selectedPos &&
+      (result.type === 'Pengeluaran' || result.type === 'Pemasukan')
+    ) {
+      next.setAsideId = selectedPos.id;
+      next.setAsideLabel = selectedPos.name;
+    }
+    setGuidance(null);
+    setSavedMsg(null);
+    setParsed(next);
+    return next;
+  };
+
+  const handleSubmit = () => {
     const result = parseTransactionText(input);
     if (result.status === 'EMPTY') {
       setGuidance('Masukkan catatan transaksi terlebih dahulu.');
@@ -77,13 +128,7 @@ export default function CatatTransaksiSection({
       setParsed(null);
       return;
     }
-    const withAccount: ParsedTransaction = {
-      ...result,
-      account: selectedAccount.name,
-    };
-    setGuidance(null);
-    setSavedMsg(null);
-    setParsed(withAccount);
+    buildParsed(result);
   };
 
   const handleConfirm = () => {
@@ -91,7 +136,9 @@ export default function CatatTransaksiSection({
     onSave(parsed);
     const amount = parsed.amount ?? 0;
     setSavedMsg(
-      `Transaksi berhasil dicatat: ${parsed.category} (${formatCurrencyRaw(amount)}) melalui ${parsed.account}`
+      `Transaksi berhasil dicatat: ${parsed.category} (${formatCurrencyRaw(amount)}) melalui ${parsed.account}${
+        parsed.setAsideLabel ? ` · pos "${parsed.setAsideLabel}"` : ''
+      }`
     );
     setInput('');
     setParsed(null);
@@ -129,7 +176,7 @@ export default function CatatTransaksiSection({
           <span className="text-[11px] text-lo-text-subtle">
             Aktif:{' '}
             <strong className="text-lo-primary font-medium">
-              {selectedAccount?.name ?? '—'}
+              {selectedAccount?.name ?? 'Belum dipilih'}
             </strong>
           </span>
         </div>
@@ -160,7 +207,7 @@ export default function CatatTransaksiSection({
         </div>
       </div>
 
-      {/* Input + submit */}
+      {/* Input + submit — alur utama: pilih Sumber Dana → tulis → catat */}
       <div className="relative">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
           <div className="flex-1 relative flex items-center">
@@ -198,6 +245,36 @@ export default function CatatTransaksiSection({
             <Icon name="arrow_forward" className="text-[18px]" />
           </button>
         </div>
+
+        {/* Dana yang Disisihkan — pilihan tambahan, ringkas. Hanya tampil bila ada pos aktif. */}
+        {activePos.length > 0 ? (
+          <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+            <label
+              htmlFor="catat-pos"
+              className="text-[11px] text-lo-text-subtle flex items-center gap-1 shrink-0"
+            >
+              <Icon name="savings" className="text-[13px]" />
+              Dana yang Disisihkan
+            </label>
+            <select
+              id="catat-pos"
+              className={`${selectBase} w-auto min-w-[11rem] py-1.5`}
+              value={activePosId}
+              onChange={(e) => handlePosChange(e.target.value)}
+            >
+              <option value="">Tidak ada</option>
+                {activePos.map((p) => (
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    disabled={p.category === 'routine_batch' && p.cycleExecuted}
+                  >
+                  {p.name} — {formatCurrencyRaw(p.amount)}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         {/* Guidance */}
         {guidance ? (
@@ -247,9 +324,15 @@ export default function CatatTransaksiSection({
                     {parsed.category}
                   </h3>
                   <p className="text-xs text-lo-text-subtle font-normal mt-1 flex items-center gap-1">
-                    Sumber dana:{' '}
+                    Sumber Dana:{' '}
                     <span className="text-lo-text-ink font-medium" id="verify-account-display">
                       {parsed.account}
+                    </span>
+                  </p>
+                  <p className="text-xs text-lo-text-subtle font-normal mt-0.5 flex items-center gap-1">
+                    Dana yang Disisihkan:{' '}
+                    <span className="text-lo-text-ink font-medium">
+                      {parsed.setAsideLabel ?? 'Tidak ada'}
                     </span>
                   </p>
                 </div>
@@ -320,16 +403,9 @@ export default function CatatTransaksiSection({
               setInput(phrase);
               setGuidance(null);
               setSavedMsg(null);
-              if (!selectedAccount) {
-                setGuidance(
-                  'Belum ada sumber dana aktif. Tambahkan sumber dana di bagian Sumber Dana.'
-                );
-                setParsed(null);
-                return;
-              }
               const result = parseTransactionText(phrase);
               if (result.status === 'SUCCESS') {
-                setParsed({ ...result, account: selectedAccount.name });
+                buildParsed(result);
               } else if (result.status === 'NO_AMOUNT') {
                 setGuidance('Sertakan nominal transaksi (contoh: 25rb, 340rb, atau 1.5jt).');
                 setParsed(null);

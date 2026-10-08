@@ -24,13 +24,17 @@ public class AccountProjection
     public AccountType Type { get; set; }
     public bool IsArchived { get; set; }
 
-    /// <summary>Saldo riil = SUM(TransactionEntry.Amount).</summary>
+    /// <summary>Saldo riil = SUM(TransactionEntry.Amount). Lokasi uang di akun ini.</summary>
     public decimal ActualBalance { get; set; }
 
-    /// <summary>Uang yang sedang disisihkan pada akun ini.</summary>
+    /// <summary>
+    /// SELALU 0 — alokasi (Dana yang Disisihkan) scope-wide, bukan milik akun tertentu.
+    /// </summary>
     public decimal SetAsideAmount { get; set; }
 
-    /// <summary>Saldo tersedia = ActualBalance - SetAsideAmount.</summary>
+    /// <summary>
+    /// Saldo aktual akun ini. Alokasi dihitung di TotalAvailable scope-wide.
+    /// </summary>
     public decimal AvailableBalance { get; set; }
 
     public DateTime CreatedAt { get; set; }
@@ -39,7 +43,13 @@ public class AccountProjection
 public class AccountListProjection
 {
     public List<AccountProjection> Accounts { get; set; } = [];
+
+    /// <summary>Σ saldo aktual seluruh akun dalam scope.</summary>
     public decimal TotalActualBalance { get; set; }
+
+    /// <summary>Σ alokasi aktif scope-wide — bukan per akun.</summary>
     public decimal TotalSetAsideAmount { get; set; }
+
+    /// <summary>TotalAvailable = TotalActualBalance − TotalSetAsideAmount.</summary>
     public decimal TotalAvailableBalance { get; set; }
 }

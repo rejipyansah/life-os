@@ -60,6 +60,8 @@ export default function FinancePage({
               <JatuhTempoCard
                 derived={state.derived}
                 billsDue={state.billsDue}
+                accounts={state.accounts}
+                posItems={state.posItems}
                 onPayBill={state.payBill}
                 onPayAll={state.payAllBills}
                 onPostponeBill={state.postponeBill}
@@ -70,6 +72,7 @@ export default function FinancePage({
           {/* Row 2: Catat Transaksi */}
           <CatatTransaksiSection
             accounts={state.accounts}
+            posItems={state.posItems}
             onSave={state.saveTransaction}
           />
 
@@ -79,6 +82,7 @@ export default function FinancePage({
               <YangDisisihkanSection
                 posItems={state.posItems}
                 accounts={state.accounts}
+                freeCash={state.derived.freeCash}
                 filter={state.posFilter}
                 page={state.posPage}
                 onFilterChange={state.setPosFilter}
@@ -90,10 +94,12 @@ export default function FinancePage({
                 onExecuteSingle={state.executeSingleSpendPos}
                 onCreate={state.createPos}
                 onDelete={state.deletePos}
+                onUpdate={state.updatePos}
               />
               {/* Seukuran Yang Disisihkan, menutup ruang kosong di kolom kiri. */}
               <AgendaKasSection
                 accounts={state.accounts}
+                posItems={state.posItems}
                 agendas={state.agendas}
                 archivedAgendas={state.archivedAgendas}
                 filter={state.agendaFilter}

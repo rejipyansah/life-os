@@ -530,14 +530,31 @@ function VoidModal({
             {isIncome ? (
               <>
                 Pemasukan sebesar <span className="font-medium font-headline">{absAmount}</span>{' '}
-                akan dikurangkan kembali dari sumber dana <strong>{tx.accountLabel}</strong>.
+                akan dikurangkan kembali dari saldo sumber dana{' '}
+                <strong>{tx.accountLabel}</strong>
+                {tx.setAsideLabel ? (
+                  <>
+                    {' '}
+                    dan alokasi pos{' '}
+                    <strong>&quot;{tx.setAsideLabel}&quot;</strong> akan dilepas kembali
+                  </>
+                ) : null}
+                .
               </>
             ) : (
               <>
                 Pengeluaran sebesar{' '}
                 <span className="font-medium font-headline">{absAmount}</span> akan
-                dikembalikan seutuhnya ke saldo sumber dana <strong>{tx.accountLabel}</strong> dan
-                uang bebas Anda.
+                dikembalikan ke saldo sumber dana <strong>{tx.accountLabel}</strong>
+                {tx.setAsideLabel ? (
+                  <>
+                    ; alokasi pos <strong>&quot;{tx.setAsideLabel}&quot;</strong> juga akan
+                    dipulihkan
+                  </>
+                ) : (
+                  ' dan uang yang belum dialokasikan'
+                )}
+                .
               </>
             )}
           </div>

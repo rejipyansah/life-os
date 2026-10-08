@@ -12,6 +12,17 @@ public class CreateTransactionCommand
     public DateOnly OccurredOn { get; set; }
     public Guid? RelatedTransactionId { get; set; }
     public decimal? FeeAmount { get; set; }
+
+    /// <summary>
+    /// Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas pada transaksi ini.
+    /// INDEPENDEN dari Sumber Dana (AccountId di Entries) — dua pilihan berbeda:
+    ///   Entries[].AccountId = Sumber Dana (uang keluar/masuk dari mana)
+    ///   SetAsideId          = alokasi/tujuan uang yang digunakan
+    /// Untuk Expense: melepas min(amount, saldoPos) dari pos.
+    /// Untuk Income: menambah amount ke pos.
+    /// </summary>
+    public Guid? SetAsideId { get; set; }
+
     public List<CreateTransactionEntryCommand> Entries { get; set; } = [];
 }
 

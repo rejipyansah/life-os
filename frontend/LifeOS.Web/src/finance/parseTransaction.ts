@@ -43,7 +43,10 @@ export function parseTransactionText(raw: string): ParsedTransaction {
   }
 
   const detectedAcc = detectAccountFromText(text);
-  const finalAccount = detectedAcc || 'BCA Operasional';
+  // Sumber Dana = uang fisik aktual yang ditentukan user.
+  // Tanpa penyebutan akun dalam teks, tidak ada fallback —
+  // UI meminta user memilih Sumber Dana secara eksplisit.
+  const finalAccount = detectedAcc ?? undefined;
 
   let type: ParsedTransaction['type'] = 'Pengeluaran';
   let category = 'Rutin & Harian';

@@ -8,10 +8,10 @@ import type {
   CreateTransactionCommand,
   ReverseTransactionCommand,
   SetAsideProjection,
+  SetAsideHistoryPage,
   SetAsideOperationResult,
   CreateSetAsideCommand,
   UpdateSetAsideCommand,
-  SetAsideEntryProjection,
   UpcomingEventProjection,
   CreateUpcomingEventCommand,
   UpdateUpcomingEventCommand,
@@ -22,21 +22,39 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
+/**
+ * Parse body respons dengan aman. Backend bisa mengembalikan HTML
+ * (halaman error ASP.NET) atau teks non-JSON saat server gagal —
+ * jangan pernah melempar SyntaxError mentah ke UI.
+ */
+async function parseBody(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function errorMessageFromBody(body: unknown, status: number): string {
+  if (body && typeof body === 'object' && 'error' in body) {
+    const msg = (body as { error: unknown }).error;
+    if (typeof msg === 'string' && msg) return msg;
+  }
+  return `Request failed (${status})`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: 'include',
   });
 
-  const body = await res.json();
+  const body = await parseBody(res);
 
   if (!res.ok) {
-    const msg =
-      body && typeof body === 'object' && 'error' in body
-        ? (body as { error: string }).error
-        : `Request failed (${res.status})`;
-
-    throw new Error(msg);
+    throw new Error(errorMessageFromBody(body, res.status));
   }
 
   return body as T;
@@ -50,13 +68,8 @@ async function requestNoContent(path: string, init?: RequestInit): Promise<void>
 
   if (res.ok) return;
 
-  const body = await res.json().catch(() => null);
-  const msg =
-    body && typeof body === 'object' && 'error' in body
-      ? (body as { error: string }).error
-      : `Request failed (${res.status})`;
-
-  throw new Error(msg);
+  const body = await parseBody(res);
+  throw new Error(errorMessageFromBody(body, res.status));
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({
@@ -219,9 +232,13 @@ export async function getSetAside(id: string): Promise<SetAsideProjection> {
 }
 
 export async function getSetAsideHistory(
-  id: string
-): Promise<{ items: SetAsideEntryProjection[] }> {
-  return request(`/api/finance/set-asides/${id}/history`);
+  id: string,
+  cursor?: string | null,
+  pageSize = 30
+): Promise<SetAsideHistoryPage> {
+  const params = new URLSearchParams({ pageSize: String(pageSize) });
+  if (cursor) params.set('cursor', cursor);
+  return request(`/api/finance/set-asides/${id}/history?${params.toString()}`);
 }
 
 export async function createSetAside(
@@ -237,10 +254,11 @@ export async function updateSetAside(
   return request(`/api/finance/set-asides/${id}`, json('PATCH', command));
 }
 
-/** Menambah saldo disisihkan (top-up). Bukan Expense. */
+/** Menambah saldo disisihkan (top-up). Bukan Expense.
+ *  sourceAccountId: opsional, hanya divalidasi sekali pakai — bukan ikatan pos. */
 export async function addToSetAside(
   id: string,
-  command: { amount: number; note?: string }
+  command: { amount: number; note?: string; sourceAccountId?: string | null }
 ): Promise<SetAsideOperationResult> {
   return request(`/api/finance/set-asides/${id}/add`, json('POST', command));
 }
@@ -253,17 +271,20 @@ export async function withdrawFromSetAside(
   return request(`/api/finance/set-asides/${id}/withdraw`, json('POST', command));
 }
 
-/** Pengeluaran riil dari set-aside: membuat Expense sekaligus melepas reservasi.
- *  FreeCashAccountId: rekening sumber Uang Bebas untuk porsi di atas saldo pos. */
+/**
+ * Pengeluaran riil dari set-aside: membuat Expense sekaligus melepas reservasi.
+ * sourceAccountId = Sumber Dana tempat uang BENAR-BENAR keluar. WAJIB.
+ * Seluruh nominal keluar dari akun itu; pos melepas min(amount, saldoPos).
+ */
 export async function spendFromSetAside(
   id: string,
   command: {
+    sourceAccountId: string;
     amount: number;
     description?: string;
     categoryName?: string;
     occurredOn: string;
     note?: string;
-    freeCashAccountId?: string;
   }
 ): Promise<SetAsideOperationResult> {
   return request(`/api/finance/set-asides/${id}/spend`, json('POST', command));
@@ -334,10 +355,14 @@ export async function cancelUpcomingEvent(
   );
 }
 
-/** Merealisasikan agenda menjadi transaksi riil. */
+/**
+ * Merealisasikan agenda menjadi transaksi riil.
+ * accountId = Sumber Dana tempat uang keluar/masuk — WAJIB dipilih saat realizasi.
+ * setAsideId = Dana yang Disisihkan opsional yang dialokasikan/dilepas.
+ */
 export async function realizeUpcomingEvent(
   id: string,
-  command: { occurredOn?: string; description?: string } = {}
+  command: { accountId: string; setAsideId?: string | null; occurredOn?: string; description?: string }
 ): Promise<RealizeUpcomingEventResult> {
   return request(
     `/api/finance/upcoming-events/${id}/realize`,

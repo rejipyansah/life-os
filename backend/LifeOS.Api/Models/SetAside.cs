@@ -4,11 +4,25 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace LifeOS.Api.Models;
 
 /// <summary>
-/// Uang yang Disisihkan (set-aside / reservation).
-/// A reservation of money held inside an Account. It is NOT an expense, it creates no
-/// TransactionEntry and never changes the actual account balance. It only reduces the
-/// derived available balance.
-/// The current reserved amount is derived from <see cref="SetAsideEntry"/> history.
+/// Uang yang Disisihkan (set-aside / pos alokasi) — alokasi/tujuan uang.
+///
+/// SEBUAH POOL ALOKASI SCOPE-WIDE, bukan milik satu Sumber Dana:
+///   - tidak pernah membuat TransactionEntry
+///   - tidak pernah mengubah saldo aktual akun manapun
+///   - hanya mengurangi derived TotalAvailable / FreeCash
+///
+/// Saldo saat ini diturunkan dari <see cref="SetAsideEntry"/> history (SUM).
+///
+/// LEGACY: kolom <see cref="AccountId"/> boleh berisi nilai lama dari data sebelum
+/// pemisahan konsep. Nilai legacy TIDAK PERNAH dipakai untuk perhitungan saldo,
+/// uang yang bisa dipakai, pendanaan cycle, maupun alokasi. SetAside baru tidak pernah
+/// menulis kolom ini. Sumber Dana hanya ditentukan pada transaksi/perpindahan uang,
+/// bukan pada Dana yang Disisihkan.
+///
+/// <see cref="DefaultSourceAccountId"/> adalah HINT NON-BINDING: sumber dana default
+/// yang direkomendasikan untuk proses manual (top-up/pakai/eksekusi). Hanya dipakai
+/// untuk pre-select di UI — TIDAK PERNAH dipakai untuk validasi/perhitungan apa pun,
+/// dan bukan kepemilikan pos.
 /// </summary>
 public class SetAside
 {
@@ -20,10 +34,25 @@ public class SetAside
 
     public Scope Scope { get; set; } = null!;
 
+    /// <summary>
+    /// LEGACY ONLY — jangan dibaca untuk validasi/perhitungan apa pun.
+    /// Tidak ditulis untuk SetAside baru.
+    /// </summary>
     [ForeignKey(nameof(Account))]
-    public Guid AccountId { get; set; }
+    public Guid? AccountId { get; set; }
 
-    public Account Account { get; set; } = null!;
+    /// <summary>LEGACY ONLY — tidak pernah dipakai di logic.</summary>
+    public Account? Account { get; set; }
+
+    /// <summary>
+    /// Hint non-binding: sumber dana default untuk proses manual (top-up/pakai).
+    /// Dipakai untuk pre-select UI saja — bukan ikatan, bukan validasi.
+    /// </summary>
+    [ForeignKey(nameof(DefaultSourceAccount))]
+    public Guid? DefaultSourceAccountId { get; set; }
+
+    /// <summary>LEGACY/non-critical navigation untuk hint default.</summary>
+    public Account? DefaultSourceAccount { get; set; }
 
     [Required]
     [MaxLength(256)]
@@ -51,6 +80,13 @@ public class SetAside
 
     /// <summary>Hari mulai cycle yang sedang berjalan.</summary>
     public DateOnly CycleAnchorDate { get; set; }
+
+    /// <summary>
+    /// Dana target cycle berjalan yang belum dapat dialokasikan karena Uang Bebas
+    /// belum cukup. Akan dipenuhi otomatis ketika ada pemasukan baru.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal CycleFundingShortfall { get; set; }
 
     public SetAsideStatus Status { get; set; } = SetAsideStatus.Active;
 

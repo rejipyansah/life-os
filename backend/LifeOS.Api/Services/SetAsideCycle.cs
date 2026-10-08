@@ -20,6 +20,11 @@ public static class SetAsideCycle
     {
         if (!HasCycle(kind)) return anchor;
 
+        // Monthly routines follow calendar months, regardless of the original
+        // creation day or legacy anchor date.
+        if (kind == SetAsideCycleKind.Monthly)
+            return new DateOnly(today.Year, today.Month, 1);
+
         var start = anchor;
         for (var guard = 0; guard < 4096; guard++)
         {
@@ -33,7 +38,7 @@ public static class SetAsideCycle
     public static DateOnly CycleEnd(DateOnly start, SetAsideCycleKind kind) => kind switch
     {
         SetAsideCycleKind.Weekly => start.AddDays(6),
-        SetAsideCycleKind.Monthly => start.AddMonths(1).AddDays(-1),
+        SetAsideCycleKind.Monthly => new DateOnly(start.Year, start.Month, 1).AddMonths(1).AddDays(-1),
         SetAsideCycleKind.Quarterly => start.AddMonths(3).AddDays(-1),
         SetAsideCycleKind.SemiAnnual => start.AddMonths(6).AddDays(-1),
         SetAsideCycleKind.Annual => start.AddYears(1).AddDays(-1),
@@ -43,7 +48,7 @@ public static class SetAsideCycle
     public static DateOnly NextCycleStart(DateOnly start, SetAsideCycleKind kind) => kind switch
     {
         SetAsideCycleKind.Weekly => start.AddDays(7),
-        SetAsideCycleKind.Monthly => start.AddMonths(1),
+        SetAsideCycleKind.Monthly => new DateOnly(start.Year, start.Month, 1).AddMonths(1),
         SetAsideCycleKind.Quarterly => start.AddMonths(3),
         SetAsideCycleKind.SemiAnnual => start.AddMonths(6),
         SetAsideCycleKind.Annual => start.AddYears(1),
@@ -66,9 +71,11 @@ public static class SetAsideCycle
     {
         if (!HasCycle(setAside.CycleKind)) return (null, null);
 
-        var start = IsRolloverPending(setAside, today)
-            ? CurrentCycleStart(setAside.CycleAnchorDate, setAside.CycleKind, today)
-            : setAside.CycleAnchorDate;
+        var start = setAside.CycleKind == SetAsideCycleKind.Monthly
+            ? new DateOnly(today.Year, today.Month, 1)
+            : IsRolloverPending(setAside, today)
+                ? CurrentCycleStart(setAside.CycleAnchorDate, setAside.CycleKind, today)
+                : setAside.CycleAnchorDate;
 
         return (start, CycleEnd(start, setAside.CycleKind));
     }

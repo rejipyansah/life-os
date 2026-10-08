@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getSetAsideHistory } from '../../api';
+import type { SetAsideEntryProjection } from '../../types';
 
 import type { SetAsideCycleKind } from '../../types';
 import {
@@ -37,27 +39,41 @@ type ModalMode =
   | { kind: 'savings'; pos: PosItem }
   | { kind: 'incremental'; pos: PosItem }
   | { kind: 'batch'; pos: PosItem }
-  | { kind: 'single'; pos: PosItem };
+  | { kind: 'single'; pos: PosItem }
+  | { kind: 'edit'; pos: PosItem };
 
 interface YangDisisihkanSectionProps {
   posItems: PosItem[];
   accounts: Account[];
+  freeCash: number;
   filter: PosCategory | 'all';
   page: number;
   onFilterChange: (f: PosCategory | 'all') => void;
   onPageChange: (p: number) => void;
-  onTopUp: (id: string, amount: number) => void;
-  onWithdraw: (id: string, amount: number) => void;
+  onTopUp: (id: string, amount: number, sourceAccountId?: string) => Promise<boolean>;
+  onWithdraw: (id: string, amount: number) => Promise<boolean>;
+  /** sourceAccountId WAJIB — Sumber Dana tempat uang benar-benar keluar. */
   onUseIncremental: (
     id: string,
     amount: number,
-    note?: string,
-    freeCashAccountId?: string
-  ) => void;
-  onExecuteBatch: (id: string, actualCost: number, note?: string) => void;
-  onExecuteSingle: (id: string, actualCost: number, note?: string) => void;
-  onCreate: (input: CreatePosInput) => void;
-  onDelete: (id: string) => void;
+    sourceAccountId: string,
+    note?: string
+  ) => Promise<boolean>;
+  onExecuteBatch: (
+    id: string,
+    actualCost: number,
+    sourceAccountId: string,
+    note?: string
+  ) => Promise<boolean>;
+  onExecuteSingle: (
+    id: string,
+    actualCost: number,
+    sourceAccountId: string,
+    note?: string
+  ) => Promise<boolean>;
+  onCreate: (input: CreatePosInput) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onUpdate: (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
 }
 
 const FILTERS: Array<{ key: PosCategory | 'all'; label: string }> = [
@@ -68,9 +84,38 @@ const FILTERS: Array<{ key: PosCategory | 'all'; label: string }> = [
   { key: 'single_spend', label: 'Sekali Pakai' },
 ];
 
+/** Rekening non-arsip yang bisa dipakai sebagai sumber transaksi riil. */
+function sortedSourceAccounts(accounts: Account[]): Account[] {
+  return accounts
+    .filter((a) => !a.archived)
+    .sort((a, b) => b.availableBalance - a.availableBalance);
+}
+
+/**
+ * Pre-select hanya preferensi rekening yang tersimpan pada pos; tanpa preferensi
+ * pengguna harus memilih rekening sendiri.
+ */
+function resolveManualSourceAccountId(pos: PosItem, accounts: Account[]): string {
+  const active = accounts.filter((a) => !a.archived);
+  const hinted = pos.defaultSourceAccountId
+    ? active.find((a) => a.id === pos.defaultSourceAccountId)
+    : undefined;
+  if (hinted) return hinted.id;
+  return '';
+}
+
+/** Rekening untuk top-up hanya referensi: tanpa preferensi, jangan menebak akun. */
+function resolveReferenceAccountId(pos: PosItem, accounts: Account[]): string {
+  if (!pos.defaultSourceAccountId) return '';
+  return accounts.some((account) => !account.archived && account.id === pos.defaultSourceAccountId)
+    ? pos.defaultSourceAccountId
+    : '';
+}
+
 export default function YangDisisihkanSection({
   posItems,
   accounts,
+  freeCash,
   filter,
   page,
   onFilterChange,
@@ -82,18 +127,29 @@ export default function YangDisisihkanSection({
   onExecuteSingle,
   onCreate,
   onDelete,
+  onUpdate,
 }: YangDisisihkanSectionProps) {
   const [modal, setModal] = useState<ModalMode>(null);
   const [deleteTarget, setDeleteTarget] = useState<PosItem | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<PosItem | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const activeItems = useMemo(
     () => posItems.filter((p) => !p.archived),
     [posItems]
   );
+  const archivedItems = useMemo(() => posItems.filter((p) => p.archived), [posItems]);
+  const listedItems = showArchived ? archivedItems : activeItems;
 
   const filtered = useMemo(
-    () => (filter === 'all' ? activeItems : activeItems.filter((p) => p.category === filter)),
-    [activeItems, filter]
+    () => {
+        const items = filter === 'all' ? listedItems : listedItems.filter((p) => p.category === filter);
+      return [...items].sort((a, b) =>
+        Number(a.category === 'routine_batch' && a.cycleExecuted) -
+        Number(b.category === 'routine_batch' && b.cycleExecuted)
+      );
+    },
+    [listedItems, filter]
   );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / POS_PER_PAGE));
@@ -102,10 +158,10 @@ export default function YangDisisihkanSection({
   const pageItems = filtered.slice(startIndex, startIndex + POS_PER_PAGE);
 
   const filterCount = (key: PosCategory | 'all') =>
-    key === 'all' ? activeItems.length : activeItems.filter((p) => p.category === key).length;
+    key === 'all' ? listedItems.length : listedItems.filter((p) => p.category === key).length;
 
   return (
-    <div className={`${cardBase} p-6 h-full flex flex-col`}>
+    <div className={`${cardBase} p-4 sm:p-6 h-full flex flex-col`}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-4 border-b border-lo-border-hairline/60">
         <div className="min-w-0">
@@ -128,6 +184,15 @@ export default function YangDisisihkanSection({
         >
           <Icon name="add" className="text-base" />
           <span>Tambah Dana</span>
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 pt-4">
+        <button type="button" onClick={() => { setShowArchived(false); onPageChange(1); }} className={`px-4 py-2 rounded-full text-xs cursor-pointer ${!showArchived ? 'bg-lo-secondary text-white' : 'bg-lo-surface-recessed text-lo-text-subtle'}`}>
+          Aktif ({activeItems.length})
+        </button>
+        <button type="button" onClick={() => { setShowArchived(true); onPageChange(1); }} className={`px-4 py-2 rounded-full text-xs cursor-pointer ${showArchived ? 'bg-lo-secondary text-white' : 'bg-lo-surface-recessed text-lo-text-subtle'}`}>
+          Arsip ({archivedItems.length})
         </button>
       </div>
 
@@ -157,16 +222,24 @@ export default function YangDisisihkanSection({
         {pageItems.length === 0 ? (
           <EmptyState
             icon="savings"
-            title="Tidak ada pos pada filter ini"
-            hint="Buat pos baru atau pilih filter lain."
+            title={showArchived ? 'Belum ada pos di arsip' : 'Tidak ada pos pada filter ini'}
+            hint={showArchived ? 'Pos yang ditutup akan tersimpan dan dapat dilihat di sini.' : 'Buat pos baru atau pilih filter lain.'}
           />
         ) : (
-          pageItems.map((pos) => (
+          pageItems.map((pos) => showArchived ? (
+            <button key={pos.id} type="button" onClick={() => setHistoryTarget(pos)} className="w-full text-left rounded-2xl p-4 border border-lo-border-hairline bg-lo-surface-recessed/50 hover:bg-lo-surface-recessed cursor-pointer">
+              <span className="font-semibold text-lo-text-ink">{pos.name}</span>
+              <span className="block text-xs text-lo-text-subtle mt-1">Ditutup · {closeReasonLabel(pos.closeReason)} · saldo akhir {formatCurrencyRaw(pos.amount)}</span>
+              <span className="text-[11px] text-lo-secondary">Lihat detail dan riwayat →</span>
+            </button>
+          ) : (
             <PosCard
               key={pos.id}
               pos={pos}
               onOpen={() => openPosModal(pos, setModal)}
               onDelete={() => setDeleteTarget(pos)}
+              onEdit={() => setModal({ kind: 'edit', pos })}
+              onHistory={() => setHistoryTarget(pos)}
             />
           ))
         )}
@@ -185,14 +258,23 @@ export default function YangDisisihkanSection({
         }
       />
 
+      {historyTarget ? <PosHistoryModal pos={historyTarget} onClose={() => setHistoryTarget(null)} /> : null}
+      {modal?.kind === 'edit' ? <EditPosModal pos={modal.pos} onClose={() => setModal(null)} onSave={async (command) => {
+        const ok = await onUpdate(modal.pos.id, command);
+        if (ok) setModal(null);
+        return ok;
+      }} /> : null}
+
       {/* Create modal */}
       <CreatePosModal
         open={modal?.kind === 'create'}
         onClose={() => setModal(null)}
         accounts={accounts}
-        onCreate={(input) => {
-          onCreate(input);
-          setModal(null);
+        freeCash={freeCash}
+        onCreate={async (input) => {
+          const ok = await onCreate(input);
+          if (ok) setModal(null);
+          return ok;
         }}
       />
 
@@ -201,14 +283,17 @@ export default function YangDisisihkanSection({
         <SavingsModal
           pos={modal.pos}
           accounts={accounts}
+          freeCash={freeCash}
           onClose={() => setModal(null)}
-          onTopUp={(amt) => {
-            onTopUp(modal.pos.id, amt);
-            setModal(null);
+          onTopUp={async (amt, sourceAccountId) => {
+            const ok = await onTopUp(modal.pos.id, amt, sourceAccountId);
+            if (ok) setModal(null);
+            return ok;
           }}
-          onWithdraw={(amt) => {
-            onWithdraw(modal.pos.id, amt);
-            setModal(null);
+          onWithdraw={async (amt) => {
+            const ok = await onWithdraw(modal.pos.id, amt);
+            if (ok) setModal(null);
+            return ok;
           }}
           onDelete={() => {
             setDeleteTarget(modal.pos);
@@ -223,9 +308,10 @@ export default function YangDisisihkanSection({
           pos={modal.pos}
           accounts={accounts}
           onClose={() => setModal(null)}
-          onSubmit={(amt, note, freeCashAccountId) => {
-            onUseIncremental(modal.pos.id, amt, note, freeCashAccountId);
-            setModal(null);
+          onSubmit={async (amt, sourceAccountId, note) => {
+            const ok = await onUseIncremental(modal.pos.id, amt, sourceAccountId, note);
+            if (ok) setModal(null);
+            return ok;
           }}
         />
       ) : null}
@@ -234,10 +320,12 @@ export default function YangDisisihkanSection({
       {modal?.kind === 'batch' ? (
         <BatchModal
           pos={modal.pos}
+          accounts={accounts}
           onClose={() => setModal(null)}
-          onSubmit={(cost, note) => {
-            onExecuteBatch(modal.pos.id, cost, note);
-            setModal(null);
+          onSubmit={async (cost, sourceAccountId, note) => {
+            const ok = await onExecuteBatch(modal.pos.id, cost, sourceAccountId, note);
+            if (ok) setModal(null);
+            return ok;
           }}
         />
       ) : null}
@@ -246,10 +334,12 @@ export default function YangDisisihkanSection({
       {modal?.kind === 'single' ? (
         <SingleSpendModal
           pos={modal.pos}
+          accounts={accounts}
           onClose={() => setModal(null)}
-          onSubmit={(cost, note) => {
-            onExecuteSingle(modal.pos.id, cost, note);
-            setModal(null);
+          onSubmit={async (cost, sourceAccountId, note) => {
+            const ok = await onExecuteSingle(modal.pos.id, cost, sourceAccountId, note);
+            if (ok) setModal(null);
+            return ok;
           }}
         />
       ) : null}
@@ -258,13 +348,16 @@ export default function YangDisisihkanSection({
       <ConfirmDialog
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => {
-          if (deleteTarget) onDelete(deleteTarget.id);
+        onConfirm={async () => {
+          if (!deleteTarget) return false;
+          const ok = await onDelete(deleteTarget.id);
+          if (ok) setDeleteTarget(null);
+          return ok;
         }}
-        title={`Hapus Pos ${deleteTarget?.name ?? ''}?`}
-        description="Pos ini akan dihapus dari daftar aktif. Dana yang tersisa dikembalikan ke kas / Uang Bebas."
+        title={`Tutup pos ${deleteTarget?.name ?? ''}?`}
+        description="Pos akan dipindahkan ke arsip. Dana yang tersisa dilepas kembali ke Uang Bebas; riwayatnya tetap dapat dilihat."
         icon="delete"
-        actionLabel="Hapus Pos"
+        actionLabel="Tutup Pos"
         danger
       />
     </div>
@@ -278,14 +371,247 @@ function openPosModal(pos: PosItem, setModal: (m: ModalMode) => void) {
   else setModal({ kind: 'single', pos });
 }
 
+function useSubmitState() {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async (action: () => Promise<boolean>) => {
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (await action()) return true;
+      setError('Perubahan belum tersimpan. Periksa pesan kesalahan, lalu coba lagi. Isian tetap tersimpan di formulir ini.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+  return { saving, error, submit };
+}
+
+function SubmitError({ message }: { message: string }) {
+  return message ? <p role="alert" className="text-xs text-lo-error">{message}</p> : null;
+}
+
+function closeReasonLabel(reason?: string) {
+  if (reason === 'Spent') return 'Belanja selesai';
+  if (reason === 'Withdrawn') return 'Dana ditarik';
+  return 'Dibatalkan';
+}
+
+function ledgerTypeLabel(type: SetAsideEntryProjection['type']) {
+  switch (type) {
+    case 'Opened': return 'Dana dialokasikan';
+    case 'Added': return 'Alokasi ditambahkan';
+    case 'Withdrawn': return 'Alokasi ditarik';
+    case 'Spent': return 'Pengeluaran dari pos';
+    case 'CycleFunding': return 'Pendanaan siklus';
+    case 'Released': return 'Sisa alokasi dilepas';
+    case 'Closed': return 'Pos ditutup';
+  }
+}
+
+function transactionTypeLabel(type: NonNullable<SetAsideEntryProjection['transaction']>['type']) {
+  switch (type) {
+    case 'Income': return 'Pemasukan';
+    case 'Expense': return 'Pengeluaran';
+    case 'Transfer': return 'Transfer';
+    case 'Refund': return 'Pengembalian';
+    case 'Reversal': return 'Pembatalan transaksi';
+    case 'Adjustment': return 'Penyesuaian';
+  }
+}
+
+function ledgerNoteLabel(entry: SetAsideEntryProjection) {
+  const note = entry.note?.trim();
+  if (!note) return '';
+  if (note.startsWith('Reversal of allocation entry')) return 'Koreksi otomatis dari pembatalan transaksi';
+  if (note === 'Initial set-aside') return 'Saldo awal pos';
+  if (note === 'Unused cycle allocation returned to available money') return 'Sisa dana periode dikembalikan ke Uang Bebas';
+  if (note === 'Cycle funding from available money') return 'Diambil dari Uang Bebas untuk memenuhi target periode';
+  if (note === 'Cycle shortfall funded from new income') return 'Kekurangan periode dipenuhi dari pemasukan baru';
+  if (note === 'Single-spend set-aside completed') return 'Sisa alokasi dilepas setelah belanja';
+  if (note.startsWith('Closed: ')) return `Alasan: ${closeReasonLabel(note.slice('Closed: '.length))}`;
+  return note;
+}
+
+function PosHistoryModal({ pos, onClose }: { pos: PosItem; onClose: () => void }) {
+  const [entries, setEntries] = useState<SetAsideEntryProjection[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async (nextCursor?: string | null) => {
+    try {
+      const page = await getSetAsideHistory(pos.id, nextCursor);
+      setEntries((current) => nextCursor ? [...current, ...page.items] : page.items);
+      setCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Riwayat gagal dimuat.');
+    } finally {
+      setLoading(false);
+    }
+  }, [pos.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSetAsideHistory(pos.id).then((page) => {
+      if (cancelled) return;
+      setEntries(page.items);
+      setCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    }).catch((e: unknown) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : 'Riwayat gagal dimuat.');
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [pos.id]);
+  const reload = (nextCursor?: string | null) => {
+    setLoading(true);
+    setError('');
+    void load(nextCursor);
+  };
+  return (
+    <Modal open onClose={onClose} title={pos.name} subtitle="Detail pos dan riwayat perubahan alokasi" icon="history" maxWidth="max-w-2xl">
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 rounded-xl bg-lo-surface-recessed p-4 text-xs">
+          <div><span className="block text-lo-text-subtle">Status</span><strong>{pos.archived ? `Diarsipkan · ${closeReasonLabel(pos.closeReason)}` : 'Aktif'}</strong></div>
+          <div><span className="block text-lo-text-subtle">Saldo sekarang</span><strong>{formatCurrencyRaw(pos.amount)}</strong></div>
+          <div><span className="block text-lo-text-subtle">Target</span><strong>{pos.targetAmount ? formatCurrencyRaw(pos.targetAmount) : 'Tidak ditentukan'}</strong></div>
+          <div><span className="block text-lo-text-subtle">Siklus</span><strong>{pos.cycle ?? 'Tanpa siklus'}</strong></div>
+          <div className="col-span-2"><span className="block text-lo-text-subtle">Catatan</span><strong>{pos.description || '—'}</strong></div>
+        </div>
+        <div className="flex items-end justify-between gap-2">
+          <h4 className="text-sm font-semibold">Riwayat perubahan saldo</h4>
+          <span className="text-[11px] text-lo-text-subtle">Terbaru lebih dulu</span>
+        </div>
+        <div className="space-y-2">
+          {entries.map((entry) => {
+            const transaction = entry.transaction;
+            const note = ledgerNoteLabel(entry);
+            const title = transaction?.description || transaction?.categoryName || (transaction ? transactionTypeLabel(transaction.type) : '');
+            return (
+              <article key={entry.id} className="rounded-xl border border-lo-border-hairline bg-white/80 p-3 sm:p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <strong className="block text-xs sm:text-sm text-lo-text-ink">{ledgerTypeLabel(entry.type)}</strong>
+                    <time className="mt-0.5 block text-[11px] text-lo-text-subtle" dateTime={entry.createdAt}>
+                      {new Date(entry.createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' })}
+                    </time>
+                    {note ? <p className="mt-1 break-words text-xs text-lo-text-subtle">{note}</p> : null}
+                  </div>
+                  <div className="flex shrink-0 items-center justify-between gap-4 sm:flex-col sm:items-end sm:gap-1">
+                    <strong className={`text-sm tabular-nums ${entry.amount > 0 ? 'text-lo-secondary' : entry.amount < 0 ? 'text-lo-text-ink' : 'text-lo-text-subtle'}`}>
+                      {entry.amount > 0 ? '+' : entry.amount < 0 ? '−' : ''}{formatCurrencyRaw(Math.abs(entry.amount))}
+                    </strong>
+                    <span className="text-[10px] text-lo-text-subtle">Saldo setelah: {formatCurrencyRaw(entry.balanceAfter)}</span>
+                  </div>
+                </div>
+                {transaction ? (
+                  <details className="mt-3 border-t border-lo-border-hairline pt-2 text-xs">
+                    <summary className="cursor-pointer select-none font-medium text-lo-secondary">Transaksi terkait: {title}</summary>
+                    <div className="mt-2 rounded-lg bg-lo-surface-recessed p-2.5 text-lo-text-subtle">
+                      <div className="flex flex-wrap justify-between gap-2"><span>{transactionTypeLabel(transaction.type)}{transaction.categoryName ? ` · ${transaction.categoryName}` : ''}</span><strong className="text-lo-text-ink">{formatCurrencyRaw(transaction.amount)}</strong></div>
+                      <div className="mt-1">Tanggal transaksi: {transaction.occurredOn}</div>
+                      {transaction.relatedDescription ? <div className="mt-1">Transaksi asal: {transaction.relatedDescription}</div> : null}
+                    </div>
+                  </details>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+        {loading ? <p className="text-xs text-lo-text-subtle">Memuat riwayat…</p> : null}
+        {error ? <div role="alert" className="text-xs text-lo-error">{error} <button type="button" onClick={() => reload(cursor)} className="underline">Coba lagi</button></div> : null}
+        {!loading && entries.length === 0 && !error ? <p className="text-xs text-lo-text-subtle">Belum ada entry riwayat.</p> : null}
+        {hasMore ? <button type="button" disabled={loading} onClick={() => reload(cursor)} className={btnSecondary}>{loading ? 'Memuat…' : 'Muat riwayat berikutnya'}</button> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function EditPosModal({
+  pos,
+  onClose,
+  onSave,
+}: {
+  pos: PosItem;
+  onClose: () => void;
+  onSave: (command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
+}) {
+  const { saving, error, submit } = useSubmitState();
+  const [name, setName] = useState(pos.name);
+  const [note, setNote] = useState(pos.description);
+  const [target, setTarget] = useState(pos.targetAmount ? formatNumberString(String(pos.targetAmount)) : '');
+  const [cycleKind, setCycleKind] = useState<SetAsideCycleKind>(pos.cycleKind ?? 'None');
+  const nextTarget = parseFormattedNumber(target);
+  const hasCycle = pos.category === 'routine_incremental' || pos.category === 'routine_batch';
+  const requiresCycleTarget = hasCycle || pos.category === 'single_spend';
+  const targetLabel = pos.category === 'saving'
+    ? 'Target tabungan (opsional)'
+    : pos.category === 'routine_incremental'
+      ? 'Plafon per periode'
+      : pos.category === 'routine_batch'
+        ? 'Estimasi biaya per realisasi'
+        : 'Jumlah dana sekali pakai';
+  const targetHelp = pos.category === 'saving'
+    ? 'Target hanya membantu memantau progres, tidak mengubah saldo.'
+    : pos.category === 'routine_incremental'
+      ? 'Batas alokasi untuk setiap siklus. Perubahan tidak menambah/mengurangi saldo saat ini.'
+      : pos.category === 'routine_batch'
+        ? 'Estimasi dana untuk satu realisasi dalam setiap siklus.'
+        : 'Target pos belanja satu kali. Perubahan tidak mengubah saldo yang sudah dialokasikan.';
+  const canSave = name.trim().length > 0
+    && (!requiresCycleTarget || nextTarget > 0)
+    && (!hasCycle || cycleKind !== 'None');
+  const projectedShortfall = hasCycle ? Math.max(0, nextTarget - pos.amount) : 0;
+
+  return (
+    <Modal open onClose={onClose} title={`Edit ${pos.name}`} icon="edit" maxWidth="max-w-xl">
+      <div className="space-y-4">
+        <SubmitError message={error} />
+        <label className="block text-xs font-medium">Nama dana<input className={`${inputBase} mt-1`} value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label className="block text-xs font-medium">Catatan<textarea className={`${inputBase} mt-1`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <label className="block text-xs font-medium">{targetLabel} (Rp)
+          <input className={`${inputBase} mt-1`} inputMode="numeric" value={target} onChange={(e) => setTarget(formatNumberString(e.target.value))} placeholder={pos.category === 'saving' ? 'Opsional' : 'Masukkan nominal'} />
+          <span className="mt-1 block text-[11px] font-normal text-lo-text-subtle">{targetHelp}</span>
+        </label>
+        {hasCycle ? (
+          <label className="block text-xs font-medium">Siklus
+            <select className={`${selectBase} mt-1`} value={cycleKind} onChange={(e) => setCycleKind(e.target.value as SetAsideCycleKind)}>
+              <option value="Weekly">Mingguan</option><option value="Monthly">Bulanan</option><option value="Quarterly">Triwulanan</option><option value="SemiAnnual">Semesteran</option><option value="Annual">Tahunan</option>
+            </select>
+          </label>
+        ) : null}
+        <div className="rounded-xl bg-lo-accent-wash/60 p-3 text-xs text-lo-text-subtle">
+          {hasCycle ? 'Sebelum siklus/target baru berlaku, siklus lama dinormalisasi. Perubahan metadata tidak mengubah saldo secara langsung.' : 'Perubahan nama, catatan, dan target tidak memindahkan atau mengubah saldo pos.'}
+          <div className="mt-1 font-medium text-lo-text-ink">Saldo saat ini: {formatCurrencyRaw(pos.amount)} · {targetLabel.toLowerCase()}: {nextTarget > 0 ? formatCurrencyRaw(nextTarget) : 'tidak ditentukan'}</div>
+          {projectedShortfall > 0 ? <div className="mt-1">Perkiraan kekurangan menuju target: {formatCurrencyRaw(projectedShortfall)}. Ini informasi, bukan saldo yang sudah tersedia.</div> : null}
+        </div>
+        <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-lo-border-hairline bg-lo-surface-cream p-4 sm:static sm:mx-0 sm:mb-0 sm:flex-row sm:justify-end sm:border-0 sm:bg-transparent sm:p-0">
+          <button type="button" onClick={onClose} className={`${btnSecondary} justify-center`}>Batal</button>
+          <button type="button" disabled={!canSave || saving} onClick={() => void submit(() => onSave({ name: name.trim(), note, targetAmount: nextTarget || undefined, removeTarget: !requiresCycleTarget && nextTarget <= 0, cycleKind: hasCycle ? cycleKind : 'None' }))} className={`${btnPrimary} justify-center`}>{saving ? 'Menyimpan…' : 'Simpan perubahan'}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function PosCard({
   pos,
   onOpen,
   onDelete,
+  onEdit,
+  onHistory,
 }: {
   pos: PosItem;
   onOpen: () => void;
   onDelete: () => void;
+  onEdit: () => void;
+  onHistory: () => void;
 }) {
   const categoryLabel = posCategoryLabel(pos.category);
   const hasTarget = typeof pos.targetAmount === 'number' && pos.targetAmount > 0;
@@ -307,7 +633,7 @@ function PosCard({
     pos.category === 'routine_incremental'
       ? 'Catat Pakai'
       : pos.category === 'routine_batch'
-        ? 'Eksekusi Servis'
+        ? pos.cycleExecuted ? 'Periode Selesai' : 'Eksekusi Servis'
         : pos.category === 'single_spend'
           ? 'Realisasikan Belanja'
           : hasTarget
@@ -318,7 +644,7 @@ function PosCard({
     pos.category === 'routine_incremental'
       ? `Total Pengeluaran ${formatCurrencyRaw(pos.usedAmount || 0)}`
       : pos.category === 'routine_batch'
-        ? ''
+        ? pos.cycleExecuted ? 'Sudah dieksekusi periode ini' : ''
         : pos.category === 'single_spend'
           ? 'Dana terkumpul penuh'
           : pos.status || (hasTarget ? `${targetPct}% tercapai` : 'Fleksibel');
@@ -327,14 +653,18 @@ function PosCard({
   const overPlafon = pos.category === 'routine_incremental' && overage > 0;
 
   return (
-    <div className="group bg-lo-surface-cream/70 hover:bg-lo-surface-recessed/50 transition-all duration-200 rounded-2xl p-5 border border-lo-border-hairline/60 hover:border-lo-secondary/30">
+    <div className={`group transition-all duration-200 rounded-2xl p-4 sm:p-5 border ${pos.category === 'routine_batch' && pos.cycleExecuted
+      ? 'bg-lo-surface-recessed/40 border-lo-border-hairline/40'
+      : 'bg-lo-surface-cream/70 hover:bg-lo-surface-recessed/50 border-lo-border-hairline/60 hover:border-lo-secondary/30'}`}>
       <div className="flex items-start justify-between gap-4">
         <button
           type="button"
           onClick={onOpen}
           className="flex items-start gap-4 min-w-0 text-left flex-1 cursor-pointer"
         >
-          <div className="w-11 h-11 rounded-xl bg-lo-accent-wash flex items-center justify-center text-lo-secondary shrink-0 border border-lo-secondary/15">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${pos.category === 'routine_batch' && pos.cycleExecuted
+            ? 'bg-lo-container-low text-lo-text-subtle border-lo-border-hairline/40'
+            : 'bg-lo-accent-wash text-lo-secondary border-lo-secondary/15'}`}>
             <Icon name={pos.icon} className="text-2xl" />
           </div>
           <div className="min-w-0">
@@ -342,7 +672,9 @@ function PosCard({
               <h3 className="font-headline-sm text-base font-semibold text-lo-text-ink truncate">
                 {pos.name}
               </h3>
-              <span className="inline-flex items-center gap-1 text-[11px] bg-lo-accent-wash text-lo-secondary px-2.5 py-0.5 rounded-full font-medium">
+              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full font-medium ${pos.category === 'routine_batch' && pos.cycleExecuted
+                ? 'bg-lo-container-low text-lo-text-subtle'
+                : 'bg-lo-accent-wash text-lo-secondary'}`}>
                 {categoryLabel}
               </span>
             </div>
@@ -390,7 +722,7 @@ function PosCard({
                 </span>
                 <span>
                   <span className="font-semibold">{formatCurrencyRaw(overage)}</span>
-                  {' '}diambil dari uang yang bisa dipakai.</span>
+                  {' '}ditanggung uang yang belum dialokasikan.</span>
               </span>
             </div>
           ) : null}
@@ -404,24 +736,25 @@ function PosCard({
 
       {/* Bottom action row */}
       <div
-        className="mt-3 pt-3 border-t border-lo-border-hairline/50 flex items-center justify-between gap-2"
+        className="mt-3 pt-3 border-t border-lo-border-hairline/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={onOpen}
-          className={
-            pos.category === 'routine_batch' || pos.category === 'single_spend'
-              ? `${btnPrimary} px-3.5 py-1.5 text-xs`
-              : `${btnSecondary} px-3.5 py-1.5 text-xs`
-          }
+          disabled={pos.category === 'routine_batch' && pos.cycleExecuted}
+          className={`w-full sm:w-auto justify-center ${pos.category === 'routine_batch' && pos.cycleExecuted
+            ? 'inline-flex items-center gap-1.5 rounded-full bg-lo-container-low text-lo-text-subtle px-3.5 py-1.5 text-xs font-medium cursor-not-allowed'
+            : pos.category === 'routine_batch' || pos.category === 'single_spend'
+            ? `${btnPrimary} px-3.5 py-1.5 text-xs`
+            : `${btnSecondary} px-3.5 py-1.5 text-xs`} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           <Icon
             name={
               pos.category === 'routine_incremental'
                 ? 'edit_note'
                 : pos.category === 'routine_batch'
-                  ? 'build'
+                  ? pos.cycleExecuted ? 'check_circle' : 'build'
                   : pos.category === 'single_spend'
                     ? 'shopping_cart_checkout'
                     : 'savings'
@@ -430,19 +763,25 @@ function PosCard({
           />
           <span>{actionLabel}</span>
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full sm:w-auto items-center justify-between sm:justify-end gap-1.5">
           <span
-            className={`text-[11px] ${
+            className={`min-w-0 flex-1 sm:flex-none truncate text-[10px] sm:text-[11px] ${
               overPlafon ? 'font-semibold text-lo-error' : 'text-lo-text-subtle'
             }`}
           >
             {rightStatus}
           </span>
+          <button type="button" onClick={onEdit} title="Edit detail pos" aria-label={`Edit ${pos.name}`} className="w-8 h-8 rounded-lg flex items-center justify-center text-lo-text-subtle hover:text-lo-secondary hover:bg-lo-accent-wash transition-all cursor-pointer">
+            <Icon name="edit" className="text-[16px]" />
+          </button>
+          <button type="button" onClick={onHistory} title="Lihat detail dan riwayat" aria-label={`Riwayat ${pos.name}`} className="w-8 h-8 rounded-lg flex items-center justify-center text-lo-text-subtle hover:text-lo-secondary hover:bg-lo-accent-wash transition-all cursor-pointer">
+            <Icon name="history" className="text-[16px]" />
+          </button>
           <button
             type="button"
             onClick={onDelete}
-            title="Hapus pos"
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-lo-text-subtle hover:text-lo-error hover:bg-red-50 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+            title="Tutup pos"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center text-lo-text-subtle hover:text-lo-error hover:bg-red-50 transition-all cursor-pointer ${pos.category === 'routine_batch' && pos.cycleExecuted ? 'opacity-60 hover:opacity-100' : ''}`}
           >
             <Icon name="delete" className="text-[16px]" />
           </button>
@@ -452,19 +791,24 @@ function PosCard({
   );
 }
 
-/* ── Create pos modal ── */
+/* ── Create pos modal ──
+ * Rekening referensi bersifat OPSIONAL — tidak membatasi atau memindahkan dana.
+ * Pos tidak pernah terikat ke rekening. */
 
 function CreatePosModal({
   open,
   onClose,
   accounts,
+  freeCash,
   onCreate,
 }: {
   open: boolean;
   onClose: () => void;
   accounts: Account[];
-  onCreate: (input: CreatePosInput) => void;
+  freeCash: number;
+  onCreate: (input: CreatePosInput) => Promise<boolean>;
 }) {
+  const { saving, error, submit } = useSubmitState();
   const [name, setName] = useState('');
   const [category, setCategory] = useState<PosCategory>('saving');
   const [accountLabel, setAccountLabel] = useState('');
@@ -474,15 +818,9 @@ function CreatePosModal({
   const [cycleKind, setCycleKind] = useState<SetAsideCycleKind>('Monthly');
   const [description, setDescription] = useState('');
 
-  // Only real, non-archived accounts may be picked as the source of funds.
-  // Non-tabungan: tampilkan available balance; Rp0 tidak dapat dipilih.
-  const isFundingNonSaving = category !== 'saving';
+  // Rekening non-arsip untuk dipilih sebagai referensi (opsional).
   const baseAccounts = accounts.filter((a) => !a.archived);
-  const selectableAccounts = isFundingNonSaving
-    ? baseAccounts.filter((a) => a.availableBalance > 0)
-    : baseAccounts;
-  const selectedAccount =
-    selectableAccounts.find((a) => a.name === accountLabel) ?? selectableAccounts[0];
+  const selectedAccount = baseAccounts.find((a) => a.name === accountLabel);
 
   // Dana yang disiapkan = Plafon Siklus / Estimasi Biaya / Target Anggaran
   // (bukan input user). Rutinitas Berkala: dana langsung disisihkan saat create.
@@ -491,16 +829,10 @@ function CreatePosModal({
     category === 'routine_batch' ||
     category === 'single_spend';
   const prepareAmount = preparesInitialFunds ? parseFormattedNumber(plafon) : 0;
-  const availableBalance = selectedAccount?.availableBalance ?? 0;
-  const exceedsAvailable = prepareAmount > 0 && prepareAmount > availableBalance;
+  const exceedsAvailable = prepareAmount > 0 && prepareAmount > freeCash;
   const missingNominal = preparesInitialFunds && prepareAmount <= 0;
 
-  const canSubmit =
-    name.trim().length >= 2 &&
-    !!selectedAccount &&
-    (!isFundingNonSaving || selectedAccount.availableBalance > 0) &&
-    !missingNominal &&
-    !exceedsAvailable;
+  const canSubmit = name.trim().length >= 2 && !missingNominal && !exceedsAvailable;
 
   const reset = () => {
     setName('');
@@ -537,13 +869,12 @@ function CreatePosModal({
           </button>
           <button
             type="button"
-            disabled={!canSubmit}
-            onClick={() => {
-              onCreate({
+            disabled={!canSubmit || saving}
+            onClick={() => void submit(() => onCreate({
                 name: name.trim(),
                 description: description.trim(),
                 category,
-                accountLabel: selectedAccount?.name ?? '',
+                sourceAccountLabel: selectedAccount?.name,
                 targetAmount:
                   category === 'saving' && target ? parseFormattedNumber(target) : undefined,
                 plafon:
@@ -554,18 +885,17 @@ function CreatePosModal({
                     : undefined,
                 cycle: category === 'routine_batch' ? cycle : undefined,
                 cycleKind: category === 'routine_incremental' ? cycleKind : undefined,
-              });
-              reset();
-            }}
+              }))}
             className={`${btnPrimary} disabled:opacity-40 disabled:hover:bg-lo-primary`}
           >
             <Icon name="check" className="text-base" />
-            <span>Simpan Pos Baru</span>
+            <span>{saving ? 'Menyimpan…' : 'Simpan Pos Baru'}</span>
           </button>
         </>
       }
     >
       <div className="flex flex-col gap-5">
+        <SubmitError message={error} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-type">
@@ -585,35 +915,24 @@ function CreatePosModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-account">
-              Sumber Dana <span className="text-lo-secondary">*</span>
+              Rekening Referensi
             </label>
             <select
               id="new-pos-account"
               className={selectBase}
-              value={selectedAccount?.name ?? ''}
+              value={accountLabel}
               onChange={(e) => setAccountLabel(e.target.value)}
             >
-              {selectableAccounts.length === 0 && (
-                <option value="" disabled>
-                  {isFundingNonSaving
-                    ? 'Tidak ada sumber dana dengan saldo tersedia'
-                    : 'Belum ada sumber dana aktif'}
-                </option>
-              )}
-              {selectableAccounts.map((a) => (
+              <option value="">Tanpa rekening referensi</option>
+              {baseAccounts.map((a) => (
                 <option key={a.id} value={a.name}>
-                  {isFundingNonSaving
-                    ? `${a.name} — ${formatCurrencyRaw(a.availableBalance)} tersedia`
-                    : a.name}
+                  {a.name}
                 </option>
               ))}
             </select>
-            {isFundingNonSaving && selectedAccount ? (
-              <span className="text-[11px] text-lo-text-subtle">
-                Tersedia {formatCurrencyRaw(selectedAccount.availableBalance)} di{' '}
-                {selectedAccount.name}.
-              </span>
-            ) : null}
+            <span className="text-[11px] text-lo-text-subtle">
+              Penanda rekening yang biasanya digunakan. Top-up memakai Uang Bebas dan tidak memindahkan saldo rekening.
+            </span>
           </div>
         </div>
 
@@ -639,6 +958,7 @@ function CreatePosModal({
             <input
               id="new-pos-target"
               type="text"
+              inputMode="numeric"
               className={inputBase}
               value={target}
               onChange={(e) => setTarget(formatNumberString(e.target.value))}
@@ -678,6 +998,7 @@ function CreatePosModal({
             <input
               id="new-pos-plafon"
               type="text"
+              inputMode="numeric"
               className={inputBase}
               value={plafon}
               onChange={(e) => setPlafon(formatNumberString(e.target.value))}
@@ -685,13 +1006,12 @@ function CreatePosModal({
             />
             {exceedsAvailable ? (
               <p className="text-[11px] text-lo-error">
-                Batas pengeluaran {formatCurrencyRaw(prepareAmount)} melebihi saldo tersedia{' '}
-                {formatCurrencyRaw(availableBalance)} di{' '}
-                {selectedAccount?.name ?? 'sumber dana'}. Kurangi batas pengeluaran atau pilih sumber dana lain.
+                Uang Bebas tidak cukup untuk alokasi awal {formatCurrencyRaw(prepareAmount)}.
+                Tersedia {formatCurrencyRaw(freeCash)}.
               </p>
             ) : (
               <span className="text-[11px] text-lo-text-subtle">
-                Setiap periode, dana akan disiapkan hingga mencapai batas pengeluaran ini.
+                Setiap periode, alokasi akan disiapkan hingga mencapai batas pengeluaran ini.
               </span>
             )}
           </div>
@@ -722,6 +1042,7 @@ function CreatePosModal({
               <input
                 id="new-pos-batch-cost"
                 type="text"
+                inputMode="numeric"
                 className={inputBase}
                 value={plafon}
                 onChange={(e) => setPlafon(formatNumberString(e.target.value))}
@@ -731,14 +1052,13 @@ function CreatePosModal({
             <div className="sm:col-span-2">
               {exceedsAvailable ? (
                 <p className="text-[11px] text-lo-error">
-                  Estimasi biaya {formatCurrencyRaw(prepareAmount)} melebihi saldo tersedia{' '}
-                  {formatCurrencyRaw(availableBalance)} di{' '}
-                  {selectedAccount?.name ?? 'sumber dana'}. Kurangi nominal atau pilih sumber dana lain.
+                  Uang Bebas tidak cukup untuk alokasi awal {formatCurrencyRaw(prepareAmount)}.
+                  Tersedia {formatCurrencyRaw(freeCash)}.
                 </p>
               ) : (
                 <span className="text-[11px] text-lo-text-subtle">
-                  Dana langsung disisihkan dari Uang Bebas saat pos dibuat. Digunakan saat
-                  kebutuhan terjadi.
+                  Dana langsung disisihkan dari uang yang belum dialokasikan saat pos dibuat.
+                  Digunakan saat kebutuhan terjadi.
                 </span>
               )}
             </div>
@@ -753,6 +1073,7 @@ function CreatePosModal({
             <input
               id="new-pos-single-budget"
               type="text"
+              inputMode="numeric"
               className={inputBase}
               value={plafon}
               onChange={(e) => setPlafon(formatNumberString(e.target.value))}
@@ -760,13 +1081,12 @@ function CreatePosModal({
             />
             {exceedsAvailable ? (
               <p className="text-[11px] text-lo-error">
-                Batas Pengeluaran {formatCurrencyRaw(prepareAmount)} melebihi saldo tersedia{' '}
-                {formatCurrencyRaw(availableBalance)} di{' '}
-                {selectedAccount?.name ?? 'sumber dana'}. Kurangi batas pengeluaran atau pilih sumber dana lain.
+                Uang Bebas tidak cukup untuk alokasi awal {formatCurrencyRaw(prepareAmount)}.
+                Tersedia {formatCurrencyRaw(freeCash)}.
               </p>
             ) : (
               <span className="text-[11px] text-lo-text-subtle">
-                Dana akan disisihkan sesuai jumlah yang ditentukan dan digunakan saat kebutuhan terjadi.
+                Alokasi disiapkan sesuai jumlah ini dan digunakan saat kebutuhan terjadi.
               </span>
             )}
           </div>
@@ -789,12 +1109,10 @@ function CreatePosModal({
         {!canSubmit ? (
           <p className="text-[11px] text-lo-text-subtle">
             {exceedsAvailable
-              ? 'Dana yang disiapkan melebihi saldo tersedia sumber dana sumber. Kurangi nominal atau pilih sumber dana lain.'
+              ? 'Uang Bebas tidak cukup untuk alokasi awal. Kurangi nominal atau catat pemasukan terlebih dahulu.'
               : missingNominal
                 ? 'Isi plafon siklus / estimasi biaya / target anggaran untuk melanjutkan.'
-                : isFundingNonSaving && baseAccounts.length > 0 && selectableAccounts.length === 0
-                  ? 'Semua sumber dana memiliki saldo tersedia Rp 0. Tambah dana atau pilih tipe pos lain.'
-                  : 'Isi nama pos untuk melanjutkan.'}
+                : 'Isi nama pos untuk melanjutkan.'}
           </p>
         ) : null}
       </div>
@@ -802,11 +1120,12 @@ function CreatePosModal({
   );
 }
 
-/* ── Savings modal ── */
+/* ── Savings modal (Top-Up / Tarik) ── */
 
 function SavingsModal({
   pos,
   accounts,
+  freeCash,
   onClose,
   onTopUp,
   onWithdraw,
@@ -814,24 +1133,28 @@ function SavingsModal({
 }: {
   pos: PosItem;
   accounts: Account[];
+  freeCash: number;
   onClose: () => void;
-  onTopUp: (amount: number) => void;
-  onWithdraw: (amount: number) => void;
+  onTopUp: (amount: number, sourceAccountId?: string) => Promise<boolean>;
+  onWithdraw: (amount: number) => Promise<boolean>;
   onDelete: () => void;
 }) {
+  const { saving, error, submit } = useSubmitState();
   const [mode, setMode] = useState<'topup' | 'withdraw'>('topup');
   const [amountStr, setAmountStr] = useState('');
+  // Hanya pre-select referensi tersimpan; jangan menebak rekening untuk top-up.
+  const [sourceAccountId, setSourceAccountId] = useState<string>(() =>
+    resolveReferenceAccountId(pos, accounts)
+  );
   const amount = parseFormattedNumber(amountStr);
 
-  // Available balance aktual dari Finance state — bukan hardcode.
-  const sourceAccount = accounts.find((a) => a.name === pos.accountLabel);
-  const availableBalance = sourceAccount?.availableBalance ?? 0;
-
-  const exceedsAvailable = mode === 'topup' && amount > availableBalance;
+  const sourceAccounts = sortedSourceAccounts(accounts);
+  const selectedSource = sourceAccounts.find((a) => a.id === sourceAccountId);
+  const exceedsFreeCash = mode === 'topup' && amount > freeCash;
   const canSubmit =
     amount > 0 &&
     (mode === 'topup'
-      ? !exceedsAvailable && amount <= availableBalance
+      ? !exceedsFreeCash
       : amount <= pos.amount);
 
   const setQuick = (v: number) => {
@@ -858,7 +1181,7 @@ function SavingsModal({
             className="text-xs text-lo-warning hover:underline inline-flex items-center gap-1 cursor-pointer mr-auto"
           >
             <Icon name="delete" className="text-base" />
-            Hapus Pos
+            Tutup Pos
           </button>
           <button
             type="button"
@@ -869,19 +1192,19 @@ function SavingsModal({
           </button>
           <button
             type="button"
-            disabled={!canSubmit}
-            onClick={() => {
-              if (mode === 'topup') onTopUp(amount);
-              else onWithdraw(amount);
-            }}
+            disabled={!canSubmit || saving}
+            onClick={() => void submit(() => mode === 'topup'
+              ? onTopUp(amount, selectedSource?.id)
+              : onWithdraw(amount))}
             className={`${btnPrimary} disabled:opacity-40`}
           >
-            {mode === 'topup' ? 'Konfirmasi Tambah Simpanan' : 'Konfirmasi Tarik Simpanan'}
+            {saving ? 'Menyimpan…' : mode === 'topup' ? 'Konfirmasi Tambah Simpanan' : 'Konfirmasi Tarik Simpanan'}
           </button>
         </>
       }
     >
       <div className="space-y-4">
+        <SubmitError message={error} />
         <p className="text-xs text-lo-text-subtle">{pos.description}</p>
         <div className="bg-lo-surface-recessed p-4 rounded-xl flex items-center justify-between">
           <div>
@@ -890,9 +1213,6 @@ function SavingsModal({
             </span>
             <span className="text-2xl font-semibold tabular-nums text-lo-text-ink">
               {formatCurrencyRaw(pos.amount)}
-            </span>
-            <span className="text-[12px] text-lo-text-subtle block mt-0.5">
-              {pos.accountLabel} · Terisolasi Aman
             </span>
           </div>
           <div className="text-right">
@@ -934,9 +1254,34 @@ function SavingsModal({
           </div>
           <p className="text-[12px] text-lo-text-subtle mb-3">
             {mode === 'topup'
-              ? 'Setor dana dari Uang Bebas untuk menambah akumulasi tabungan ini.'
-              : 'Tarik sebagian simpanan. Dana yang ditarik akan langsung dikembalikan ke Kas / Uang Bebas Anda.'}
+              ? 'Tambah alokasi tabungan dari Uang Bebas. Saldo rekening tidak berubah; rekening referensi hanya penanda.'
+              : 'Tarik sebagian simpanan. Alokasi yang ditarik dikembalikan ke uang yang belum dialokasikan — saldo rekening tidak berubah.'}
           </p>
+
+          {mode === 'topup' ? (
+            <div className="flex flex-col gap-1.5 mb-3">
+              <label className="text-xs font-medium text-lo-text-ink" htmlFor="pos-topup-source">
+                Rekening Referensi (opsional)
+              </label>
+              <select
+                id="pos-topup-source"
+                className={selectBase}
+                value={sourceAccountId}
+                onChange={(e) => setSourceAccountId(e.target.value)}
+              >
+                <option value="">Tanpa rekening referensi</option>
+                {sourceAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                    {a.name}
+                </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-lo-text-subtle">
+                Penanda rekening yang biasanya digunakan; tidak didebit dan tidak membatasi top-up.
+              </span>
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-4 gap-2 mb-3">
             {QUICK_AMOUNTS.map((v) => (
               <button
@@ -953,26 +1298,76 @@ function SavingsModal({
             <span className="absolute left-3.5 top-2.5 text-[11px] text-lo-text-subtle">Rp</span>
             <input
               type="text"
+              inputMode="numeric"
               className={`${inputBase} pl-9 font-semibold tabular-nums`}
               value={amountStr}
               onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
               placeholder="Ketik nominal transfer..."
             />
           </div>
-          {mode === 'topup' && exceedsAvailable ? (
+          {mode === 'topup' && exceedsFreeCash ? (
             <p className="mt-2 text-[12px] text-lo-error">
-              Melebihi saldo tersedia {formatCurrencyRaw(availableBalance)} di{' '}
-              {pos.accountLabel}. Maksimal top-up {formatCurrencyRaw(availableBalance)}.
+              Uang Bebas tidak cukup. Tersedia {formatCurrencyRaw(freeCash)}; kurangi nominal atau catat pemasukan terlebih dahulu.
             </p>
           ) : null}
           <div className="mt-3 p-3 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline text-[12px] text-lo-text-subtle">
             {mode === 'topup'
-              ? `Maksimal top-up: ${formatCurrencyRaw(availableBalance)} (saldo tersedia ${pos.accountLabel}).`
+              ? `Maksimal top-up dari Uang Bebas: ${formatCurrencyRaw(freeCash)}.`
               : `Maksimal tarik: ${formatCurrencyRaw(pos.amount)}.`}
           </div>
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* ── Shared source-account picker untuk modal pakai/eksekusi pos ── */
+
+function SourceAccountPicker({
+  accounts,
+  sourceAccountId,
+  onChange,
+  id,
+  autoSelected = false,
+}: {
+  accounts: Account[];
+  sourceAccountId: string;
+  onChange: (id: string) => void;
+  id: string;
+  autoSelected?: boolean;
+}) {
+  const sourceAccounts = sortedSourceAccounts(accounts);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-lo-text-ink" htmlFor={id}>
+        Sumber Dana <span className="text-lo-secondary">*</span>
+      </label>
+      <span className="text-[11px] text-lo-text-subtle">
+        Uang keluar dari rekening ini.
+      </span>
+      {autoSelected ? (
+        <span className="text-[11px] font-medium text-lo-secondary">
+          Otomatis dipilih dari preferensi pos — periksa sebelum menyimpan.
+        </span>
+      ) : null}
+      <select
+        id={id}
+        className={selectBase}
+        value={sourceAccountId}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="" disabled>
+          {sourceAccounts.length === 0
+            ? 'Tidak ada sumber dana aktif'
+            : 'Pilih Sumber Dana…'}
+        </option>
+        {sourceAccounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name} — {formatCurrencyRaw(a.availableBalance)} tersedia
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -987,26 +1382,28 @@ function IncrementalModal({
   pos: PosItem;
   accounts: Account[];
   onClose: () => void;
-  onSubmit: (amount: number, note?: string, freeCashAccountId?: string) => void;
+  onSubmit: (amount: number, sourceAccountId: string, note?: string) => Promise<boolean>;
 }) {
+  const { saving, error, submit } = useSubmitState();
   const [amountStr, setAmountStr] = useState('');
   const [note, setNote] = useState('');
-  const [freeCashLabel, setFreeCashLabel] = useState('');
+  const [sourceAccountId, setSourceAccountId] = useState(() =>
+    resolveManualSourceAccountId(pos, accounts)
+  );
   const amount = parseFormattedNumber(amountStr);
 
   // Plafon = batas aman, bukan hard limit. Pemakaian boleh melebihi saldo pos;
-  // kekurangannya diambil dari Uang Bebas (sumber dana terpilih).
+  // kelebihannya ditanggung uang yang belum dialokasikan (dicek backend).
   const fromPos = Math.min(amount, pos.amount);
   const shortfall = Math.max(0, amount - pos.amount);
 
-  const freeCashAccounts = accounts.filter((a) => !a.archived && a.availableBalance > 0);
-  const selectedFreeCash =
-    freeCashAccounts.find((a) => a.name === freeCashLabel) ?? freeCashAccounts[0];
-  const freeCashAvailable = selectedFreeCash?.availableBalance ?? 0;
-  const exceedsFreeCash = shortfall > 0 && shortfall > freeCashAvailable;
+  const sourceAccounts = sortedSourceAccounts(accounts);
+  const selectedSource = sourceAccounts.find((a) => a.id === sourceAccountId);
+  const sourceBalance = selectedSource?.availableBalance ?? 0;
+  // Seluruh nominal keluar dari Sumber Dana — validasi terhadap saldo rekening.
+  const exceedsSource = amount > 0 && !!selectedSource && amount > sourceBalance;
 
-  const canSubmit =
-    amount > 0 && (shortfall === 0 || (!!selectedFreeCash && !exceedsFreeCash));
+  const canSubmit = amount > 0 && !!selectedSource && !exceedsSource;
 
   return (
     <Modal
@@ -1025,23 +1422,18 @@ function IncrementalModal({
           </button>
           <button
             type="button"
-            disabled={!canSubmit}
-            onClick={() =>
-              onSubmit(
-                amount,
-                note || undefined,
-                shortfall > 0 ? selectedFreeCash?.id : undefined
-              )
-            }
+            disabled={!canSubmit || saving}
+            onClick={() => void submit(() => onSubmit(amount, sourceAccountId, note || undefined))}
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-base" />
-            <span>Simpan Pemakaian</span>
+            <span>{saving ? 'Menyimpan…' : 'Simpan Pemakaian'}</span>
           </button>
         </>
       }
     >
       <div className="space-y-4">
+        <SubmitError message={error} />
         <div className="bg-lo-surface-recessed p-4 rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[11px] text-lo-text-subtle block uppercase tracking-wide">
@@ -1049,7 +1441,7 @@ function IncrementalModal({
             </span>
             <span className="text-base font-semibold text-lo-text-ink">{pos.name}</span>
             <span className="text-[12px] text-lo-text-subtle block mt-0.5">
-              {pos.accountLabel} · Plafon{' '}
+              Plafon{' '}
               {formatCurrencyRaw(pos.plafon ?? pos.targetAmount ?? 0)} (batas aman)
             </span>
           </div>
@@ -1088,6 +1480,7 @@ function IncrementalModal({
             <input
               id="inc-amount"
               type="text"
+              inputMode="numeric"
               className={`${inputBase} pl-11 font-semibold tabular-nums text-base`}
               value={amountStr}
               onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
@@ -1096,40 +1489,19 @@ function IncrementalModal({
           </div>
         </div>
 
-        {shortfall > 0 ? (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-lo-text-ink" htmlFor="inc-free-cash">
-              Sumber Dana Uang Bebas <span className="text-lo-secondary">*</span>
-            </label>
-            <select
-              id="inc-free-cash"
-              className={selectBase}
-              value={selectedFreeCash?.name ?? ''}
-              onChange={(e) => setFreeCashLabel(e.target.value)}
-            >
-              {freeCashAccounts.length === 0 && (
-                <option value="" disabled>
-                  Tidak ada sumber dana dengan saldo tersedia
-                </option>
-              )}
-              {freeCashAccounts.map((a) => (
-                <option key={a.id} value={a.name}>
-                  {a.name} — {formatCurrencyRaw(a.availableBalance)} tersedia
-                </option>
-              ))}
-            </select>
-            {exceedsFreeCash ? (
-              <p className="text-[11px] text-lo-error">
-                Kekurangan {formatCurrencyRaw(shortfall)} melebihi saldo tersedia{' '}
-                {formatCurrencyRaw(freeCashAvailable)} di{' '}
-                {selectedFreeCash?.name ?? 'sumber dana'}. Pilih sumber dana lain atau kurangi nominal.
-              </p>
-            ) : (
-              <span className="text-[11px] text-lo-text-subtle">
-                Dipakai untuk menutup kekurangan di atas saldo pos.
-              </span>
-            )}
-          </div>
+        <SourceAccountPicker
+          accounts={accounts}
+          sourceAccountId={sourceAccountId}
+          onChange={setSourceAccountId}
+          id="inc-source-account"
+          autoSelected={!!pos.defaultSourceAccountId && sourceAccountId === pos.defaultSourceAccountId}
+        />
+        {exceedsSource ? (
+          <p className="text-[11px] text-lo-error -mt-2">
+            Nominal {formatCurrencyRaw(amount)} melebihi saldo{' '}
+            {formatCurrencyRaw(sourceBalance)} di {selectedSource?.name ?? 'sumber dana'}.
+            Pilih sumber dana lain atau kurangi nominal.
+          </p>
         ) : null}
 
         <div className="flex flex-col gap-1.5">
@@ -1160,11 +1532,12 @@ function IncrementalModal({
               </span>
               {shortfall > 0 ? (
                 <>
-                  {' · '}Dari Uang Bebas:{' '}
+                  {' · '}Sisa{' '}
                   <span className="font-semibold font-headline text-lo-text-ink">
                     {formatCurrencyRaw(shortfall)}
-                  </span>
-                  {selectedFreeCash ? ` (${selectedFreeCash.name})` : ''}
+                  </span>{' '}
+                  ditanggung uang yang belum dialokasikan
+                  {selectedSource ? ` (dari ${selectedSource.name})` : ''}.
                 </>
               ) : null}
             </div>
@@ -1179,17 +1552,29 @@ function IncrementalModal({
 
 function BatchModal({
   pos,
+  accounts,
   onClose,
   onSubmit,
 }: {
   pos: PosItem;
+  accounts: Account[];
   onClose: () => void;
-  onSubmit: (cost: number, note?: string) => void;
+  onSubmit: (cost: number, sourceAccountId: string, note?: string) => Promise<boolean>;
 }) {
+  const { saving, error, submit } = useSubmitState();
   const defaultCost = pos.plafon || pos.amount;
   const [amountStr, setAmountStr] = useState(formatNumberString(String(defaultCost)));
   const [note, setNote] = useState('');
-  const amount = parseFormattedNumber(amountStr) || defaultCost;
+  const [sourceAccountId, setSourceAccountId] = useState(() =>
+    resolveManualSourceAccountId(pos, accounts)
+  );
+  const amount = parseFormattedNumber(amountStr);
+
+  const sourceAccounts = sortedSourceAccounts(accounts);
+  const selectedSource = sourceAccounts.find((a) => a.id === sourceAccountId);
+  const sourceBalance = selectedSource?.availableBalance ?? 0;
+  const exceedsSource = !!selectedSource && amount > sourceBalance;
+  const canSubmit = amount > 0 && !!selectedSource && !exceedsSource && !pos.cycleExecuted;
 
   return (
     <Modal
@@ -1208,16 +1593,24 @@ function BatchModal({
           </button>
           <button
             type="button"
-            onClick={() => onSubmit(amount, note || undefined)}
-            className={btnPrimary}
+            disabled={!canSubmit || saving}
+            onClick={() => void submit(() => onSubmit(amount, sourceAccountId, note || undefined))}
+            className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-base" />
-            <span>Konfirmasi Eksekusi Tuntas</span>
+            <span>{saving ? 'Menyimpan…' : 'Konfirmasi Eksekusi Tuntas'}</span>
           </button>
         </>
       }
     >
       <div className="space-y-4">
+        <SubmitError message={error} />
+        {pos.cycleExecuted ? (
+          <div className="rounded-xl border border-lo-secondary/30 bg-lo-accent-wash/60 p-3 text-xs text-lo-text-ink">
+            Periode ini sudah direalisasikan. Sisa alokasi telah dilepas ke Uang Bebas; pos dapat
+            digunakan kembali setelah periode berikutnya dimulai.
+          </div>
+        ) : null}
         <div className="bg-lo-surface-recessed p-4 rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[11px] text-lo-text-subtle block uppercase tracking-wide">
@@ -1225,7 +1618,7 @@ function BatchModal({
             </span>
             <span className="text-base font-semibold text-lo-text-ink">{pos.name}</span>
             <span className="text-[12px] text-lo-text-subtle block mt-0.5">
-              {pos.accountLabel} · {pos.cycle || 'Bulanan'}
+              {pos.cycle || 'Bulanan'}
             </span>
           </div>
           <div className="text-right">
@@ -1256,6 +1649,7 @@ function BatchModal({
             <input
               id="batch-cost"
               type="text"
+              inputMode="numeric"
               className={`${inputBase} pl-11 font-semibold tabular-nums text-base`}
               value={amountStr}
               onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
@@ -1263,6 +1657,21 @@ function BatchModal({
             />
           </div>
         </div>
+
+        <SourceAccountPicker
+          accounts={accounts}
+          sourceAccountId={sourceAccountId}
+          onChange={setSourceAccountId}
+          id="batch-source-account"
+          autoSelected={!!pos.defaultSourceAccountId && sourceAccountId === pos.defaultSourceAccountId}
+        />
+        {exceedsSource ? (
+          <p className="text-[11px] text-lo-error -mt-2">
+            Biaya {formatCurrencyRaw(amount)} melebihi saldo{' '}
+            {formatCurrencyRaw(sourceBalance)} di {selectedSource?.name ?? 'sumber dana'}.
+            Pilih sumber dana lain atau kurangi nominal.
+          </p>
+        ) : null}
 
         <div className="p-3.5 rounded-xl border border-lo-secondary/40 bg-lo-accent-wash/60">
           <div className="flex items-center justify-between">
@@ -1272,8 +1681,8 @@ function BatchModal({
             </span>
           </div>
           <p className="text-[12px] text-lo-text-subtle mt-1">
-            Dana {formatCurrencyRaw(amount)} digunakan 1x tuntas. Status periode ini akan
-            ditandai Selesai dan siap untuk siklus berikutnya.
+            Biaya aktual {formatCurrencyRaw(amount)} dicatat sebagai pengeluaran. Sisa alokasi
+            periode ini langsung dilepas ke Uang Bebas; biaya di atas alokasi memakai Uang Bebas.
           </p>
         </div>
 
@@ -1299,17 +1708,29 @@ function BatchModal({
 
 function SingleSpendModal({
   pos,
+  accounts,
   onClose,
   onSubmit,
 }: {
   pos: PosItem;
+  accounts: Account[];
   onClose: () => void;
-  onSubmit: (cost: number, note?: string) => void;
+  onSubmit: (cost: number, sourceAccountId: string, note?: string) => Promise<boolean>;
 }) {
+  const { saving, error, submit } = useSubmitState();
   const defaultCost = pos.targetAmount || pos.amount;
   const [amountStr, setAmountStr] = useState(formatNumberString(String(defaultCost)));
   const [note, setNote] = useState('');
-  const amount = parseFormattedNumber(amountStr) || defaultCost;
+  const [sourceAccountId, setSourceAccountId] = useState(() =>
+    resolveManualSourceAccountId(pos, accounts)
+  );
+  const amount = parseFormattedNumber(amountStr);
+
+  const sourceAccounts = sortedSourceAccounts(accounts);
+  const selectedSource = sourceAccounts.find((a) => a.id === sourceAccountId);
+  const sourceBalance = selectedSource?.availableBalance ?? 0;
+  const exceedsSource = !!selectedSource && amount > sourceBalance;
+  const canSubmit = amount > 0 && !!selectedSource && !exceedsSource;
 
   return (
     <Modal
@@ -1328,16 +1749,18 @@ function SingleSpendModal({
           </button>
           <button
             type="button"
-            onClick={() => onSubmit(amount, note || undefined)}
-            className={btnPrimary}
+            disabled={!canSubmit || saving}
+            onClick={() => void submit(() => onSubmit(amount, sourceAccountId, note || undefined))}
+            className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="archive" className="text-base" />
-            <span>Belanjakan &amp; Arsipkan Pos</span>
+            <span>{saving ? 'Menyimpan…' : 'Belanjakan &amp; Arsipkan Pos'}</span>
           </button>
         </>
       }
     >
       <div className="space-y-4">
+        <SubmitError message={error} />
         <div className="bg-lo-surface-recessed p-4 rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[11px] text-lo-text-subtle block uppercase tracking-wide">
@@ -1345,7 +1768,7 @@ function SingleSpendModal({
             </span>
             <span className="text-base font-semibold text-lo-text-ink">{pos.name}</span>
             <span className="text-[12px] text-lo-text-subtle block mt-0.5">
-              {pos.accountLabel} · Target Tercapai
+              Pos sekali pakai · sisa alokasi dilepas setelah transaksi
             </span>
           </div>
           <div className="text-right">
@@ -1388,6 +1811,7 @@ function SingleSpendModal({
             <input
               id="single-cost"
               type="text"
+              inputMode="numeric"
               className={`${inputBase} pl-11 font-semibold tabular-nums text-base`}
               value={amountStr}
               onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
@@ -1395,6 +1819,21 @@ function SingleSpendModal({
             />
           </div>
         </div>
+
+        <SourceAccountPicker
+          accounts={accounts}
+          sourceAccountId={sourceAccountId}
+          onChange={setSourceAccountId}
+          id="single-source-account"
+          autoSelected={!!pos.defaultSourceAccountId && sourceAccountId === pos.defaultSourceAccountId}
+        />
+        {exceedsSource ? (
+          <p className="text-[11px] text-lo-error -mt-2">
+            Harga {formatCurrencyRaw(amount)} melebihi saldo{' '}
+            {formatCurrencyRaw(sourceBalance)} di {selectedSource?.name ?? 'sumber dana'}.
+            Pilih sumber dana lain atau kurangi nominal.
+          </p>
+        ) : null}
 
         <div className="p-3.5 rounded-xl border border-lo-secondary/40 bg-lo-accent-wash/60">
           <div className="flex items-center justify-between">
@@ -1404,8 +1843,8 @@ function SingleSpendModal({
             </span>
           </div>
           <p className="text-[12px] text-lo-text-subtle mt-1">
-            Barang berhasil dibeli. Pos akan ditandai Terpenuhi &amp; dipindahkan ke Arsip
-            dengan rapi.
+            Setelah transaksi dicatat, pos akan ditutup dan sisa alokasi dikembalikan ke Uang Bebas.
+            Jika biaya melebihi alokasi, selisih memakai Uang Bebas.
           </p>
         </div>
 

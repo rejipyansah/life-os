@@ -112,8 +112,9 @@ describe.skipIf(!enabled)('live Finance smoke flow (guest session)', () => {
     expect(state.accounts.find((a) => a.id === sea.accountId)?.actualBalance).toBe(2_000_000);
 
     // Set-aside lowers available and Uang Bebas, never the actual balance.
+    // sourceAccountId hanya divalidasi sekali pakai — pos tidak terikat akun.
     const pos = await api.createSetAside({
-      accountId: sea.accountId,
+      sourceAccountId: sea.accountId,
       name: `Dana Makan Smoke ${Date.now()}`,
       kind: 'RoutineIncremental',
       targetAmount: 300_000,
@@ -139,6 +140,8 @@ describe.skipIf(!enabled)('live Finance smoke flow (guest session)', () => {
     expect(posView.amount).toBe(350_000);
 
     await api.spendFromSetAside(pos.id, {
+      // Sumber Dana tempat uang BENAR-BENAR keluar. Wajib.
+      sourceAccountId: sea.accountId,
       amount: 200_000,
       description: 'Makan smoke',
       occurredOn: new Date().toISOString().slice(0, 10),
@@ -176,16 +179,18 @@ describe.skipIf(!enabled)('live Finance smoke flow (guest session)', () => {
     state = await api.getFinanceState();
     expect(state.dueEvents.some((e) => e.id === bill.id)).toBe(false);
 
-    // Realize an expense on the funded account.
+    // Realize an expense — accountId wajib dipilih saat realizasi.
     const sewa = await api.createUpcomingEvent({
-      accountId: sea.accountId,
       title: 'Sewa Smoke',
       amount: 500_000,
       direction: 'Expense',
       dueDate: '2099-01-01',
       scheduleKind: 'Scheduled',
     });
-    const realized = await api.realizeUpcomingEvent(sewa.id, { occurredOn: today });
+    const realized = await api.realizeUpcomingEvent(sewa.id, {
+      accountId: sea.accountId,
+      occurredOn: today,
+    });
     expect(realized.event.status).toBe('Realized');
     expect(realized.transactionId).toBeTruthy();
 
@@ -218,8 +223,9 @@ describe.skipIf(!enabled)('live Finance smoke flow (guest session)', () => {
       occurredOn: new Date().toISOString().slice(0, 10),
       entries: [{ accountId: account.accountId, amount: 1_000_000 }],
     });
+    // Rencana tidak terikat akun — sourceAccountId hanya validasi pendanaan awal.
     await api.createSetAside({
-      accountId: account.accountId,
+      sourceAccountId: account.accountId,
       name: `Pos Map ${Date.now()}`,
       kind: 'Saving',
       amount: 250_000,
@@ -232,6 +238,8 @@ describe.skipIf(!enabled)('live Finance smoke flow (guest session)', () => {
     expect(mapped.derived.freeCash).toBe(projection.freeCash);
     expect(mapped.derived.totalLiquidity).toBe(projection.totalActualBalance);
     expect(mapped.derived.savingsCommitment).toBe(projection.totalCommittedSetAside);
-    expect(mapped.posItems.some((p) => p.accountLabel.length > 0)).toBe(true);
+    // accountLabel adalah LEGACY ONLY — pos baru tidak terikat rekening.
+    expect(mapped.posItems.some((p) => p.name.startsWith('Pos Map'))).toBe(true);
+    expect(mapped.posItems.find((p) => p.name.startsWith('Pos Map'))?.accountLabel).toBeUndefined();
   }, LIVE_TIMEOUT);
 });

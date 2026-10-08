@@ -294,6 +294,8 @@ describe('parseTransactionText', () => {
     expect(r.status).toBe('SUCCESS');
     expect(r.amount).toBe(340_000);
     expect(r.type).toBe('Pengeluaran');
+    // Tanpa penyebutan akun, Sumber Dana tidak ditebak — UI yang meminta pilihan.
+    expect(r.account).toBeUndefined();
   });
 
   it('parses jt suffix as income with keyword', () => {

@@ -445,7 +445,7 @@ public class AccountServiceTests : IDisposable
         await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Vacation Fund",
             Amount = 300_000m
         });
@@ -453,7 +453,12 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Single(result.Accounts);
-        Assert.Equal(300_000m, result.Accounts[0].SetAsideAmount);
+        // Alokasi scope-wide — SetAsideAmount per akun selalu 0.
+        Assert.Equal(0m, result.Accounts[0].SetAsideAmount);
+        Assert.Equal(500_000m, result.Accounts[0].AvailableBalance);
+        // Total tetap tercatat di ringkasan scope-wide.
+        Assert.Equal(300_000m, result.TotalSetAsideAmount);
+        Assert.Equal(200_000m, result.TotalAvailableBalance);
     }
 
     [Fact]
@@ -470,7 +475,7 @@ public class AccountServiceTests : IDisposable
         await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Fund",
             Amount = 200_000m
         });
@@ -478,16 +483,21 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
 
         Assert.Single(result.Accounts);
+        // Per-account: SetAsideAmount selalu 0; AvailableBalance = ActualBalance.
         Assert.Equal(500_000m, result.Accounts[0].ActualBalance);
-        Assert.Equal(200_000m, result.Accounts[0].SetAsideAmount);
-        Assert.Equal(300_000m, result.Accounts[0].AvailableBalance);
+        Assert.Equal(0m, result.Accounts[0].SetAsideAmount);
+        Assert.Equal(500_000m, result.Accounts[0].AvailableBalance);
+        // Alokasi terlihat di total scope-wide.
+        Assert.Equal(200_000m, result.TotalSetAsideAmount);
+        Assert.Equal(300_000m, result.TotalAvailableBalance);
     }
 
     [Fact]
     public async Task GetAccounts_SetAsideBeyondAvailable_IsRejected()
     {
-        // Available balance is a real constraint: a set-aside may never reserve more
-        // than the account actually has free. This keeps `Available` from going negative.
+        // Alokasi baru harus didukung uang yang belum dialokasikan (scope-wide).
+        // TotalAvailable hanya 100rb, set-aside minta 300rb → ditolak.
+        // Tanpa SourceAccountId, validasi yang menentukan adalah TotalAvailable scope.
         var account = await _sut.CreateAccountAsync(new CreateAccountCommand
         {
             ScopeId = _scopeId,
@@ -501,18 +511,53 @@ public class AccountServiceTests : IDisposable
             _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
             {
                 ScopeId = _scopeId,
-                AccountId = account.Id,
                 Name = "Big Fund",
                 Amount = 300_000m
             }));
 
-        Assert.Contains("Insufficient available balance", ex.Message);
+        Assert.Contains("Uang Bebas tidak cukup", ex.Message);
 
         // Nothing was reserved.
         var result = await _sut.GetAccountsAsync(_scopeId);
         Assert.Equal(100_000m, result.Accounts[0].ActualBalance);
         Assert.Equal(0m, result.Accounts[0].SetAsideAmount);
         Assert.Equal(100_000m, result.Accounts[0].AvailableBalance);
+    }
+
+    [Fact]
+    public async Task GetAccounts_SetAsideBeyondReferenceAccountBalance_IsAllowedWhenFreeCashIsSufficient()
+    {
+        // Rekening referensi tidak membatasi alokasi bila Uang Bebas scope-wide cukup.
+        var account = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Underfunded Source",
+            Type = AccountType.Bank
+        });
+
+        await SeedBalance(account.Id, 100_000m);
+        // Akun lain menambah TotalAvailable agar validasi scope tidak yang menolak.
+        var other = await _sut.CreateAccountAsync(new CreateAccountCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Rich Source",
+            Type = AccountType.Bank
+        });
+        await SeedBalance(other.Id, 1_000_000m);
+
+        var setAside = await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Name = "Big Fund",
+            Amount = 300_000m
+        });
+
+        var result = await _sut.GetAccountsAsync(_scopeId);
+        Assert.Equal(account.Id, setAside.DefaultSourceAccountId);
+        Assert.Equal(0m, result.Accounts.Single(a => a.Id == account.Id).SetAsideAmount);
+        Assert.Equal(100_000m, result.Accounts.Single(a => a.Id == account.Id).ActualBalance);
+        Assert.Equal(800_000m, result.TotalAvailableBalance);
     }
 
     [Fact]
@@ -552,7 +597,7 @@ public class AccountServiceTests : IDisposable
         await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = accountA.Id,
+            SourceAccountId = accountA.Id,
             Name = "Fund A",
             Amount = 100_000m
         });
@@ -1085,8 +1130,10 @@ public class AccountServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Archive_ActiveAllocation_Rejected()
+    public async Task Archive_ZeroBalance_WithActiveSetAside_Succeeds()
     {
+        // Aturan arsip baru: hanya saldo aktual ≠ 0 yang memblokir arsip.
+        // Set-aside aktif tidak lagi mengikat akun.
         var account = await _sut.CreateAccountAsync(new CreateAccountCommand
         {
             ScopeId = _scopeId,
@@ -1098,7 +1145,7 @@ public class AccountServiceTests : IDisposable
         await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Vacation Fund",
             Amount = 200_000m
         });
@@ -1106,18 +1153,20 @@ public class AccountServiceTests : IDisposable
         // Settle balance to zero
         await SeedBalance(account.Id, -500_000m);
 
-        // Still has active allocation
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
-            {
-                ScopeId = _scopeId,
-                IsArchived = true
-            }));
+        // Saldo 0 meski ada set-aside aktif → arsip diizinkan.
+        var updated = await _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
+        {
+            ScopeId = _scopeId,
+            IsArchived = true
+        });
+
+        Assert.True(updated.IsArchived);
     }
 
     [Fact]
     public async Task Archive_PositiveBalance_And_ActiveAllocation_Rejected()
     {
+        // Penolakan di sini karena saldo aktual ≠ 0 — bukan karena set-aside aktif.
         var account = await _sut.CreateAccountAsync(new CreateAccountCommand
         {
             ScopeId = _scopeId,
@@ -1129,12 +1178,12 @@ public class AccountServiceTests : IDisposable
         await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Fund",
             Amount = 200_000m
         });
 
-        // Both balance > 0 and active allocation > 0
+        // Saldo masih 500k ≠ 0 → arsip ditolak.
         await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.UpdateAccountAsync(account.Id, new UpdateAccountCommand
             {
@@ -1358,7 +1407,7 @@ public class AccountServiceTests : IDisposable
         await _allocService.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Fund",
             Amount = 200_000m
         });
@@ -1366,7 +1415,9 @@ public class AccountServiceTests : IDisposable
         var result = await _sut.GetAccountsAsync(_scopeId);
         Assert.Single(result.Accounts);
         Assert.Equal(500_000m, result.Accounts[0].ActualBalance);
-        Assert.Equal(200_000m, result.Accounts[0].SetAsideAmount);
+        // Per-account SetAsideAmount selalu 0; total alokasi ada di scope-wide.
+        Assert.Equal(0m, result.Accounts[0].SetAsideAmount);
+        Assert.Equal(200_000m, result.TotalSetAsideAmount);
     }
 
     // ───────────────────────── Scope Initialization ─────────────────────────

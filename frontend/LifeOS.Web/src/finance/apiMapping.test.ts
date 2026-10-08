@@ -29,8 +29,6 @@ function account(overrides: Partial<AccountStateProjection> = {}): AccountStateP
     actualBalance: 2_000_000,
     setAsideAmount: 500_000,
     availableBalance: 1_500_000,
-    pendingCycleFunding: 0,
-    pendingCycleSurplus: 0,
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
   };
@@ -41,6 +39,8 @@ function setAside(overrides: Partial<SetAsideProjection> = {}): SetAsideProjecti
     id: 'pos-1',
     accountId: 'acc-1',
     accountName: 'SeaBank',
+    defaultSourceAccountId: null,
+    defaultSourceAccountName: null,
     name: 'Dana Makan',
     kind: 'RoutineIncremental',
     note: null,
@@ -56,6 +56,7 @@ function setAside(overrides: Partial<SetAsideProjection> = {}): SetAsideProjecti
     cycleSurplus: 0,
     cycleFundingShortfall: 0,
     isUnderfunded: false,
+    isCycleExecuted: false,
     usedAmount: 100_000,
     status: 'Active',
     closeReason: null,
@@ -104,6 +105,8 @@ function transaction(overrides: Partial<TransactionProjection> = {}): Transactio
     entries: [{ accountId: 'acc-1', accountName: 'SeaBank', amount: -250_000 }],
     isReversed: false,
     reversalReason: null,
+    setAsideId: null,
+    setAsideName: null,
     ...overrides,
   };
 }
@@ -152,6 +155,8 @@ describe('mapFinanceState', () => {
     expect(result.derived.scheduledExpenseCommitments).toBe(340_440);
     expect(result.derived.unpaidBillsCount).toBe(1);
     expect(result.derived.commitmentTotal).toBe(600_000 + 340_440);
+    // DUA ANGKA TERPISAH — totalAvailable ≠ freeCash.
+    expect(result.derived.totalAvailable).toBe(1_500_000);
     expect(result.derived.hasUnpaidBills).toBe(true);
     expect(result.derived.allBillsPaid).toBe(false);
   });
@@ -268,8 +273,28 @@ describe('mapPosItem', () => {
     expect(mapped.plafon).toBe(300_000);
     expect(mapped.usedAmount).toBe(100_000);
     expect(mapped.cycle).toBe('Bulanan');
+    // LEGACY ONLY — alokasi tidak terikat Sumber Dana.
     expect(mapped.accountLabel).toBe('SeaBank');
     expect(mapped.archived).toBe(false);
+  });
+
+  it('leaves accountLabel undefined for pos without a legacy account binding', () => {
+    const mapped = mapPosItem(setAside({ accountId: null, accountName: null }));
+    expect(mapped.accountLabel).toBeUndefined();
+  });
+
+  it('maps defaultSourceAccountId as a non-binding manual-process hint', () => {
+    const mapped = mapPosItem(
+      setAside({
+        accountId: null,
+        accountName: null,
+        defaultSourceAccountId: 'acc-9',
+        defaultSourceAccountName: 'BCA',
+      })
+    );
+    // Hint untuk pre-select UI saja — bukan lokasi/kepemilikan pos.
+    expect(mapped.defaultSourceAccountId).toBe('acc-9');
+    expect(mapped.accountLabel).toBeUndefined();
   });
 
   it('does not invent a plafon for a set-aside without a cycle', () => {
@@ -303,7 +328,7 @@ describe('toCreateSetAsideCommand', () => {
       name: 'Dana Makan',
       description: 'Pos dana baru',
       category: 'routine_incremental',
-      accountLabel: 'SeaBank',
+      sourceAccountLabel: 'SeaBank',
       plafon: 300_000,
       ...overrides,
     };
@@ -315,7 +340,8 @@ describe('toCreateSetAsideCommand', () => {
       'acc-1'
     );
 
-    expect(command.accountId).toBe('acc-1');
+    // SourceAccountId hanya divalidasi sekali pakai — bukan ikatan pos.
+    expect(command.sourceAccountId).toBe('acc-1');
     expect(command.name).toBe('Dana Makan');
     expect(command.kind).toBe('RoutineIncremental');
     expect(command.targetAmount).toBe(300_000);
@@ -443,6 +469,16 @@ describe('mapBillDue', () => {
     const mapped = mapBillDue(event({ isOverdue: true }));
     expect(mapped.badge).toBe('Terlambat');
     expect(mapped.icon).toBe('bolt');
+  });
+
+  it('shows a legacy account hint in meta without pre-binding the bill', () => {
+    const mapped = mapBillDue(event());
+    expect(mapped.meta).toBe('Tenggat 1 Okt · legacy: Mandiri');
+  });
+
+  it('omits the legacy hint when the event has no account name', () => {
+    const mapped = mapBillDue(event({ accountId: null, accountName: null }));
+    expect(mapped.meta).toBe('Tenggat 1 Okt');
   });
 });
 

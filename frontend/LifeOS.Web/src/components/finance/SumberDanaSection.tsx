@@ -187,7 +187,7 @@ export default function SumberDanaSection({
           if (modal?.kind === 'delete') onDelete(modal.account.id);
         }}
         title={`Hapus Sumber Dana "${modal?.kind === 'delete' ? modal.account.name : ''}"?`}
-        description="Sumber dana ini akan dihapus dari daftar sumber dana aktif. Saldo dan mutasi terkait tetap tersimpan dalam riwayat."
+        description="Sumber dana ini akan diarsipkan dari daftar aktif. Saldo harus Rp 0 terlebih dahulu; Dana yang Disisihkan tidak menghalangi arsip karena alokasi bersifat scope-wide. Riwayat mutasi tetap tersimpan."
         icon="delete"
         actionLabel="Hapus"
         danger

@@ -477,7 +477,7 @@ public class InterpreterTests : IDisposable
         Assert.NotNull(response.SetAsideCommand);
         var cmd = response.SetAsideCommand!;
         Assert.Equal(_scopeId, cmd.ScopeId);
-        Assert.Equal(_mandiriAccount.Id, cmd.AccountId);
+        Assert.Equal(_mandiriAccount.Id, cmd.SourceAccountId);
         Assert.Equal("WiFi", cmd.Name);
         Assert.Equal(350000m, cmd.Amount);
 

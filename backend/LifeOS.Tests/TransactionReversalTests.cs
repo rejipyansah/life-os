@@ -228,7 +228,7 @@ public class TransactionReversalTests : IDisposable
         var setAside = await setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Tabungan",
             Amount = 400_000m
         });
@@ -248,8 +248,12 @@ public class TransactionReversalTests : IDisposable
             TransactionId = expense.Id
         });
 
+        // Saldo aktual kembali utuh setelah reversal.
+        Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
+        // Set-aside tidak terpengaruh transaksi biasa (tanpa SetAsideId).
         Assert.Equal(400_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(600_000m, await _balances.GetAvailableAsync(account.Id));
+        // TotalAvailable scope-wide = TotalActual − TotalSetAside = 1M − 400k.
+        Assert.Equal(600_000m, await _balances.GetScopeAvailableAsync(_scopeId));
     }
 
     // ───────────────────────── Helpers ─────────────────────────

@@ -61,7 +61,7 @@ public class FinanceStateServiceTests : IDisposable
         await _setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = seabank.Id,
+            SourceAccountId = seabank.Id,
             Name = "Tabungan Darurat",
             Amount = 500_000m
         });
@@ -118,7 +118,7 @@ public class FinanceStateServiceTests : IDisposable
         var setAside = await _setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Dana Makan",
             Kind = SetAsideKind.RoutineIncremental,
             TargetAmount = 300_000m,
@@ -126,10 +126,11 @@ public class FinanceStateServiceTests : IDisposable
             Amount = 300_000m
         });
 
-        // 100rb terpakai di cycle berjalan.
+        // 100rb terpakai di cycle berjalan — uang keluar dari Sumber Dana yang dipilih.
         await _setAsides.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 100_000m,
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
@@ -146,9 +147,9 @@ public class FinanceStateServiceTests : IDisposable
 
         Assert.True(after.PendingCycleFunding > 0, "Pending cycle funding must be surfaced to the read model.");
         Assert.Equal(100_000m, after.PendingCycleFunding);
-        Assert.Equal(300_000m, after.TotalCommittedSetAside);
-        // 100rb dari cycle berikutnya sudah dianggap terikat, jadi Uang Bebas turun.
-        Assert.Equal(600_000m, after.FreeCash);
+        Assert.Equal(200_000m, after.TotalCommittedSetAside);
+        // Shortfall yang belum didanai terlihat, tetapi belum mengurangi Uang Bebas.
+        Assert.Equal(700_000m, after.FreeCash);
 
         // Read tetap idempotent: tidak ada yang berubah di database.
         Assert.Equal(200_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
@@ -168,15 +169,15 @@ public class FinanceStateServiceTests : IDisposable
 
         await _setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
-            ScopeId = _scopeId, AccountId = seabank.Id, Name = "Tabungan Darurat", Amount = 3_500_000m
+            ScopeId = _scopeId, SourceAccountId = seabank.Id, Name = "Tabungan Darurat", Amount = 3_500_000m
         });
         await _setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
-            ScopeId = _scopeId, AccountId = seabank.Id, Name = "Dana Servis Motor", Amount = 500_000m
+            ScopeId = _scopeId, SourceAccountId = seabank.Id, Name = "Dana Servis Motor", Amount = 500_000m
         });
         await _setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
-            ScopeId = _scopeId, AccountId = cash.Id, Name = "Dana Makan", Amount = 200_000m
+            ScopeId = _scopeId, SourceAccountId = cash.Id, Name = "Dana Makan", Amount = 200_000m
         });
 
         var state = await _sut.GetStateAsync(_scopeId);
@@ -185,19 +186,22 @@ public class FinanceStateServiceTests : IDisposable
         Assert.Equal(5_800_000m, state.TotalActualBalance);
         Assert.Equal(4_200_000m, state.TotalSetAside);
         Assert.Equal(1_600_000m, state.FreeCash);
+        // TotalAvailable = TotalActual − TotalSetAside (scope-wide, bukan per akun).
+        Assert.Equal(1_600_000m, state.TotalAvailable);
 
+        // Set-aside tidak mengurangi saldo per akun — alokasi bersifat scope-wide.
         var seabankState = state.Accounts.Single(a => a.Id == seabank.Id);
         Assert.Equal(4_000_000m, seabankState.ActualBalance);
-        Assert.Equal(4_000_000m, seabankState.SetAsideAmount);
-        Assert.Equal(0m, seabankState.AvailableBalance);
+        Assert.Equal(0m, seabankState.SetAsideAmount);
+        Assert.Equal(4_000_000m, seabankState.AvailableBalance);
 
         var bcaState = state.Accounts.Single(a => a.Id == bca.Id);
         Assert.Equal(1_500_000m, bcaState.AvailableBalance);
         Assert.Equal(0m, bcaState.SetAsideAmount);
 
         var cashState = state.Accounts.Single(a => a.Id == cash.Id);
-        Assert.Equal(200_000m, cashState.SetAsideAmount);
-        Assert.Equal(100_000m, cashState.AvailableBalance);
+        Assert.Equal(0m, cashState.SetAsideAmount);
+        Assert.Equal(300_000m, cashState.AvailableBalance);
 
         Assert.Equal(3, state.SetAsides.Count);
     }
@@ -428,7 +432,11 @@ public class FinanceStateServiceTests : IDisposable
 
         Assert.True((await _sut.GetStateAsync(_scopeId)).HasUnpaidBills);
 
-        await _events.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId });
+        await _events.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id
+        });
 
         var state = await _sut.GetStateAsync(_scopeId);
         Assert.False(state.HasUnpaidBills);
@@ -442,7 +450,7 @@ public class FinanceStateServiceTests : IDisposable
         await SeedBalanceAsync(account.Id, 1_000_000m);
         await _setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
-            ScopeId = _scopeId, AccountId = account.Id, Name = "Pos", Amount = 100_000m
+            ScopeId = _scopeId, SourceAccountId = account.Id, Name = "Pos", Amount = 100_000m
         });
 
         var entriesBefore = await _db.SetAsideEntries.CountAsync();

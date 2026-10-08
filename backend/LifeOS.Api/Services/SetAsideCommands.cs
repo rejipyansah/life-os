@@ -2,10 +2,25 @@ using LifeOS.Api.Models;
 
 namespace LifeOS.Api.Services;
 
+/// <summary>
+/// Membuat Dana yang Disisihkan (pos alokasi).
+///
+/// SourceAccountId = referensi rekening yang biasa dipakai untuk proses manual.
+/// - Tidak membatasi nominal dan tidak didebit.
+/// - Nilai ini DISIMPAN sebagai hint non-binding (DefaultSourceAccountId) untuk
+///   pre-select UI pada proses manual — BUKAN kepemilikan pos, BUKAN ikatan permanen.
+/// - Tidak dipakai untuk perhitungan saldo/available/funding/aloikasi apa pun.
+/// </summary>
 public class CreateSetAsideCommand
 {
     public Guid ScopeId { get; set; }
-    public Guid AccountId { get; set; }
+
+    /// <summary>
+    /// Sumber Dana default untuk proses manual (top-up/pakai).
+    /// Divalidasi hanya scope/status; disimpan sebagai hint non-binding.
+    /// </summary>
+    public Guid? SourceAccountId { get; set; }
+
     public string Name { get; set; } = "";
     public SetAsideKind Kind { get; set; } = SetAsideKind.Saving;
     public string? Note { get; set; }
@@ -28,14 +43,19 @@ public class UpdateSetAsideCommand
     public decimal? TargetAmount { get; set; }
     public bool RemoveTarget { get; set; }
     public SetAsideCycleKind? CycleKind { get; set; }
-
-    /// <summary>Memindahkan set-aside ke akun lain dalam scope yang sama.</summary>
-    public Guid? AccountId { get; set; }
 }
 
+/// <summary>
+/// Top-up: menambah saldo yang disisihkan dari Uang Bebas scope-wide, bukan Expense.
+/// SourceAccountId hanya referensi untuk pre-select preferensi rekening — tidak didebit.
+/// </summary>
 public class AddToSetAsideCommand
 {
     public Guid ScopeId { get; set; }
+
+    /// <summary>Opsional. Rekening referensi; tidak membatasi saldo atau didebit.</summary>
+    public Guid? SourceAccountId { get; set; }
+
     public decimal Amount { get; set; }
     public string? Note { get; set; }
 }
@@ -49,23 +69,25 @@ public class WithdrawFromSetAsideCommand
 
 /// <summary>
 /// Real spending drawn from a set-aside: creates an Expense Transaction AND releases the
-/// reserved amount. Overspend beyond the reserved amount is borne by available money
-/// (Uang Bebas) — optionally from a user-selected source account.
+/// reserved amount.
+///
+/// SourceAccountId = Sumber Dana tempat uang BENAR-BENAR keluar. Wajib.
+/// Seluruh nominal keluar dari SourceAccountId (validasi saldo aktual akun itu).
+/// Porsi di atas saldo pos (shortfall) ditanggung uang yang belum dialokasikan
+/// (Uang Bebas scope-wide) — pos tidak terikat ke akun manapun.
 /// </summary>
 public class SpendFromSetAsideCommand
 {
     public Guid ScopeId { get; set; }
+
+    /// <summary>Sumber Dana tempat uang keluar. Wajib.</summary>
+    public Guid SourceAccountId { get; set; }
+
     public decimal Amount { get; set; }
     public string? Description { get; set; }
     public string? CategoryName { get; set; }
     public DateOnly OccurredOn { get; set; }
     public string? Note { get; set; }
-
-    /// <summary>
-    /// Rekening sumber Uang Bebas untuk porsi shortfall (di atas saldo SetAside).
-    /// Null = ambil dari akun SetAside itu sendiri.
-    /// </summary>
-    public Guid? FreeCashAccountId { get; set; }
 }
 
 public class CloseSetAsideCommand
@@ -78,8 +100,25 @@ public class CloseSetAsideCommand
 public class SetAsideProjection
 {
     public Guid Id { get; set; }
-    public Guid AccountId { get; set; }
-    public string AccountName { get; set; } = "";
+
+    /// <summary>
+    /// LEGACY ONLY — alokasi tidak terikat Sumber Dana; field ini tidak pernah
+    /// dipakai untuk perhitungan. Nilai legacy dibiarkan null untuk pos baru.
+    /// </summary>
+    public Guid? AccountId { get; set; }
+
+    /// <summary>LEGACY ONLY. Tidak dipakai untuk perhitungan.</summary>
+    public string? AccountName { get; set; }
+
+    /// <summary>
+    /// Hint non-binding: sumber dana default untuk proses manual (top-up/pakai).
+    /// Hanya pre-select UI — bukan ikatan, bukan validasi.
+    /// </summary>
+    public Guid? DefaultSourceAccountId { get; set; }
+
+    /// <summary>Nama sumber dana default untuk tampilan.</summary>
+    public string? DefaultSourceAccountName { get; set; }
+
     public string Name { get; set; } = "";
     public SetAsideKind? Kind { get; set; }
     public string? Note { get; set; }
@@ -106,9 +145,12 @@ public class SetAsideProjection
     public decimal CycleFundingShortfall { get; set; }
     public bool IsUnderfunded { get; set; }
 
+    /// <summary>True bila RoutineBatch sudah direalisasikan pada cycle saat ini.</summary>
+    public bool IsCycleExecuted { get; set; }
+
     /// <summary>
     /// Total pemakaian pada cycle berjalan (atau sepanjang waktu bila tanpa cycle),
-    /// termasuk porsi yang ditutup Uang Bebas — nominal penuh transaksinya,
+    /// termasuk porsi yang ditutup uang bebas — nominal penuh transaksinya,
     /// bukan hanya yang keluar dari saldo pos.
     /// </summary>
     public decimal UsedAmount { get; set; }
@@ -128,6 +170,26 @@ public class SetAsideEntryProjection
     public Guid? TransactionId { get; set; }
     public string? Note { get; set; }
     public DateTime CreatedAt { get; set; }
+    public decimal BalanceAfter { get; set; }
+    public SetAsideTransactionSummary? Transaction { get; set; }
+}
+
+public class SetAsideTransactionSummary
+{
+    public Guid Id { get; set; }
+    public TransactionType Type { get; set; }
+    public decimal Amount { get; set; }
+    public string? Description { get; set; }
+    public string? CategoryName { get; set; }
+    public DateOnly OccurredOn { get; set; }
+    public string? RelatedDescription { get; set; }
+}
+
+public class SetAsideHistoryPage
+{
+    public List<SetAsideEntryProjection> Items { get; set; } = [];
+    public bool HasMore { get; set; }
+    public string? NextCursor { get; set; }
 }
 
 public class SetAsideOperationResult
@@ -138,6 +200,6 @@ public class SetAsideOperationResult
     /// <summary>Transaksi Expense yang tercipta; hanya untuk operasi Spend.</summary>
     public Guid? TransactionId { get; set; }
 
-    /// <summary>Bagian cycle funding yang tidak terpenuhi karena Uang Bebas tidak cukup.</summary>
+    /// <summary>Bagian cycle funding yang tidak terpenuhi karena uang bebas tidak cukup.</summary>
     public decimal CycleFundingShortfall { get; set; }
 }

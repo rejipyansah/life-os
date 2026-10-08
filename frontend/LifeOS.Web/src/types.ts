@@ -91,11 +91,15 @@ export interface AccountStateProjection {
   name: string;
   type: AccountType;
   isArchived: boolean;
+  /** Saldo riil = SUM(TransactionEntry.Amount). Lokasi uang di akun ini. */
   actualBalance: number;
+  /**
+   * SELALU 0 — alokasi (Dana yang Disisihkan) scope-wide, bukan milik akun tertentu.
+   * SetAside.AccountId legacy tidak dipakai untuk mengurangi saldo per akun.
+   */
   setAsideAmount: number;
+  /** Saldo aktual akun ini. Alokasi dihitung di totalAvailable (scope-wide). */
   availableBalance: number;
-  pendingCycleFunding: number;
-  pendingCycleSurplus: number;
   createdAt: string;
 }
 
@@ -131,6 +135,10 @@ export interface TransactionProjection {
   entries: TransactionEntryProjection[];
   isReversed: boolean;
   reversalReason: string | null;
+  /** Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas. */
+  setAsideId: string | null;
+  /** Nama pos alokasi bila ada. */
+  setAsideName: string | null;
 }
 
 export interface CreateTransactionEntryCommand {
@@ -147,6 +155,13 @@ export interface CreateTransactionCommand {
   relatedTransactionId?: string;
   feeAmount?: number;
   entries: CreateTransactionEntryCommand[];
+  /**
+   * Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas.
+   * INDEPENDEN dari Entries[].AccountId (Sumber Dana):
+   *   entries[].accountId = Sumber Dana (uang keluar/masuk dari mana)
+   *   setAsideId          = alokasi/tujuan uang yang digunakan
+   */
+  setAsideId?: string | null;
 }
 
 export interface ReverseTransactionCommand {
@@ -163,12 +178,42 @@ export interface SetAsideEntryProjection {
   transactionId: string | null;
   note: string | null;
   createdAt: string;
+  balanceAfter: number;
+  transaction: SetAsideTransactionSummary | null;
+}
+
+export interface SetAsideTransactionSummary {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  description: string | null;
+  categoryName: string | null;
+  occurredOn: string;
+  relatedDescription: string | null;
+}
+
+export interface SetAsideHistoryPage {
+  items: SetAsideEntryProjection[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export interface SetAsideProjection {
   id: string;
-  accountId: string;
-  accountName: string;
+  /**
+   * LEGACY ONLY — alokasi tidak terikat Sumber Dana.
+   * Nilai legacy dibiarkan untuk kompatibilitas data lama; tidak dipakai perhitungan.
+   */
+  accountId: string | null;
+  /** LEGACY ONLY. */
+  accountName: string | null;
+  /**
+   * Hint non-binding: sumber dana default untuk proses manual (top-up/pakai).
+   * Hanya pre-select UI — bukan ikatan, bukan validasi.
+   */
+  defaultSourceAccountId: string | null;
+  /** Nama sumber dana default untuk tampilan. */
+  defaultSourceAccountName: string | null;
   name: string;
   kind: SetAsideKind | null;
   note: string | null;
@@ -186,6 +231,7 @@ export interface SetAsideProjection {
   cycleSurplus: number;
   cycleFundingShortfall: number;
   isUnderfunded: boolean;
+  isCycleExecuted: boolean;
   usedAmount: number;
   status: SetAsideStatus;
   closeReason: SetAsideCloseReason | null;
@@ -195,7 +241,11 @@ export interface SetAsideProjection {
 }
 
 export interface CreateSetAsideCommand {
-  accountId: string;
+  /**
+   * Opsional. Sumber dana untuk validasi pendanaan awal saja (bila amount > 0).
+   * TIDAK disimpan permanen di SetAside — pos tidak pernah terikat rekening.
+   */
+  sourceAccountId?: string | null;
   name: string;
   kind?: SetAsideKind;
   note?: string;
@@ -211,7 +261,6 @@ export interface UpdateSetAsideCommand {
   targetAmount?: number;
   removeTarget?: boolean;
   cycleKind?: SetAsideCycleKind;
-  accountId?: string;
 }
 
 export interface SetAsideOperationResult {
@@ -226,7 +275,12 @@ export interface SetAsideOperationResult {
 
 export interface UpcomingEventProjection {
   id: string;
+  /**
+   * LEGACY ONLY — Rencana baru tidak pernah mengisi akun.
+   * Akun hanya dipilih saat realizasi. Nilai legacy hanya untuk kompatibilitas.
+   */
   accountId: string | null;
+  /** LEGACY ONLY. */
   accountName: string | null;
   title: string;
   amount: number;
@@ -246,6 +300,10 @@ export interface UpcomingEventProjection {
 }
 
 export interface CreateUpcomingEventCommand {
+  /**
+   * Tidak dipakai untuk create — Rencana tidak terikat Sumber Dana.
+   * Akun hanya dipilih saat realizasi.
+   */
   accountId?: string | null;
   title: string;
   amount: number;
@@ -258,8 +316,6 @@ export interface CreateUpcomingEventCommand {
 }
 
 export interface UpdateUpcomingEventCommand {
-  accountId?: string | null;
-  clearAccount?: boolean;
   title?: string;
   amount?: number;
   direction?: UpcomingEventDirection;
@@ -271,6 +327,18 @@ export interface UpdateUpcomingEventCommand {
   recurrence?: UpcomingEventRecurrence;
 }
 
+/**
+ * Realisasi Rencana menjadi transaksi nyata.
+ * accountId = Sumber Dana tempat uang keluar/masuk — WAJIB dipilih saat realizasi.
+ * setAsideId = Dana yang Disisihkan opsional yang dialokasikan/dilepas.
+ */
+export interface RealizeUpcomingEventCommand {
+  accountId: string;
+  setAsideId?: string | null;
+  occurredOn?: string;
+  description?: string;
+}
+
 export interface RealizeUpcomingEventResult {
   event: UpcomingEventProjection;
   transactionId: string;
@@ -278,6 +346,14 @@ export interface RealizeUpcomingEventResult {
 
 // ───────────────────────── Finance state (read model) ─────────────────────────
 
+/**
+ * DUA ANGKA TERPISAH — jangan disamakan:
+ *   totalAvailable = totalActualBalance − totalSetAside
+ *     Uang yang belum dialokasikan ke Dana yang Disisihkan (sebelum komitmen Rencana).
+ *   freeCash (Uang Bebas) = totalActualBalance − totalCommittedSetAside
+ *                           − scheduledExpenseCommitments
+ *     Uang yang benar-benar bebas dibelanjakan setelah semua komitmen.
+ */
 export interface FinanceStateProjection {
   today: string;
 
@@ -286,6 +362,12 @@ export interface FinanceStateProjection {
   pendingCycleFunding: number;
   pendingCycleSurplus: number;
   totalCommittedSetAside: number;
+
+  /**
+   * TotalAvailable = totalActualBalance − totalSetAside.
+   * Uang yang belum dialokasikan ke Dana yang Disisihkan.
+   * BERBEDA dari freeCash (yang juga mengurangi komitmen Rencana).
+   */
   totalAvailable: number;
 
   dueObligations: number;
@@ -294,15 +376,14 @@ export interface FinanceStateProjection {
 
   /**
    * Komitmen SEMUA agenda pengeluaran terjadwal (sekali jalan & ber-siklus).
-   * Mengurangi Uang Bebas sejak agenda dibuat, tanpa menjadi transaksi
-   * (mirip disisihkan).
+   * Mengurangi freeCash sejak agenda dibuat, tanpa menjadi transaksi.
    */
   scheduledExpenseCommitments: number;
 
   /**
-   * Uang Bebas — DERIVED STATE.
+   * FreeCash (Uang Bebas) — DERIVED STATE.
    *   = totalActualBalance - totalCommittedSetAside - scheduledExpenseCommitments
-   * Tidak pernah di-clamp ke 0.
+   * Tidak pernah di-clamp ke 0. BERBEDA dari totalAvailable.
    */
   freeCash: number;
 

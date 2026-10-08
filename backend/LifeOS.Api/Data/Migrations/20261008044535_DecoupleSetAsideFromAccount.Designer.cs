@@ -3,6 +3,7 @@ using System;
 using LifeOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace LifeOS.Api.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261008044535_DecoupleSetAsideFromAccount")]
+    partial class DecoupleSetAsideFromAccount
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -130,16 +133,10 @@ namespace LifeOS.Api.Data.Migrations
                     b.Property<DateOnly>("CycleAnchorDate")
                         .HasColumnType("date");
 
-                    b.Property<decimal>("CycleFundingShortfall")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<string>("CycleKind")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
-
-                    b.Property<Guid?>("DefaultSourceAccountId")
-                        .HasColumnType("uuid");
 
                     b.Property<string>("Kind")
                         .HasMaxLength(32)
@@ -171,8 +168,6 @@ namespace LifeOS.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
-
-                    b.HasIndex("DefaultSourceAccountId");
 
                     b.HasIndex("ScopeId");
 
@@ -604,11 +599,6 @@ namespace LifeOS.Api.Data.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("LifeOS.Api.Models.Account", "DefaultSourceAccount")
-                        .WithMany()
-                        .HasForeignKey("DefaultSourceAccountId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("LifeOS.Api.Models.Scope", "Scope")
                         .WithMany()
                         .HasForeignKey("ScopeId")
@@ -616,8 +606,6 @@ namespace LifeOS.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
-
-                    b.Navigation("DefaultSourceAccount");
 
                     b.Navigation("Scope");
                 });

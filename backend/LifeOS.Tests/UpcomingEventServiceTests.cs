@@ -96,7 +96,11 @@ public class UpcomingEventServiceTests : IDisposable
         await SeedBalanceAsync(account.Id, 500_000m);
 
         var agenda = await _sut.CreateAsync(NewIncome("Gaji", 5_000_000m, account.Id));
-        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId });
+        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id
+        });
 
         var tx = await _db.Transactions.SingleAsync(t => t.Id == result.TransactionId);
         Assert.Equal(TransactionType.Income, tx.Type);
@@ -119,7 +123,11 @@ public class UpcomingEventServiceTests : IDisposable
         await SeedBalanceAsync(account.Id, 2_000_000m);
 
         var agenda = await _sut.CreateAsync(NewExpense("WiFi Rumah", 340_440m, account.Id));
-        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId });
+        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id
+        });
 
         var tx = await _db.Transactions.SingleAsync(t => t.Id == result.TransactionId);
         Assert.Equal(TransactionType.Expense, tx.Type);
@@ -139,10 +147,18 @@ public class UpcomingEventServiceTests : IDisposable
         var txCountBefore = await _db.Transactions.CountAsync();
 
         var agenda = await _sut.CreateAsync(NewExpense("WiFi Rumah", 340_440m, account.Id));
-        await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId });
+        await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id
+        });
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId }));
+            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+            {
+                ScopeId = _scopeId,
+                AccountId = account.Id
+            }));
 
         // Hanya satu transaksi riil yang tercipta.
         Assert.Equal(txCountBefore + 1, await _db.Transactions.CountAsync());
@@ -158,33 +174,83 @@ public class UpcomingEventServiceTests : IDisposable
         var agenda = await _sut.CreateAsync(NewExpense("Sewa", 1_200_000m, account.Id));
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId }));
+            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+            {
+                ScopeId = _scopeId,
+                AccountId = account.Id
+            }));
 
         Assert.Equal(txCountBefore, await _db.Transactions.CountAsync());
         Assert.Equal(100_000m, await _balances.GetActualBalanceAsync(account.Id));
     }
 
     [Fact]
-    public async Task Realize_Expense_RespectsReservedFunds()
+    public async Task Realize_Expense_WithSetAside_ReleasesFromPos()
     {
+        // Semantics baru: set-aside bersifat scope-wide, TIDAK mengurangi saldo
+        // aktual akun. Realisasi memvalidasi saldo aktual akun (Sumber Dana);
+        // alokasi dilepas min(amount, saldoPos) dari pos terkait.
         var account = await CreateAccountAsync("Mandiri");
         await SeedBalanceAsync(account.Id, 1_000_000m);
 
         var setAsides = new SetAsideService(_db, _balances);
-        await setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
+        var setAside = await setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Tabungan",
             Amount = 900_000m
         });
 
         var agenda = await _sut.CreateAsync(NewExpense("Sewa", 500_000m, account.Id));
 
-        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId }));
+        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            SetAsideId = setAside.Id
+        });
 
-        Assert.Contains("Insufficient available balance", ex.Message);
+        // Seluruh nominal keluar dari Sumber Dana.
+        Assert.Equal(500_000m, await _balances.GetActualBalanceAsync(account.Id));
+        // Pos melepas min(500k, 900k) = 500k → sisa pos 400k.
+        Assert.Equal(400_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+        // Scope-wide: TotalAvailable = TotalActual − TotalSetAside = 500k − 400k.
+        Assert.Equal(100_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+        Assert.Equal(UpcomingEventStatus.Realized, result.Event.Status);
+    }
+
+    [Fact]
+    public async Task Realize_Expense_WithSetAside_ShortfallSupportedByScopeAvailable()
+    {
+        // Porsi di atas saldo pos ditanggung uang yang belum dialokasikan
+        // (TotalAvailable scope-wide), selama TotalAvailable mencukupi.
+        var account = await CreateAccountAsync("Mandiri");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        var setAsides = new SetAsideService(_db, _balances);
+        var setAside = await setAsides.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Name = "Tabungan Kecil",
+            Amount = 100_000m
+        });
+
+        // TotalActual=1M, TotalSetAside=100k → TotalAvailable=900k.
+        var agenda = await _sut.CreateAsync(NewExpense("Sewa", 500_000m, account.Id));
+
+        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id,
+            SetAsideId = setAside.Id
+        });
+
+        // Pos melepas 100k (seluruh saldo pos); shortfall 400k ditanggung TotalAvailable.
+        Assert.Equal(0m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+        Assert.Equal(500_000m, await _balances.GetActualBalanceAsync(account.Id));
+        Assert.Equal(UpcomingEventStatus.Realized, result.Event.Status);
     }
 
     // ───────────────────────── Lifecycle ─────────────────────────
@@ -243,7 +309,11 @@ public class UpcomingEventServiceTests : IDisposable
         Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId }));
+            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+            {
+                ScopeId = _scopeId,
+                AccountId = account.Id
+            }));
     }
 
     [Fact]
@@ -275,7 +345,11 @@ public class UpcomingEventServiceTests : IDisposable
         var account = await CreateAccountAsync("Mandiri");
         await SeedBalanceAsync(account.Id, 1_000_000m);
         var agenda = await _sut.CreateAsync(NewExpense("WiFi", 340_440m, account.Id));
-        await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId });
+        await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id
+        });
 
         var ex = await Assert.ThrowsAsync<ValidationException>(() => _sut.DeleteAsync(agenda.Id, _scopeId));
         Assert.Contains("cannot be deleted", ex.Message);
@@ -315,18 +389,29 @@ public class UpcomingEventServiceTests : IDisposable
         await _db.SaveChangesAsync();
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId }));
+            _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+            {
+                ScopeId = _scopeId,
+                AccountId = account.Id
+            }));
     }
 
     [Fact]
-    public async Task ArchivedAccount_CannotReceiveNewAgenda()
+    public async Task ArchivedAccount_OnCreate_IsIgnored_AccountNotStored()
     {
+        // Semantics baru: AccountId pada CreateUpcomingEventCommand adalah wire legacy —
+        // tidak divalidasi dan tidak disimpan. Rencana independen dari Sumber Dana.
+        // Pembatasan akun terarsip berlaku saat realizasi (lihat ArchivedAccount_CannotBeRealized).
         var account = await CreateAccountAsync("Mandiri");
         account.IsArchived = true;
         await _db.SaveChangesAsync();
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            _sut.CreateAsync(NewExpense("WiFi", 340_440m, account.Id)));
+        var agenda = await _sut.CreateAsync(NewExpense("WiFi", 340_440m, account.Id));
+
+        var projected = await _sut.GetByIdAsync(agenda.Id, _scopeId);
+        Assert.NotNull(projected);
+        Assert.Null(projected!.AccountId);
+        Assert.Equal(UpcomingEventStatus.Scheduled, projected.Status);
     }
 
     // ───────────────────────── Validation ─────────────────────────
@@ -391,6 +476,12 @@ public class UpcomingEventServiceTests : IDisposable
             ScheduleKind = UpcomingEventScheduleKind.Flexible
         });
 
+        // Rencana baru tidak menyimpan AccountId (selalu null).
+        var projected = await _sut.GetByIdAsync(agenda.Id, _scopeId);
+        Assert.Null(projected!.AccountId);
+
+        // Realisasi WAJIB menyebut Sumber Dana di command — event legacy tanpa
+        // AccountId pun tetap harus menentukan akun saat realizasi.
         await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand { ScopeId = _scopeId }));
     }

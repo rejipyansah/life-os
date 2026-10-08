@@ -185,14 +185,22 @@ public class ApplicationDbContext : IdentityDbContext
                 .HasForeignKey(sa => sa.ScopeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // FK to Account
+            // FK to Account (legacy binding — never used in calculations)
             e.HasOne(sa => sa.Account)
                 .WithMany()
                 .HasForeignKey(sa => sa.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Hint non-binding: sumber dana default untuk proses manual.
+            // Bukan kepemilikan; hanya pre-select UI.
+            e.HasOne(sa => sa.DefaultSourceAccount)
+                .WithMany()
+                .HasForeignKey(sa => sa.DefaultSourceAccountId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             e.HasIndex(sa => sa.ScopeId);
             e.HasIndex(sa => sa.AccountId);
+            e.HasIndex(sa => sa.DefaultSourceAccountId);
             e.HasIndex(sa => new { sa.ScopeId, sa.Status });
         });
 

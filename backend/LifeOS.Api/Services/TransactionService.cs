@@ -4,13 +4,29 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LifeOS.Api.Services;
 
+/// <summary>
+/// Transaction ledger — sumber kebenaran uang riil per Sumber Dana (Account).
+///
+/// Prinsip pemisahan konsep:
+///   - Sumber Dana (Entries[].AccountId) = lokasi uang keluar/masuk.
+///   - Dana yang Disisihkan (SetAsideId) = alokasi/tujuan uang — INDEPENDEN dari akun.
+///
+/// Validasi transaksi HANYA memakai saldo aktual per akun (Σ TransactionEntry.Amount).
+/// SetAside.AccountId legacy TIDAK dipakai. Alokasi dihitung scope-wide di
+/// BalanceCalculator; pos tidak pernah "menempel" di satu rekening.
+///
+/// Reverse tidak pernah mengubah histori transaksi asli; yang dibuat adalah
+/// Reversal berlawanan. Kompensasi alokasi (SetAsideEntry) juga append-only.
+/// </summary>
 public class TransactionService
 {
     private readonly ApplicationDbContext _db;
+    private readonly SetAsideService _setAsides;
 
     public TransactionService(ApplicationDbContext db)
     {
         _db = db;
+        _setAsides = new SetAsideService(db, new BalanceCalculator(db));
     }
 
     public Task<(Transaction transaction, List<TransactionEntry> entries)> CreateTransactionAsync(
@@ -24,6 +40,10 @@ public class TransactionService
     /// Transaksi asli tetap utuh dan tidak pernah dimutasi. Yang dibuat adalah satu
     /// Transaction Reversal baru dengan entry berlawanan, dihubungkan lewat
     /// RelatedTransactionId sehingga jejak audit tetap dapat ditelusuri.
+    ///
+    /// Bila transaksi asli memiliki SetAsideId (alokasi), kompensasi alokasi dibuat
+    /// sebagai SetAsideEntry berlawanan arah yang terhubung ke transaksi Reversal —
+    /// append-only, tidak pernah memutasi entry lama.
     /// </summary>
     public Task<Transaction> ReverseTransactionAsync(
         ReverseTransactionCommand command,
@@ -56,7 +76,7 @@ public class TransactionService
                     ? "Reversal"
                     : command.Reason.Trim(),
                 CategoryName = original.CategoryName,
-                OccurredOn = command.OccurredOn ?? DateOnly.FromDateTime(DateTime.UtcNow),
+                OccurredOn = command.OccurredOn ?? BusinessDate.TodayWib,
                 RelatedTransactionId = original.Id,
                 Entries = entries
                     .Select(e => new CreateTransactionEntryCommand { AccountId = e.AccountId, Amount = -e.Amount })
@@ -64,8 +84,80 @@ public class TransactionService
             };
 
             var (reversal, _) = await ExecuteInTransactionAsync(create, token);
+
+            // Kompensasi alokasi: balik SetAsideEntry yang terhubung ke transaksi asli.
+            await CompensateSetAsideEntriesAsync(original, reversal, token);
+
             return reversal;
         }, ct);
+
+    /// <summary>
+    /// Membuat SetAsideEntry kompensasi (berlawanan arah) untuk setiap alokasi
+    /// yang terhubung ke transaksi asli. Append-only — entry lama tidak diubah.
+    /// </summary>
+    private async Task CompensateSetAsideEntriesAsync(
+        Transaction original,
+        Transaction reversal,
+        CancellationToken ct)
+    {
+        var linkedEntries = await _db.SetAsideEntries
+            .Where(se => se.TransactionId == original.Id)
+            .ToListAsync(ct);
+
+        var setAsideIds = linkedEntries.Select(e => e.SetAsideId).Distinct().ToList();
+        var linkedSetAsides = setAsideIds.Count == 0
+            ? []
+            : await _db.SetAsides.Where(sa => setAsideIds.Contains(sa.Id)).ToListAsync(ct);
+
+        foreach (var entry in linkedEntries)
+        {
+            if (entry.Type == SetAsideEntryType.CycleFunding)
+            {
+                var setAside = linkedSetAsides.FirstOrDefault(sa => sa.Id == entry.SetAsideId);
+                if (setAside is not null && SetAsideCycle.HasCycle(setAside.CycleKind))
+                {
+                    var (from, to) = SetAsideCycle.UsageWindow(setAside, BusinessDate.TodayWib);
+                    if (from.HasValue && to.HasValue
+                        && entry.CreatedAt >= BusinessDate.StartOfDayUtc(from.Value)
+                        && entry.CreatedAt < BusinessDate.StartOfDayUtc(to.Value.AddDays(1)))
+                    {
+                        setAside.CycleFundingShortfall += entry.Amount;
+                    }
+                }
+            }
+
+            _db.SetAsideEntries.Add(new SetAsideEntry
+            {
+                SetAsideId = entry.SetAsideId,
+                ScopeId = entry.ScopeId,
+                // Tipe kompensasi berlawanan dengan tipe asli.
+                Type = entry.Type switch
+                {
+                    SetAsideEntryType.Spent => SetAsideEntryType.Added,
+                    SetAsideEntryType.Added => SetAsideEntryType.Withdrawn,
+                    _ => entry.Type
+                },
+                Amount = -entry.Amount,
+                TransactionId = reversal.Id,
+                Note = $"Reversal of allocation entry {entry.Id}"
+            });
+        }
+
+        // Reversal membatalkan realisasi Sekali Pakai: buka kembali pos agar
+        // pengguna dapat mencatat transaksi koreksi/pengganti.
+        foreach (var setAside in linkedSetAsides.Where(sa =>
+                     sa.Kind == SetAsideKind.SingleSpend
+                     && sa.Status == SetAsideStatus.Closed
+                     && sa.CloseReason == SetAsideCloseReason.Spent))
+        {
+            setAside.Status = SetAsideStatus.Active;
+            setAside.CloseReason = null;
+            setAside.UpdatedAt = DateTime.UtcNow;
+        }
+
+        if (linkedEntries.Count > 0)
+            await _db.SaveChangesAsync(ct);
+    }
 
     private async Task<(Transaction transaction, List<TransactionEntry> entries)> ExecuteInTransactionAsync(
         CreateTransactionCommand command,
@@ -120,11 +212,78 @@ public class TransactionService
             _ => throw new ValidationException($"Unsupported TransactionType: {command.Type}")
         };
 
+        // Alokasi Dana yang Disisihkan — independen dari Sumber Dana.
+        List<SetAsideEntry> setAsideEntries = [];
+        if (command.SetAsideId.HasValue && command.Type == TransactionType.Expense)
+        {
+            setAsideEntries = await _setAsides.RecordTransactionExpenseAsync(
+                command.SetAsideId.Value, command.ScopeId, transaction, command.Amount, ct);
+        }
+        else if (command.SetAsideId.HasValue && command.Type == TransactionType.Income)
+        {
+            setAsideEntries = await _setAsides.RecordTransactionIncomeAsync(
+                command.SetAsideId.Value, command.ScopeId, transaction, command.Amount, ct);
+        }
+        else
+        {
+            var setAsideEntry = await BuildSetAsideEntryAsync(command, transaction, ct);
+            if (setAsideEntry is not null)
+                setAsideEntries.Add(setAsideEntry);
+        }
+
         _db.Transactions.Add(transaction);
         _db.TransactionEntries.AddRange(entries);
+        _db.SetAsideEntries.AddRange(setAsideEntries);
         await _db.SaveChangesAsync(ct);
 
+        // Pemasukan dapat mengisi shortfall target cycle yang gagal didanai saat
+        // pergantian periode. Hanya memakai Uang Bebas dan urutan pos tertua.
+        if (command.Type == TransactionType.Income && !command.SetAsideId.HasValue)
+            await _setAsides.ApplyIncomeToCycleShortfallsAsync(
+                scopeId, transaction.Id, BusinessDate.TodayWib, ct);
+
         return (transaction, entries);
+    }
+
+    /// <summary>
+    /// Membuat SetAsideEntry bila transaksi membawa SetAsideId:
+    ///   - Expense: melepas min(amount, saldoPos) dari pos (tipe Spent).
+    ///   - Income:  menambah amount ke pos (tipe Added).
+    ///   - Lainnya: tidak ada alokasi.
+    ///
+    /// Posisi uang di akun TIDAK dipengaruhi pos; entry transaksi tetap penuh
+    /// terhadap Sumber Dana. Posisi alokasi hanya mempengaruhi ledger pos.
+    /// </summary>
+    private async Task<SetAsideEntry?> BuildSetAsideEntryAsync(
+        CreateTransactionCommand command,
+        Transaction transaction,
+        CancellationToken ct)
+    {
+        if (!command.SetAsideId.HasValue)
+            return null;
+
+        var setAside = await _db.SetAsides
+            .FirstOrDefaultAsync(sa => sa.Id == command.SetAsideId.Value
+                && sa.ScopeId == command.ScopeId
+                && sa.Status == SetAsideStatus.Active, ct);
+
+        if (setAside is null)
+            throw new ValidationException("Set-aside not found or not active in current Scope.");
+
+        if (command.Type == TransactionType.Income)
+        {
+            return new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = command.ScopeId,
+                Type = SetAsideEntryType.Added,
+                Amount = command.Amount,
+                TransactionId = transaction.Id,
+                Note = "Allocation funded by transaction"
+            };
+        }
+
+        return null;
     }
 
     public async Task<decimal> GetAccountBalanceAsync(Guid accountId, Guid scopeId, CancellationToken ct = default)
@@ -170,6 +329,9 @@ public class TransactionService
         if (command.Entries.Count != 1)
             throw new ValidationException("Expense must have exactly one entry.");
 
+        if (command.Entries[0].Amount != -command.Amount)
+            throw new ValidationException("Expense entry Amount must equal the negative Transaction Amount.");
+
         if (command.Entries[0].Amount >= 0)
             throw new ValidationException("Expense entry Amount must be negative.");
 
@@ -179,16 +341,9 @@ public class TransactionService
         var accountId = command.Entries[0].AccountId;
         var balance = await GetAccountBalanceAsync(accountId, command.ScopeId, ct);
 
+        // Validasi HANYA saldo aktual Sumber Dana — pos tidak mengikat akun.
         if (balance + command.Entries[0].Amount < 0)
             throw new ValidationException("Insufficient balance.");
-
-        var allocated = await _db.SetAsideEntries
-            .Where(se => se.SetAside.AccountId == accountId && se.SetAside.Status == SetAsideStatus.Active)
-            .SumAsync(se => se.Amount, ct);
-
-        var available = balance - allocated;
-        if (available + command.Entries[0].Amount < 0)
-            throw new ValidationException("Insufficient available balance. Funds are reserved by active set-asides.");
 
         return [BuildEntry(command.Entries[0], transaction.Id)];
     }
@@ -229,17 +384,11 @@ public class TransactionService
         if (destination.Amount != command.Amount)
             throw new ValidationException($"Transfer destination Amount must be {command.Amount}.");
 
+        // Transfer HANYA memvalidasi saldo aktual sumber. Posisi alokasi tidak
+        // terpengaruh lokasi — uang yang disisihkan tetap disisihkan.
         var sourceBalance = await GetAccountBalanceAsync(source.AccountId, command.ScopeId, ct);
         if (sourceBalance + source.Amount < 0)
             throw new ValidationException("Insufficient balance in source Account.");
-
-        var sourceAllocated = await _db.SetAsideEntries
-            .Where(se => se.SetAside.AccountId == source.AccountId && se.SetAside.Status == SetAsideStatus.Active)
-            .SumAsync(se => se.Amount, ct);
-
-        var sourceAvailable = sourceBalance - sourceAllocated;
-        if (sourceAvailable + source.Amount < 0)
-            throw new ValidationException("Insufficient available balance in source Account. Funds are reserved by active set-asides.");
 
         return [BuildEntry(source, transaction.Id), BuildEntry(destination, transaction.Id)];
     }
@@ -403,13 +552,14 @@ public class TransactionService
         }
 
         await ApplyReversalInfoAsync(result, ct);
+        await ApplySetAsideInfoAsync(result, ct);
 
         return result;
     }
 
     /// <summary>
     /// Menandai transaksi yang sudah dibatalkan beserta alasan pembatalannya,
-    /// supaya histori tetap dapat ditelusuri tanpa mengubah transaksi asli.
+    /// supaya jejak audit tetap dapat ditelusuri tanpa mengubah transaksi asli.
     /// </summary>
     private async Task ApplyReversalInfoAsync(List<TransactionProjection> transactions, CancellationToken ct)
     {
@@ -477,8 +627,37 @@ public class TransactionService
             .ToListAsync(ct);
 
         await ApplyReversalInfoAsync([transaction], ct);
+        await ApplySetAsideInfoAsync([transaction], ct);
 
         return transaction;
+    }
+
+    /// <summary>
+    /// Mengisi SetAsideId/SetAsideName dari ledger alokasi yang terhubung ke transaksi.
+    /// </summary>
+    private async Task ApplySetAsideInfoAsync(List<TransactionProjection> transactions, CancellationToken ct)
+    {
+        if (transactions.Count == 0) return;
+
+        var ids = transactions.Select(t => t.Id).ToList();
+        var linked = await _db.SetAsideEntries
+            .Where(se => se.TransactionId != null && ids.Contains(se.TransactionId.Value))
+            .Select(se => new { se.TransactionId, se.SetAsideId, SetAsideName = se.SetAside.Name })
+            .ToListAsync(ct);
+
+        var byTransaction = linked
+            .Where(l => l.TransactionId.HasValue)
+            .GroupBy(l => l.TransactionId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var tx in transactions)
+        {
+            if (byTransaction.TryGetValue(tx.Id, out var info))
+            {
+                tx.SetAsideId = info.SetAsideId;
+                tx.SetAsideName = info.SetAsideName;
+            }
+        }
     }
 }
 
@@ -500,6 +679,15 @@ public class TransactionProjection
 
     /// <summary>Alasan pembatalan, diambil dari transaksi Reversal terkait.</summary>
     public string? ReversalReason { get; set; }
+
+    /// <summary>
+    /// Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas pada transaksi ini.
+    /// Independen dari Entries[].AccountId (Sumber Dana).
+    /// </summary>
+    public Guid? SetAsideId { get; set; }
+
+    /// <summary>Nama pos alokasi bila ada; opsional.</summary>
+    public string? SetAsideName { get; set; }
 }
 
 public class TransactionEntryProjection

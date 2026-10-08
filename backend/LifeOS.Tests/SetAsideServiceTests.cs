@@ -6,6 +6,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LifeOS.Tests;
 
+/// <summary>
+/// Dana yang Disisihkan = pool alokasi scope-wide, INDEPENDEN dari Sumber Dana.
+/// SetAside.AccountId legacy tidak dipakai untuk perhitungan apa pun.
+/// SourceAccountId hanya menjadi referensi akun default, bukan batas saldo.
+/// </summary>
 public class SetAsideServiceTests : IDisposable
 {
     private readonly ApplicationDbContext _db;
@@ -44,7 +49,7 @@ public class SetAsideServiceTests : IDisposable
         _connection.Dispose();
     }
 
-    // ───────────────────────── 5–7: set-aside money semantics ─────────────────────────
+    // ───────────────────────── Set-aside money semantics ─────────────────────────
 
     [Fact]
     public async Task Create_DoesNotDecreaseActualBalance()
@@ -55,7 +60,7 @@ public class SetAsideServiceTests : IDisposable
         await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Dana Servis Motor",
             Amount = 500_000m
         });
@@ -74,7 +79,7 @@ public class SetAsideServiceTests : IDisposable
         await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Dana Servis Motor",
             Amount = 500_000m
         });
@@ -84,29 +89,178 @@ public class SetAsideServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Create_DecreasesAvailableBalance()
+    public async Task Create_DecreasesScopeAvailable_NotPerAccount()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
 
-        await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Dana Servis Motor",
             Amount = 500_000m
         });
 
-        Assert.Equal(500_000m, await _balances.GetActiveSetAsideAsync(account.Id));
-        Assert.Equal(500_000m, await _balances.GetAvailableAsync(account.Id));
+        // Alokasi mengurangi TotalAvailable scope-wide, bukan saldo per akun.
+        Assert.Equal(500_000m, await _balances.GetActiveSetAsideTotalAsync(_scopeId));
+        Assert.Equal(500_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+        // Saldo aktual akun tidak berubah — alokasi bukan milik akun.
+        Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
+
+        // Pos baru TIDAK terikat ke akun mana pun.
+        Assert.Null(setAside.AccountId);
     }
 
     [Fact]
-    public async Task Withdraw_IncreasesAvailableBalance()
+    public async Task Create_WithoutSourceAccount_IsAllowed()
+    {
+        // Pos tidak pernah terikat Sumber Dana — tanpa pendanaan awal, tanpa akun.
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dana Pacaran",
+            Amount = 0m
+        });
+
+        Assert.Null(setAside.AccountId);
+        Assert.Null(setAside.DefaultSourceAccountId);
+        Assert.Equal(0m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+    }
+
+    [Fact]
+    public async Task Create_StoresDefaultSourceAccountAsNonBindingHint()
+    {
+        // SourceAccountId disimpan sebagai hint default untuk proses manual —
+        // bukan kepemilikan pos, tidak dipakai untuk perhitungan.
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Name = "Dana Servis Motor",
+            Amount = 500_000m
+        });
+
+        Assert.Null(setAside.AccountId);
+        Assert.Equal(account.Id, setAside.DefaultSourceAccountId);
+
+        var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(account.Id, projected!.DefaultSourceAccountId);
+        Assert.Equal("SeaBank", projected.DefaultSourceAccountName);
+
+        // Hint tidak memengaruhi perhitungan alokasi.
+        Assert.Equal(500_000m, projected.Amount);
+        Assert.Equal(500_000m, await _balances.GetActiveSetAsideTotalAsync(_scopeId));
+    }
+
+    [Fact]
+    public async Task Create_WithInitialAmount_WithoutSourceAccount_ValidatesScopeAvailableOnly()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 300_000m);
+
+        // Tanpa SourceAccountId: hanya cek TotalAvailable scope-wide.
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Tabungan",
+            Amount = 400_000m
+        });
+
+        Assert.Null(setAside.AccountId);
+        Assert.Equal(600_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+    }
+
+    [Fact]
+    public async Task Create_InsufficientFreeCash_Rejected()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 300_000m);
+
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+            {
+                ScopeId = _scopeId,
+                Name = "Pos Terlalu Besar",
+                Amount = 500_000m
+            }));
+
+        Assert.Contains("Uang Bebas tidak cukup", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_ReferenceAccountMayHaveZeroBalance_WhenScopeFreeCashIsSufficient()
+    {
+        var referenceAccount = await CreateAccountAsync("BCA Digital");
+        var otherAccount = await CreateAccountAsync("Rekening Harian");
+        await SeedBalanceAsync(otherAccount.Id, 500_000m);
+
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = referenceAccount.Id,
+            Name = "Tabungan",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 300_000m
+        });
+
+        Assert.Equal(referenceAccount.Id, setAside.DefaultSourceAccountId);
+        Assert.Equal(0m, await _balances.GetActualBalanceAsync(referenceAccount.Id));
+        Assert.Equal(0m, setAside.CycleFundingShortfall);
+        Assert.Equal(200_000m, await _balances.GetScopeFreeCashAsync(_scopeId));
+
+        var toppedUp = await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = referenceAccount.Id,
+            Amount = 100_000m
+        });
+        Assert.Equal(400_000m, toppedUp.SetAside.Amount);
+        Assert.Equal(referenceAccount.Id, toppedUp.SetAside.DefaultSourceAccountId);
+        Assert.Equal(0m, await _balances.GetActualBalanceAsync(referenceAccount.Id));
+        Assert.Equal(100_000m, await _balances.GetScopeFreeCashAsync(_scopeId));
+    }
+
+    [Fact]
+    public async Task Add_WhenFreeCashIsZero_IsRejectedEvenIfTotalAvailableIsPositive()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 500_000m);
+        var setAside = await CreateSetAsideAsync("Tabungan", 0m);
+        _db.UpcomingEvents.Add(new UpcomingEvent
+        {
+            ScopeId = _scopeId,
+            Title = "Tagihan terjadwal",
+            Amount = 500_000m,
+            Direction = UpcomingEventDirection.Expense,
+            Status = UpcomingEventStatus.Scheduled
+        });
+        await _db.SaveChangesAsync();
+
+        Assert.Equal(500_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+        Assert.Equal(0m, await _balances.GetScopeFreeCashAsync(_scopeId));
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.AddAsync(setAside.Id, new AddToSetAsideCommand
+            {
+                ScopeId = _scopeId,
+                Amount = 1_000m
+            }));
+
+        Assert.Contains("Uang Bebas tidak cukup", exception.Message);
+        Assert.Equal(0m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+    }
+
+    [Fact]
+    public async Task Withdraw_IncreasesScopeAvailable()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 300_000m, sourceAccountId: account.Id);
 
         var result = await _sut.WithdrawAsync(setAside.Id, new WithdrawFromSetAsideCommand
         {
@@ -115,7 +269,7 @@ public class SetAsideServiceTests : IDisposable
         });
 
         Assert.Equal(100_000m, result.SetAside.Amount);
-        Assert.Equal(900_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(900_000m, await _balances.GetScopeAvailableAsync(_scopeId));
         Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
     }
 
@@ -124,7 +278,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 100_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 100_000m, sourceAccountId: account.Id);
 
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.WithdrawAsync(setAside.Id, new WithdrawFromSetAsideCommand
@@ -138,20 +292,38 @@ public class SetAsideServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Add_IncreasesReservedAndReducesAvailable()
+    public async Task Add_IncreasesReservedAndReducesScopeAvailable()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Tabungan", 100_000m);
+        var setAside = await CreateSetAsideAsync("Tabungan", 100_000m, sourceAccountId: account.Id);
 
-        await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand { ScopeId = _scopeId, Amount = 250_000m });
+        await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Amount = 250_000m
+        });
 
         Assert.Equal(350_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(650_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(650_000m, await _balances.GetScopeAvailableAsync(_scopeId));
         Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
     }
 
-    // ───────────────────────── 8–9: target null + partial use ─────────────────────────
+    [Fact]
+    public async Task Add_WithoutSourceAccount_UsesScopeAvailable()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 500_000m);
+        var setAside = await CreateSetAsideAsync("Tabungan", 100_000m, sourceAccountId: account.Id);
+
+        await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand { ScopeId = _scopeId, Amount = 200_000m });
+
+        Assert.Equal(300_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+        Assert.Equal(200_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+    }
+
+    // ───────────────────────── Target null + partial use ─────────────────────────
 
     [Fact]
     public async Task TargetAmount_CanBeNull()
@@ -162,7 +334,7 @@ public class SetAsideServiceTests : IDisposable
         var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Tabungan Organik",
             Amount = 850_000m,
             TargetAmount = null,
@@ -181,11 +353,12 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 300_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 300_000m, sourceAccountId: account.Id);
 
         var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 100_000m,
             Description = "Makan siang",
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
@@ -203,7 +376,8 @@ public class SetAsideServiceTests : IDisposable
 
         // Saldo riil berkurang sebesar pengeluaran, bukan sebesar set-aside.
         Assert.Equal(900_000m, await _balances.GetActualBalanceAsync(account.Id));
-        Assert.Equal(700_000m, await _balances.GetAvailableAsync(account.Id));
+        // TotalAvailable = 900rb − 200rb.
+        Assert.Equal(700_000m, await _balances.GetScopeAvailableAsync(_scopeId));
 
         // Terpakai = nominal transaksi penuh.
         var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
@@ -215,118 +389,157 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 500_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 300_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 300_000m, sourceAccountId: account.Id);
 
         var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 400_000m,
             Description = "Belanja besar",
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
 
-        // 300rb dari set-aside, 100rb dari Uang Bebas.
+        // 300rb dari pos, 100rb dari uang yang belum dialokasikan.
         Assert.Equal(0m, result.SetAside.Amount);
         Assert.Equal(100_000m, await _balances.GetActualBalanceAsync(account.Id));
-        Assert.Equal(100_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(100_000m, await _balances.GetScopeAvailableAsync(_scopeId));
     }
 
     [Fact]
-    public async Task Spend_WhenSetAsideEmpty_TakesFullAmountFromSelectedFreeCashAccount()
+    public async Task Spend_FromDifferentAccountThanPosCreation()
     {
-        var posAccount = await CreateAccountAsync("SeaBank");
-        var setAside = await CreateSetAsideAsync(posAccount.Id, "Dana Makan", 0m);
+        // POS TIDAK TERIKAT AKUN: dibuat "dari SeaBank", tapi spend bisa dari akun lain.
+        var seabank = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(seabank.Id, 1_000_000m);
+        var setAside = await CreateSetAsideAsync("Dana Pacaran", 500_000m, sourceAccountId: seabank.Id);
 
-        var freeCash = await CreateAccountAsync("Mandiri");
-        await SeedBalanceAsync(freeCash.Id, 200_000m);
+        var cash = await CreateAccountAsync("Tunai");
+        await SeedBalanceAsync(cash.Id, 200_000m);
 
         var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = cash.Id,
+            Amount = 200_000m,
+            Description = "Kopi sama pacar",
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+
+        // Uang keluar dari Tunai (Sumber Dana aktual), bukan dari "akun pos".
+        Assert.NotNull(result.TransactionId);
+        var entries = await _db.TransactionEntries
+            .Where(te => te.TransactionId == result.TransactionId)
+            .ToListAsync();
+        Assert.Single(entries);
+        Assert.Equal(cash.Id, entries[0].AccountId);
+        Assert.Equal(-200_000m, entries[0].Amount);
+
+        // Pos melepas 200rb, sisa 300rb — tetap Dana Pacaran.
+        Assert.Equal(300_000m, result.SetAside.Amount);
+        Assert.Equal(0m, await _balances.GetActualBalanceAsync(cash.Id));
+        Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(seabank.Id));
+    }
+
+    [Fact]
+    public async Task Spend_WhenSetAsideEmpty_TakesFullAmountFromSourceAccount()
+    {
+        var source = await CreateAccountAsync("Mandiri");
+        await SeedBalanceAsync(source.Id, 200_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 0m);
+
+        var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = source.Id,
             Amount = 50_000m,
-            FreeCashAccountId = freeCash.Id,
             Description = "Makan siang warteg",
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
 
-        // Saldo pos0 → seluruh pemakaian dari rekening Uang Bebas terpilih.
+        // Saldo pos 0 → seluruh pemakaian dari sumber yang dipilih.
         Assert.Equal(0m, result.SetAside.Amount);
         Assert.NotNull(result.TransactionId);
         var tx = await _db.Transactions.SingleAsync(t => t.Id == result.TransactionId);
         Assert.Equal(TransactionType.Expense, tx.Type);
         Assert.Equal(50_000m, tx.Amount);
 
-        Assert.Equal(0m, await _balances.GetActualBalanceAsync(posAccount.Id));
-        Assert.Equal(150_000m, await _balances.GetActualBalanceAsync(freeCash.Id));
-        Assert.Equal(150_000m, await _balances.GetAvailableAsync(freeCash.Id));
+        Assert.Equal(150_000m, await _balances.GetActualBalanceAsync(source.Id));
+        Assert.Equal(150_000m, await _balances.GetScopeAvailableAsync(_scopeId));
 
-        // Seluruh pemakaian dari Uang Bebas tetap terhitung sebagai "Terpakai".
+        // Seluruh pemakaian tetap terhitung sebagai "Terpakai".
         var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
         Assert.Equal(50_000m, projected!.UsedAmount);
     }
 
     [Fact]
-    public async Task Spend_SplitsBetweenSetAsideAndSelectedFreeCashAccount()
+    public async Task Spend_WholeAmountLeavesSingleSourceAccount()
     {
-        var posAccount = await CreateAccountAsync("SeaBank");
-        await SeedBalanceAsync(posAccount.Id, 100_000m);
-        var setAside = await CreateSetAsideAsync(posAccount.Id, "Dana Makan", 25_000m);
-
-        var freeCash = await CreateAccountAsync("Mandiri");
-        await SeedBalanceAsync(freeCash.Id, 100_000m);
+        // Model baru: SELURUH nominal keluar dari satu Sumber Dana.
+        // Pos hanya melepas porsinya sebagai metadata alokasi.
+        var source = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(source.Id, 500_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 300_000m, sourceAccountId: source.Id);
 
         var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
-            Amount = 50_000m,
-            FreeCashAccountId = freeCash.Id,
+            SourceAccountId = source.Id,
+            Amount = 400_000m,
             Description = "Belanja campuran",
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
 
-        // Rp25.000 dari saldo pos, Rp25.000 dari Uang Bebas.
+        // Seluruh 400rb keluar dari SeaBank.
+        Assert.Equal(100_000m, await _balances.GetActualBalanceAsync(source.Id));
+        // Pos melepas 300rb; shortfall 100rb ditanggung uang belum dialokasikan.
         Assert.Equal(0m, result.SetAside.Amount);
-        var tx = await _db.Transactions.SingleAsync(t => t.Id == result.TransactionId);
-        Assert.Equal(50_000m, tx.Amount);
 
-        var entries = await _db.TransactionEntries
-            .Where(te => te.TransactionId == tx.Id)
-            .ToListAsync();
-        Assert.Equal(2, entries.Count);
-        Assert.Equal(-25_000m, entries.Single(e => e.AccountId == posAccount.Id).Amount);
-        Assert.Equal(-25_000m, entries.Single(e => e.AccountId == freeCash.Id).Amount);
-
-        Assert.Equal(75_000m, await _balances.GetActualBalanceAsync(posAccount.Id));
-        Assert.Equal(75_000m, await _balances.GetActualBalanceAsync(freeCash.Id));
-
-        // Terpakai memakai nominal penuh: porsi Uang Bebas ikut terhitung,
-        // supaya pemakaian yang melewati plafon tetap terlihat.
         var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
-        Assert.Equal(50_000m, projected!.UsedAmount);
+        Assert.Equal(400_000m, projected!.UsedAmount);
         Assert.Equal(0m, projected.Amount);
     }
 
     [Fact]
-    public async Task Spend_FreeCashPortion_ExceedsAvailableBalance_IsRejected()
+    public async Task Spend_SourceBalanceInsufficient_Rejected()
     {
-        var posAccount = await CreateAccountAsync("SeaBank");
-        var setAside = await CreateSetAsideAsync(posAccount.Id, "Dana Makan", 0m);
-
-        var freeCash = await CreateAccountAsync("Mandiri");
-        await SeedBalanceAsync(freeCash.Id, 10_000m);
+        var source = await CreateAccountAsync("Mandiri");
+        await SeedBalanceAsync(source.Id, 10_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 0m);
 
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
             {
                 ScopeId = _scopeId,
+                SourceAccountId = source.Id,
                 Amount = 50_000m,
-                FreeCashAccountId = freeCash.Id,
                 OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
             }));
 
-        Assert.Contains("Insufficient funds", ex.Message);
-        Assert.Equal(0m, await _balances.GetActualBalanceAsync(posAccount.Id));
-        Assert.Equal(10_000m, await _balances.GetActualBalanceAsync(freeCash.Id));
+        Assert.Contains("Insufficient balance", ex.Message);
+        Assert.Equal(10_000m, await _balances.GetActualBalanceAsync(source.Id));
+    }
+
+    [Fact]
+    public async Task Spend_ShortfallExceedsScopeAvailable_Rejected()
+    {
+        // Uang hanya 100rb, semua sudah dialokasikan ke pos lain.
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 100_000m);
+        await CreateSetAsideAsync("Pos Lain", 100_000m, sourceAccountId: account.Id);
+        var mine = await CreateSetAsideAsync("Dana Makan", 0m);
+
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.SpendAsync(mine.Id, new SpendFromSetAsideCommand
+            {
+                ScopeId = _scopeId,
+                SourceAccountId = account.Id,
+                Amount = 50_000m,
+                OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+            }));
+
+        // Saldo aktual account cukup (100rb ≥ 50rb), tapi semua sudah dialokasikan.
+        Assert.Contains("Insufficient available money", ex.Message);
     }
 
     [Fact]
@@ -334,18 +547,20 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 500_000m);
-        var mine = await CreateSetAsideAsync(account.Id, "Dana Makan", 300_000m);
-        await CreateSetAsideAsync(account.Id, "Dana Servis", 200_000m);
+        var mine = await CreateSetAsideAsync("Dana Makan", 300_000m, sourceAccountId: account.Id);
+        await CreateSetAsideAsync("Dana Servis", 200_000m, sourceAccountId: account.Id);
 
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.SpendAsync(mine.Id, new SpendFromSetAsideCommand
             {
                 ScopeId = _scopeId,
+                SourceAccountId = account.Id,
                 Amount = 400_000m,
                 OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
             }));
 
-        Assert.Contains("Insufficient funds", ex.Message);
+        // 400rb − 300rb pos = 100rb shortfall; TotalAvailable = 0 → ditolak.
+        Assert.Contains("Insufficient available money", ex.Message);
         Assert.Equal(300_000m, await _balances.GetSetAsideAmountAsync(mine.Id));
     }
 
@@ -354,18 +569,54 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 500_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Kacamata", 400_000m);
+        var setAside = await CreateSetAsideAsync("Kacamata", 400_000m, sourceAccountId: account.Id);
 
         await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 400_000m,
             Description = "Beli kacamata",
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
 
         Assert.Equal(0m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(100_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(100_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+    }
+
+    // ───────────────────────── Key user scenario: transfer doesn't touch pos ─────────────────────────
+
+    [Fact]
+    public async Task Transfer_BetweenAccounts_DoesNotAffectSetAside()
+    {
+        // Skenario user: Dana Pacaran Rp500.000, tarik Rp200.000 menjadi tunai.
+        // Rp200.000 tetap Dana Pacaran — hanya Sumber Dananya berubah.
+        var seabank = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(seabank.Id, 500_000m);
+        var setAside = await CreateSetAsideAsync("Dana Pacaran", 500_000m, sourceAccountId: seabank.Id);
+
+        var tunai = await CreateAccountAsync("Tunai");
+
+        var (tx, _) = await _transactions.CreateTransactionAsync(new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Transfer,
+            Amount = 200_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries =
+            [
+                new CreateTransactionEntryCommand { AccountId = seabank.Id, Amount = -200_000m },
+                new CreateTransactionEntryCommand { AccountId = tunai.Id, Amount = 200_000m }
+            ]
+        });
+
+        Assert.NotNull(tx);
+        // Pos TIDAK berubah — alokasi mengikuti uang, bukan akun.
+        Assert.Equal(500_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+        Assert.Equal(300_000m, await _balances.GetActualBalanceAsync(seabank.Id));
+        Assert.Equal(200_000m, await _balances.GetActualBalanceAsync(tunai.Id));
+        // TotalAvailable tidak berubah — transfer bukan alokasi.
+        Assert.Equal(0m, await _balances.GetScopeAvailableAsync(_scopeId));
     }
 
     // ───────────────────────── Close ─────────────────────────
@@ -375,7 +626,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Tabungan", 400_000m);
+        var setAside = await CreateSetAsideAsync("Tabungan", 400_000m, sourceAccountId: account.Id);
         var txCountBefore = await _db.Transactions.CountAsync();
 
         var result = await _sut.CloseAsync(setAside.Id, new CloseSetAsideCommand
@@ -387,7 +638,7 @@ public class SetAsideServiceTests : IDisposable
         Assert.Equal(SetAsideStatus.Closed, result.SetAside.Status);
         Assert.Equal(SetAsideCloseReason.Cancelled, result.SetAside.CloseReason);
         Assert.Equal(0m, result.SetAside.Amount);
-        Assert.Equal(1_000_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(1_000_000m, await _balances.GetScopeAvailableAsync(_scopeId));
         Assert.Equal(txCountBefore, await _db.Transactions.CountAsync());
     }
 
@@ -396,11 +647,11 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Tabungan", 400_000m);
+        var setAside = await CreateSetAsideAsync("Tabungan", 400_000m, sourceAccountId: account.Id);
         await _sut.CloseAsync(setAside.Id, new CloseSetAsideCommand { ScopeId = _scopeId });
 
-        Assert.Equal(0m, await _balances.GetActiveSetAsideAsync(account.Id));
-        Assert.Equal(1_000_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(0m, await _balances.GetActiveSetAsideTotalAsync(_scopeId));
+        Assert.Equal(1_000_000m, await _balances.GetScopeAvailableAsync(_scopeId));
     }
 
     // ───────────────────────── History ─────────────────────────
@@ -410,13 +661,20 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 300_000m, withInitialAmount: false);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 0m);
 
-        await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand { ScopeId = _scopeId, Amount = 300_000m, Note = "topup" });
+        await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Amount = 300_000m,
+            Note = "topup"
+        });
         await _sut.WithdrawAsync(setAside.Id, new WithdrawFromSetAsideCommand { ScopeId = _scopeId, Amount = 50_000m, Note = "tarik" });
         await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 100_000m,
             Description = "makan",
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
@@ -424,11 +682,169 @@ public class SetAsideServiceTests : IDisposable
 
         var history = await _sut.GetHistoryAsync(setAside.Id, _scopeId);
 
-        Assert.Equal(3, history.Count);
-        Assert.Equal(history.Sum(h => h.Amount), await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Contains(history, h => h.Type == SetAsideEntryType.Added && h.Amount == 300_000m);
-        Assert.Contains(history, h => h.Type == SetAsideEntryType.Withdrawn && h.Amount == -50_000m);
-        Assert.Contains(history, h => h.Type == SetAsideEntryType.Spent && h.Amount == -100_000m && h.TransactionId.HasValue);
+        Assert.Equal(3, history.Items.Count);
+        Assert.Equal(history.Items.Sum(h => h.Amount), await _balances.GetSetAsideAmountAsync(setAside.Id));
+        Assert.Contains(history.Items, h => h.Type == SetAsideEntryType.Added && h.Amount == 300_000m);
+        Assert.Contains(history.Items, h => h.Type == SetAsideEntryType.Withdrawn && h.Amount == -50_000m);
+        Assert.Contains(history.Items, h => h.Type == SetAsideEntryType.Spent && h.Amount == -100_000m && h.TransactionId.HasValue);
+        var spendEntry = history.Items.Single(h => h.Type == SetAsideEntryType.Spent);
+        Assert.NotNull(spendEntry.Transaction);
+        Assert.Equal("makan", spendEntry.Transaction!.Description);
+        Assert.Equal(TransactionType.Expense, spendEntry.Transaction.Type);
+    }
+
+    [Fact]
+    public async Task History_UsesCursorPagesWithoutRepeatingEntries()
+    {
+        var setAside = await CreateSetAsideAsync("Riwayat", 0m);
+        var timestamp = DateTime.UtcNow.AddMinutes(-10);
+        for (var i = 0; i < 5; i++)
+            _db.SetAsideEntries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = SetAsideEntryType.Added,
+                Amount = i + 1,
+                CreatedAt = timestamp.AddMinutes(i)
+            });
+        await _db.SaveChangesAsync();
+
+        var first = await _sut.GetHistoryAsync(setAside.Id, _scopeId, pageSize: 2);
+        var second = await _sut.GetHistoryAsync(setAside.Id, _scopeId, first.NextCursor, 2);
+        var third = await _sut.GetHistoryAsync(setAside.Id, _scopeId, second.NextCursor, 2);
+
+        Assert.Equal(2, first.Items.Count);
+        Assert.True(first.HasMore);
+        Assert.Equal(2, second.Items.Count);
+        Assert.True(second.HasMore);
+        Assert.Single(third.Items);
+        Assert.False(third.HasMore);
+        Assert.Equal(5, first.Items.Concat(second.Items).Concat(third.Items).Select(x => x.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task History_CursorPagesKeepHistoricalBalanceAfterAccurate()
+    {
+        var setAside = await CreateSetAsideAsync("Saldo histori", 0m);
+        var timestamp = DateTime.UtcNow.AddMinutes(-10);
+        var deltas = new[] { 10m, 20m, -3m, 5m, -2m };
+        for (var i = 0; i < deltas.Length; i++)
+            _db.SetAsideEntries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = deltas[i] > 0 ? SetAsideEntryType.Added : SetAsideEntryType.Withdrawn,
+                Amount = deltas[i],
+                CreatedAt = timestamp.AddMinutes(i)
+            });
+        await _db.SaveChangesAsync();
+
+        var first = await _sut.GetHistoryAsync(setAside.Id, _scopeId, pageSize: 2);
+        var second = await _sut.GetHistoryAsync(setAside.Id, _scopeId, first.NextCursor, 2);
+        var third = await _sut.GetHistoryAsync(setAside.Id, _scopeId, second.NextCursor, 2);
+        var items = first.Items.Concat(second.Items).Concat(third.Items).ToList();
+
+        Assert.Equal(5, items.Count);
+        Assert.Equal(new[] { 30m, 32m, 27m, 30m, 10m }, items.Select(item => item.BalanceAfter));
+    }
+
+    [Fact]
+    public async Task IncomeAllocatedToCyclingSetAsideFundsShortfall_AndReversalRestoresIt()
+    {
+        var account = await CreateAccountAsync("Pemasukan");
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dana Siklus",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+
+        var (income, _) = await _transactions.CreateTransactionAsync(new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 200_000m,
+            OccurredOn = BusinessDate.TodayWib,
+            SetAsideId = setAside.Id,
+            Entries = [new CreateTransactionEntryCommand { AccountId = account.Id, Amount = 200_000m }]
+        });
+
+        var funded = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(200_000m, funded!.Amount);
+        Assert.Equal(100_000m, funded.CycleFundingShortfall);
+        Assert.Contains((await _sut.GetHistoryAsync(setAside.Id, _scopeId)).Items,
+            entry => entry.Type == SetAsideEntryType.CycleFunding && entry.Amount == 200_000m);
+
+        await _transactions.ReverseTransactionAsync(new ReverseTransactionCommand
+        {
+            ScopeId = _scopeId,
+            TransactionId = income.Id
+        });
+
+        var reversed = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(0m, reversed!.Amount);
+        Assert.Equal(300_000m, reversed.CycleFundingShortfall);
+    }
+
+    [Fact]
+    public async Task Expense_RejectsTransactionAmountThatDiffersFromAccountDebit()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var setAside = await CreateSetAsideAsync("Dana Belanja", 100_000m);
+        var transactionCount = await _db.Transactions.CountAsync();
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            _transactions.CreateTransactionAsync(new CreateTransactionCommand
+            {
+                ScopeId = _scopeId,
+                Type = TransactionType.Expense,
+                Amount = 200_000m,
+                OccurredOn = BusinessDate.TodayWib,
+                SetAsideId = setAside.Id,
+                Entries = [new CreateTransactionEntryCommand { AccountId = account.Id, Amount = -100_000m }]
+            }));
+
+        Assert.Contains("must equal", exception.Message);
+        Assert.Equal(transactionCount, await _db.Transactions.CountAsync());
+        Assert.Equal(100_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+        Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
+    }
+
+    [Fact]
+    public async Task Create_RejectsUnknownEnumValues()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Jenis invalid",
+            Kind = (SetAsideKind)999
+        }));
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Siklus invalid",
+            CycleKind = (SetAsideCycleKind)999
+        }));
+    }
+
+    [Fact]
+    public async Task Close_RejectsUnknownReason()
+    {
+        var setAside = await CreateSetAsideAsync("Alasan invalid", 0m);
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CloseAsync(setAside.Id,
+            new CloseSetAsideCommand { ScopeId = _scopeId, Reason = (SetAsideCloseReason)999 }));
+    }
+
+    [Fact]
+    public async Task Update_RejectsUnknownCycleEnum()
+    {
+        var setAside = await CreateSetAsideAsync("Siklus invalid", 0m);
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.UpdateSetAsideAsync(setAside.Id,
+            new UpdateSetAsideCommand { ScopeId = _scopeId, CycleKind = (SetAsideCycleKind)999 }));
     }
 
     // ───────────────────────── Scope isolation ─────────────────────────
@@ -438,7 +854,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Pos A", 100_000m);
+        var setAside = await CreateSetAsideAsync("Pos A", 100_000m, sourceAccountId: account.Id);
 
         var otherScope = new Scope { Type = ScopeType.Owner };
         _db.Scopes.Add(otherScope);
@@ -458,7 +874,7 @@ public class SetAsideServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CrossScope_Account_Rejected()
+    public async Task CrossScope_SourceAccount_RejectedWhenFunding()
     {
         var otherScope = new Scope { Type = ScopeType.Owner };
         _db.Scopes.Add(otherScope);
@@ -472,18 +888,19 @@ public class SetAsideServiceTests : IDisposable
             _sut.CreateSetAsideAsync(new CreateSetAsideCommand
             {
                 ScopeId = _scopeId,
-                AccountId = foreignAccount.Id,
+                SourceAccountId = foreignAccount.Id,
                 Name = "Pos",
-                Amount = 0m
+                Amount = 100_000m
             }));
     }
 
     // ───────────────────────── Archived account ─────────────────────────
 
     [Fact]
-    public async Task ArchivedAccount_RejectsNewSetAside()
+    public async Task ArchivedSourceAccount_RejectsFunding()
     {
         var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
         account.IsArchived = true;
         await _db.SaveChangesAsync();
 
@@ -491,20 +908,38 @@ public class SetAsideServiceTests : IDisposable
             _sut.CreateSetAsideAsync(new CreateSetAsideCommand
             {
                 ScopeId = _scopeId,
-                AccountId = account.Id,
+                SourceAccountId = account.Id,
                 Name = "Pos",
-                Amount = 0m
+                Amount = 100_000m
             }));
     }
 
     [Fact]
-    public async Task ArchivedAccount_RejectsSpend()
+    public async Task Create_WithoutFunding_AllowedEvenIfOnlyArchivedAccountsExist()
+    {
+        // Pos independen dari akun — tanpa pendanaan awal, arsip akun tidak relevan.
+        var account = await CreateAccountAsync("SeaBank");
+        account.IsArchived = true;
+        await _db.SaveChangesAsync();
+
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Pos Baru",
+            Amount = 0m
+        });
+
+        Assert.NotNull(setAside);
+        Assert.Null(setAside.AccountId);
+    }
+
+    [Fact]
+    public async Task ArchivedSourceAccount_RejectsSpend()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 500_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 200_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 200_000m, sourceAccountId: account.Id);
 
-        await _sut.WithdrawAsync(setAside.Id, new WithdrawFromSetAsideCommand { ScopeId = _scopeId, Amount = 200_000m });
         account.IsArchived = true;
         await _db.SaveChangesAsync();
 
@@ -512,6 +947,7 @@ public class SetAsideServiceTests : IDisposable
             _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
             {
                 ScopeId = _scopeId,
+                SourceAccountId = account.Id,
                 Amount = 10_000m,
                 OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
             }));
@@ -520,29 +956,299 @@ public class SetAsideServiceTests : IDisposable
     // ───────────────────────── Cycle: target saldo per siklus ─────────────────────────
 
     [Fact]
-    public async Task CycleReset_Underspend_TopUpOnlyWhatIsMissing()
+    public async Task RoutineBatch_SpendReleasesUnusedAmountAndCanOnlyExecuteOncePerCycle()
     {
-        // Target 300rb, tersisa 200rb → hanya 100rb yang diambil dari Uang Bebas.
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateCyclingSetAsideAsync(account.Id, "Dana Makan", 300_000m, SetAsideCycleKind.Monthly);
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Servis Motor",
+            Kind = SetAsideKind.RoutineBatch,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 300_000m
+        });
+
+        var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Amount = 250_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+
+        Assert.Equal(0m, result.SetAside.Amount);
+        Assert.Equal(750_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+        Assert.True(result.SetAside.IsCycleExecuted);
+        Assert.Equal(250_000m, result.SetAside.UsedAmount);
+        Assert.Contains((await _sut.GetHistoryAsync(setAside.Id, _scopeId)).Items, entry =>
+            entry.Type == SetAsideEntryType.Released
+            && entry.Amount == -50_000m
+            && entry.TransactionId == result.TransactionId);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
+            {
+                ScopeId = _scopeId,
+                SourceAccountId = account.Id,
+                Amount = 10_000m,
+                OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+            }));
+    }
+
+    [Fact]
+    public async Task RoutineBatch_ReversalRestoresAllocationAndReopensCycleExecution()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Servis Motor",
+            Kind = SetAsideKind.RoutineBatch,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 300_000m
+        });
+
+        var spent = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Amount = 250_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+
+        await _transactions.ReverseTransactionAsync(new ReverseTransactionCommand
+        {
+            ScopeId = _scopeId,
+            TransactionId = spent.TransactionId!.Value
+        });
+
+        var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(300_000m, projected!.Amount);
+        Assert.Equal(0m, projected.UsedAmount);
+        Assert.False(projected.IsCycleExecuted);
+        Assert.Equal(700_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+    }
+
+    [Fact]
+    public async Task RoutineBatch_ExpenseFromGeneralTransactionAlsoCompletesCycleAndReleasesRemainder()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Servis Motor",
+            Kind = SetAsideKind.RoutineBatch,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 300_000m
+        });
+
+        await _transactions.CreateTransactionAsync(new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 280_000m,
+            // Periode mengikuti tanggal pencatatan, bukan tanggal kejadian transaksi.
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(-2)),
+            SetAsideId = setAside.Id,
+            Entries = [new CreateTransactionEntryCommand { AccountId = account.Id, Amount = -280_000m }]
+        });
+
+        var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(0m, projected!.Amount);
+        Assert.True(projected.IsCycleExecuted);
+        Assert.Equal(280_000m, projected.UsedAmount);
+        Assert.Equal(720_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+    }
+
+    [Fact]
+    public async Task AddWithdrawAndClose_NormalizePendingCycleBeforeApplyingMutation()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        async Task<SetAside> CreateUnderfundedCycleAsync(string name)
+        {
+            var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+            {
+                ScopeId = _scopeId,
+                SourceAccountId = account.Id,
+                Name = name,
+                Kind = SetAsideKind.RoutineIncremental,
+                TargetAmount = 300_000m,
+                CycleKind = SetAsideCycleKind.Monthly,
+                Amount = 100_000m
+            });
+            await ForceCycleRolloverAsync(setAside.Id);
+            return setAside;
+        }
+
+        var addTarget = await CreateUnderfundedCycleAsync("Tambah");
+        var added = await _sut.AddAsync(addTarget.Id, new AddToSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Amount = 10_000m
+        });
+        Assert.Equal(310_000m, added.SetAside.Amount);
+        Assert.Contains((await _sut.GetHistoryAsync(addTarget.Id, _scopeId)).Items, entry =>
+            entry.Type == SetAsideEntryType.CycleFunding && entry.Amount == 200_000m);
+
+        var withdrawTarget = await CreateUnderfundedCycleAsync("Tarik");
+        var withdrawn = await _sut.WithdrawAsync(withdrawTarget.Id, new WithdrawFromSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Amount = 10_000m
+        });
+        Assert.Equal(290_000m, withdrawn.SetAside.Amount);
+        Assert.Contains((await _sut.GetHistoryAsync(withdrawTarget.Id, _scopeId)).Items, entry =>
+            entry.Type == SetAsideEntryType.CycleFunding && entry.Amount == 200_000m);
+
+        var closeTarget = await CreateUnderfundedCycleAsync("Tutup");
+        var closed = await _sut.CloseAsync(closeTarget.Id, new CloseSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Reason = SetAsideCloseReason.Cancelled
+        });
+        Assert.Equal(SetAsideStatus.Closed, closed.SetAside.Status);
+        Assert.Equal(0m, closed.SetAside.Amount);
+        var closeHistory = (await _sut.GetHistoryAsync(closeTarget.Id, _scopeId)).Items;
+        Assert.Contains(closeHistory, entry =>
+            entry.Type == SetAsideEntryType.CycleFunding && entry.Amount == 200_000m);
+        Assert.Contains(closeHistory, entry =>
+            entry.Type == SetAsideEntryType.Closed && entry.Amount == -300_000m);
+    }
+
+    [Fact]
+    public async Task IncomeAutomaticallyFundsCycleShortfallsInCreationOrder()
+    {
+        var account = await CreateAccountAsync("BCA Digital");
+        var first = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dana Pertama",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+        var second = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dana Kedua",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+
+        var secondEntity = await _db.SetAsides.SingleAsync(sa => sa.Id == second.Id);
+        secondEntity.CreatedAt = first.CreatedAt.AddMinutes(1);
+        await _db.SaveChangesAsync();
+
+        await ForceCycleRolloverAsync(first.Id);
+        await TouchAsync(first.Id);
+        await ForceCycleRolloverAsync(second.Id);
+        await TouchAsync(second.Id);
+        Assert.Equal(300_000m, (await _sut.GetSetAsideAsync(first.Id, _scopeId))!.CycleFundingShortfall);
+        Assert.Equal(300_000m, (await _sut.GetSetAsideAsync(second.Id, _scopeId))!.CycleFundingShortfall);
+        Assert.Equal(0m, await _balances.GetScopeFreeCashAsync(_scopeId));
+
+        var income = await _transactions.CreateTransactionAsync(new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 400_000m,
+            OccurredOn = BusinessDate.TodayWib,
+            Entries = [new CreateTransactionEntryCommand { AccountId = account.Id, Amount = 400_000m }]
+        });
+
+        var firstProjected = await _sut.GetSetAsideAsync(first.Id, _scopeId);
+        var secondProjected = await _sut.GetSetAsideAsync(second.Id, _scopeId);
+        Assert.Equal(300_000m, firstProjected!.Amount);
+        Assert.Equal(0m, firstProjected.CycleFundingShortfall);
+        Assert.Equal(100_000m, secondProjected!.Amount);
+        Assert.Equal(200_000m, secondProjected.CycleFundingShortfall);
+        Assert.Equal(0m, await _balances.GetScopeFreeCashAsync(_scopeId));
+
+        await _transactions.ReverseTransactionAsync(new ReverseTransactionCommand
+        {
+            ScopeId = _scopeId,
+            TransactionId = income.transaction.Id
+        });
+        Assert.Equal(0m, await _balances.GetActualBalanceAsync(account.Id));
+        Assert.Equal(300_000m, (await _sut.GetSetAsideAsync(first.Id, _scopeId))!.CycleFundingShortfall);
+        Assert.Equal(300_000m, (await _sut.GetSetAsideAsync(second.Id, _scopeId))!.CycleFundingShortfall);
+    }
+
+    [Fact]
+    public async Task SingleSpend_ClosesAfterExpense_AndReversalReopensIt()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Kulkas",
+            Kind = SetAsideKind.SingleSpend,
+            TargetAmount = 300_000m,
+            Amount = 300_000m
+        });
+
+        var result = await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Amount = 250_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+
+        Assert.Equal(SetAsideStatus.Closed, result.SetAside.Status);
+        Assert.Equal(SetAsideCloseReason.Spent, result.SetAside.CloseReason);
+        Assert.Equal(0m, result.SetAside.Amount);
+        Assert.Equal(750_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+
+        await _transactions.ReverseTransactionAsync(new ReverseTransactionCommand
+        {
+            ScopeId = _scopeId,
+            TransactionId = result.TransactionId!.Value
+        });
+
+        var reopened = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(SetAsideStatus.Active, reopened!.Status);
+        Assert.Equal(300_000m, reopened.Amount);
+        Assert.Equal(700_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+    }
+
+    [Fact]
+    public async Task CycleReset_Underspend_TopUpOnlyWhatIsMissing()
+    {
+        // Target 300rb, tersisa 200rb → hanya 100rb yang diambil dari TotalAvailable.
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var setAside = await CreateCyclingSetAsideAsync("Dana Makan", 300_000m, SetAsideCycleKind.Monthly, sourceAccountId: account.Id);
 
         await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 100_000m,
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
 
         Assert.Equal(200_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(700_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(700_000m, await _balances.GetScopeAvailableAsync(_scopeId));
 
         await ForceCycleRolloverAsync(setAside.Id);
         await TouchAsync(setAside.Id);
 
         // Tepat kembali ke target, bukan 200rb + 300rb.
         Assert.Equal(300_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(600_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(600_000m, await _balances.GetScopeAvailableAsync(_scopeId));
         await AssertCycleFundingAsync(setAside.Id, 100_000m);
     }
 
@@ -551,11 +1257,12 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateCyclingSetAsideAsync(account.Id, "Dana Makan", 300_000m, SetAsideCycleKind.Monthly);
+        var setAside = await CreateCyclingSetAsideAsync("Dana Makan", 300_000m, SetAsideCycleKind.Monthly, sourceAccountId: account.Id);
 
         await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 300_000m,
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
@@ -572,21 +1279,22 @@ public class SetAsideServiceTests : IDisposable
     [Fact]
     public async Task CycleReset_Overspend_RefillsToTarget_AndOverspendComesFromFreeMoney()
     {
-        // Plafon 300rb, pengeluaran 400rb → 100rb kelebihan ditanggung Uang Bebas.
+        // Plafon 300rb, pengeluaran 400rb → 100rb kelebihan ditanggung uang bebas.
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateCyclingSetAsideAsync(account.Id, "Dana Makan", 300_000m, SetAsideCycleKind.Monthly);
+        var setAside = await CreateCyclingSetAsideAsync("Dana Makan", 300_000m, SetAsideCycleKind.Monthly, sourceAccountId: account.Id);
 
         await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
         {
             ScopeId = _scopeId,
+            SourceAccountId = account.Id,
             Amount = 400_000m,
             OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
         });
 
         Assert.Equal(0m, await _balances.GetSetAsideAmountAsync(setAside.Id));
         Assert.Equal(600_000m, await _balances.GetActualBalanceAsync(account.Id));
-        Assert.Equal(600_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(600_000m, await _balances.GetScopeAvailableAsync(_scopeId));
 
         await ForceCycleRolloverAsync(setAside.Id);
         await TouchAsync(setAside.Id);
@@ -601,7 +1309,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateCyclingSetAsideAsync(account.Id, "Dana Makan", 300_000m, SetAsideCycleKind.Monthly);
+        var setAside = await CreateCyclingSetAsideAsync("Dana Makan", 300_000m, SetAsideCycleKind.Monthly, sourceAccountId: account.Id);
 
         // Tidak dipakai sama sekali → saldo tetap 300rb, tidak naik jadi 600rb.
         await ForceCycleRolloverAsync(setAside.Id);
@@ -616,7 +1324,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateCyclingSetAsideAsync(account.Id, "Dana Makan", 300_000m, SetAsideCycleKind.Monthly);
+        var setAside = await CreateCyclingSetAsideAsync("Dana Makan", 300_000m, SetAsideCycleKind.Monthly, sourceAccountId: account.Id);
 
         // Saldo di atas target, misalnya hasil koreksi.
         await SeedSetAsideEntryAsync(setAside.Id, SetAsideEntryType.Added, 150_000m);
@@ -625,24 +1333,23 @@ public class SetAsideServiceTests : IDisposable
         await ForceCycleRolloverAsync(setAside.Id);
         await TouchAsync(setAside.Id);
 
-        // Surplus 150rb dikembalikan ke Uang Bebas, saldo kembali ke target.
+        // Surplus 150rb dikembalikan ke TotalAvailable, saldo kembali ke target.
         Assert.Equal(300_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(700_000m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(700_000m, await _balances.GetScopeAvailableAsync(_scopeId));
 
-        var history = await _sut.GetHistoryAsync(setAside.Id, _scopeId);
+        var history = (await _sut.GetHistoryAsync(setAside.Id, _scopeId)).Items;
         Assert.Contains(history, h => h.Type == SetAsideEntryType.Released && h.Amount == -150_000m);
     }
 
     [Fact]
     public async Task CycleReset_Underfunded_ReportsShortfallInsteadOfInventingMoney()
     {
-        // Uang Bebas hanya 100rb, target siklus 300rb.
+        // TotalAvailable hanya 100rb, target siklus 300rb.
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 100_000m);
         var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
             Name = "Dana Makan",
             Kind = SetAsideKind.RoutineIncremental,
             TargetAmount = 300_000m,
@@ -656,12 +1363,54 @@ public class SetAsideServiceTests : IDisposable
         // Hanya 100rb yang mampu didanai; sisanya shortfall eksplisit, bukan saldo fiktif
         // dan balance tidak pernah dibuat negatif untuk memenuhi target.
         Assert.Equal(100_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
-        Assert.Equal(0m, await _balances.GetAvailableAsync(account.Id));
+        Assert.Equal(0m, await _balances.GetScopeAvailableAsync(_scopeId));
         Assert.Equal(100_000m, await _balances.GetActualBalanceAsync(account.Id));
         await AssertCycleFundingAsync(setAside.Id, 100_000m);
 
         var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
         Assert.Equal(200_000m, projected!.TargetShortfall);
+    }
+
+    [Fact]
+    public async Task CycleReset_MultipleSetAsides_ClaimScopeAvailableInCreationOrder()
+    {
+        // Beberapa pos dengan cycle pending berbagi pool TotalAvailable yang sama —
+        // klaim berurutan creation order, tidak double-claim.
+        // Dibuat tanpa pendanaan awal (Amount=0) agar klaim cycle benar-benar
+        // bersaing di TotalAvailable scope saat rollover.
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 200_000m);
+
+        var first = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Pos A",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 150_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+        await Task.Delay(5); // pastikan CreatedAt berbeda
+        var second = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Pos B",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 150_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+
+        await ForceCycleRolloverAsync(first.Id);
+        await ForceCycleRolloverAsync(second.Id);
+        await TouchAsync(first.Id);
+        await TouchAsync(second.Id);
+
+        // TotalAvailable 200rb; Pos A (lebih dulu) klaim 150rb, Pos B sisa 50rb.
+        Assert.Equal(150_000m, await _balances.GetSetAsideAmountAsync(first.Id));
+        Assert.Equal(50_000m, await _balances.GetSetAsideAmountAsync(second.Id));
+        await AssertCycleFundingAsync(first.Id, 150_000m);
+        await AssertCycleFundingAsync(second.Id, 50_000m);
     }
 
     [Fact]
@@ -673,7 +1422,7 @@ public class SetAsideServiceTests : IDisposable
         var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Tabungan Darurat",
             Amount = 500_000m,
             TargetAmount = 5_000_000m,
@@ -693,13 +1442,10 @@ public class SetAsideServiceTests : IDisposable
     [Fact]
     public async Task CyclingSetAside_WithoutTarget_IsRejected()
     {
-        var account = await CreateAccountAsync("SeaBank");
-
         await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.CreateSetAsideAsync(new CreateSetAsideCommand
             {
                 ScopeId = _scopeId,
-                AccountId = account.Id,
                 Name = "Tanpa target",
                 Amount = 0m,
                 CycleKind = SetAsideCycleKind.Monthly
@@ -716,7 +1462,7 @@ public class SetAsideServiceTests : IDisposable
         var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = account.Id,
+            SourceAccountId = account.Id,
             Name = "Tabungan Darurat",
             Amount = 500_000m,
             TargetAmount = 5_000_000m,
@@ -729,6 +1475,60 @@ public class SetAsideServiceTests : IDisposable
         Assert.False(projected.IsCycleRolloverPending);
     }
 
+    // ───────────────────────── Legacy AccountId tidak dipakai ─────────────────────────
+
+    [Fact]
+    public async Task LegacyAccountId_NeverUsedForCalculations()
+    {
+        // SetAsides.AccountId legacy diisi langsung di DB (data lama).
+        // Nilai ini TIDAK BOLEH memengaruhi saldo, available, funding, maupun alokasi.
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var other = await CreateAccountAsync("Mandiri");
+        await SeedBalanceAsync(other.Id, 500_000m);
+
+        var setAside = await CreateSetAsideAsync("Pos Legacy", 300_000m, sourceAccountId: account.Id);
+
+        // Suntikkan nilai legacy AccountId (mis. data lama menunjuk Mandiri).
+        setAside.AccountId = other.Id;
+        await _db.SaveChangesAsync();
+
+        var availableBefore = await _balances.GetScopeAvailableAsync(_scopeId);
+        // TotalAvailable scope-wide = TotalActual(1.5M) − TotalSetAside(300k) = 1.2M.
+        // Legacy AccountId tidak memengaruhi perhitungan ini.
+        Assert.Equal(1_200_000m, availableBefore);
+
+        // Top-up tervalidasi terhadap TotalAvailable scope — legacy AccountId diabaikan.
+        await _sut.AddAsync(setAside.Id, new AddToSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Amount = 200_000m
+        });
+
+        Assert.Equal(500_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+        // TotalAvailable = 1.5M − 500k = 1M.
+        Assert.Equal(1_000_000m, await _balances.GetScopeAvailableAsync(_scopeId));
+
+        // Saldo aktual kedua akun tidak dipengaruhi legacy AccountId.
+        Assert.Equal(1_000_000m, await _balances.GetActualBalanceAsync(account.Id));
+        Assert.Equal(500_000m, await _balances.GetActualBalanceAsync(other.Id));
+
+        // Spend memakai SourceAccountId eksplisit — bukan legacy AccountId.
+        await _sut.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            SourceAccountId = account.Id,
+            Amount = 300_000m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+
+        // Uang keluar dari SeaBank (SourceAccountId), BUKAN dari Mandiri (legacy).
+        Assert.Equal(700_000m, await _balances.GetActualBalanceAsync(account.Id));
+        Assert.Equal(500_000m, await _balances.GetActualBalanceAsync(other.Id));
+        // Pos melepas min(300k, 500k) = 300k → sisa pos 200k.
+        Assert.Equal(200_000m, await _balances.GetSetAsideAmountAsync(setAside.Id));
+    }
+
     // ───────────────────────── Concurrency ─────────────────────────
 
     [Fact]
@@ -736,7 +1536,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 100_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 100_000m, sourceAccountId: account.Id);
 
         var succeeded = await RunConcurrentlyAsync(8, async services =>
         {
@@ -764,14 +1564,13 @@ public class SetAsideServiceTests : IDisposable
             await services.SetAsides.CreateSetAsideAsync(new CreateSetAsideCommand
             {
                 ScopeId = _scopeId,
-                AccountId = account.Id,
                 Name = "Pos " + Guid.NewGuid(),
                 Amount = 40_000m
             });
         });
 
         Assert.True(succeeded <= 2, $"More set-asides succeeded than the available balance allows: {succeeded}");
-        Assert.True(await _balances.GetAvailableAsync(account.Id) >= 0m);
+        Assert.True(await _balances.GetScopeAvailableAsync(_scopeId) >= 0m);
         Assert.Equal(100_000m, await _balances.GetActualBalanceAsync(account.Id));
     }
 
@@ -780,7 +1579,7 @@ public class SetAsideServiceTests : IDisposable
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 500_000m);
-        var setAside = await CreateSetAsideAsync(account.Id, "Dana Makan", 100_000m);
+        var setAside = await CreateSetAsideAsync("Dana Makan", 100_000m, sourceAccountId: account.Id);
 
         var spend = Task.Run(async () =>
         {
@@ -790,8 +1589,9 @@ public class SetAsideServiceTests : IDisposable
                 await services.SetAsides.SpendAsync(setAside.Id, new SpendFromSetAsideCommand
                 {
                     ScopeId = _scopeId,
+                    SourceAccountId = account.Id,
                     Amount = 80_000m,
-                    OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow)
+                    OccurredOn = BusinessDate.TodayWib
                 });
                 return true;
             }
@@ -814,20 +1614,20 @@ public class SetAsideServiceTests : IDisposable
         });
 
         await Task.WhenAll(spend, withdraw);
+        var spendSucceeded = await spend;
 
         // Invariant: tidak ada saldo yang pernah menjadi negatif, dan setiap operasi
         // yang sukses benar-benar menggerakkan uang sesuai aturannya.
         var reserved = await _balances.GetSetAsideAmountAsync(setAside.Id);
-        var available = await _balances.GetAvailableAsync(account.Id);
+        var available = await _balances.GetScopeAvailableAsync(_scopeId);
         var actual = await _balances.GetActualBalanceAsync(account.Id);
 
         Assert.True(reserved >= 0m, $"Set-aside went negative: {reserved}");
-        Assert.True(available >= 0m, $"Available went negative: {available}");
         Assert.True(actual >= 0m, $"Actual balance went negative: {actual}");
         Assert.Equal(actual - reserved, available);
 
         // Spend menggerakkan uang riil; withdraw tidak.
-        Assert.Equal(spend.Result ? 420_000m : 500_000m, actual);
+        Assert.Equal(spendSucceeded ? 420_000m : 500_000m, actual);
     }
 
     // ───────────────────────── Helpers ─────────────────────────
@@ -892,22 +1692,22 @@ public class SetAsideServiceTests : IDisposable
     }
 
     private async Task<SetAside> CreateSetAsideAsync(
-        Guid accountId, string name, decimal amount, bool withInitialAmount = true)
+        string name, decimal amount, Guid? sourceAccountId = null)
         => await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = accountId,
+            SourceAccountId = sourceAccountId,
             Name = name,
             Kind = SetAsideKind.Saving,
-            Amount = withInitialAmount ? amount : 0m
+            Amount = amount
         });
 
     private async Task<SetAside> CreateCyclingSetAsideAsync(
-        Guid accountId, string name, decimal target, SetAsideCycleKind cycle)
+        string name, decimal target, SetAsideCycleKind cycle, Guid? sourceAccountId = null)
         => await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
         {
             ScopeId = _scopeId,
-            AccountId = accountId,
+            SourceAccountId = sourceAccountId,
             Name = name,
             Kind = SetAsideKind.RoutineIncremental,
             TargetAmount = target,
@@ -981,13 +1781,13 @@ public class SetAsideServiceTests : IDisposable
     private async Task AssertCycleFundingAsync(Guid setAsideId, decimal expected)
     {
         var history = await _sut.GetHistoryAsync(setAsideId, _scopeId);
-        var funding = history.Where(h => h.Type == SetAsideEntryType.CycleFunding).ToList();
+        var funding = history.Items.Where(h => h.Type == SetAsideEntryType.CycleFunding).ToList();
         Assert.Equal(expected, funding.Sum(h => h.Amount));
     }
 
     private async Task AssertNoCycleFundingAsync(Guid setAsideId)
     {
         var history = await _sut.GetHistoryAsync(setAsideId, _scopeId);
-        Assert.DoesNotContain(history, h => h.Type == SetAsideEntryType.CycleFunding);
+        Assert.DoesNotContain(history.Items, h => h.Type == SetAsideEntryType.CycleFunding);
     }
 }

@@ -6,23 +6,28 @@ using Microsoft.EntityFrameworkCore;
 namespace LifeOS.Api.Services;
 
 /// <summary>
-/// Uang yang Disisihkan (set-aside).
+/// Uang yang Disisihkan (set-aside / pos alokasi).
 ///
-/// A set-aside is a reservation/intention, NOT an expense:
-///   - it never creates a TransactionEntry
-///   - it never changes the actual account balance
-///   - it only changes the derived available balance
+/// SEBUAH POOL ALOKASI SCOPE-WIDE, independen dari Sumber Dana:
+///   - tidak pernah membuat TransactionEntry atas nama akun
+///   - tidak pernah mengubah saldo aktual akun manapun
+///   - hanya mengurangi TotalAvailable / FreeCash (derived)
 ///
-/// The only operation that produces real money movement is <see cref="SpendAsync"/>,
-/// which records the actual expense AND releases the reservation together.
+/// Sumber Dana (Account) hanya ditentukan pada saat transaksi/perpindahan uang:
+///   - Create/Add: DefaultSourceAccountId hanya petunjuk rekening, bukan batas saldo
+///   - Spend:     SourceAccountId wajib — seluruh nominal keluar dari akun itu
 ///
-/// Every mutation runs inside a SERIALIZABLE transaction so concurrent requests cannot
-/// over-reserve, double-withdraw, or spend against a stale available balance.
+/// LEGACY SetAside.AccountId tidak pernah dipakai di method ini untuk perhitungan
+/// saldo, uang yang bisa dipakai, pendanaan cycle, maupun alokasi.
 ///
-/// Cycle normalization is applied on every write command that touches a set-aside
-/// (create/update/add/withdraw/spend/close). A GET never writes.
+/// Operasi uang riil hanya <see cref="SpendAsync"/> (Expense) — dibuat atomik
+/// bersama pelepasan alokasi. Operasi lain (top-up/withdraw/close/cycle) hanya
+/// mengubah ledger alokasi, bukan transaksi.
 ///
-/// The current reserved amount of a set-aside is derived from its history:
+/// Setiap mutation berjalan dalam SERIALIZABLE transaction agar concurrent request
+/// tidak bisa over-reserve, double-withdraw, atau spend terhadap stale balance.
+///
+/// Saldo pos diturunkan dari history:
 ///   amount = SUM(SetAsideEntry.Amount)
 /// </summary>
 public class SetAsideService
@@ -44,31 +49,51 @@ public class SetAsideService
     private async Task<SetAside> CreateInternalAsync(CreateSetAsideCommand command, CancellationToken ct)
     {
         var name = NormalizeName(command.Name);
-        var account = await RequireAccountAsync(command.AccountId, command.ScopeId, requireActive: true, ct);
+        if (!Enum.IsDefined(command.Kind))
+            throw new ValidationException("Jenis dana tidak valid.");
+        if (!Enum.IsDefined(command.CycleKind))
+            throw new ValidationException("Jenis siklus tidak valid.");
         ValidateTarget(command.TargetAmount, command.CycleKind);
+
+        if (command.Kind == SetAsideKind.RoutineBatch && !SetAsideCycle.HasCycle(command.CycleKind))
+            throw new ValidationException("Rutinitas berkala harus memiliki periode berulang.");
 
         if (command.Amount < 0)
             throw new ValidationException("Set-aside amount must not be negative.");
 
-        if (command.Amount > 0)
+        if (command.SourceAccountId.HasValue)
         {
-            var available = await _balances.GetAvailableAsync(account.Id, ct);
-            if (available < command.Amount)
-                throw new ValidationException(
-                    $"Insufficient available balance. Available: {available:N0}.");
+            // Rekening default hanya referensi; alokasi tidak mendebit rekening ini.
+            await RequireAccountAsync(command.SourceAccountId.Value, command.ScopeId, requireActive: true, ct);
         }
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (command.Amount > 0)
+        {
+            // Alokasi harus didukung Uang Bebas scope-wide; rekening referensi tidak didebit.
+            var available = await _balances.GetScopeFreeCashAsync(command.ScopeId, ct);
+            if (available < command.Amount)
+                throw new ValidationException($"Uang Bebas tidak cukup. Tersedia: {available:N0}.");
+        }
+
+        var today = BusinessDate.TodayWib;
         var setAside = new SetAside
         {
             ScopeId = command.ScopeId,
-            AccountId = account.Id,
+            // AccountId tidak ditulis — alokasi independen dari Sumber Dana.
+            AccountId = null,
+            // Hint non-binding untuk pre-select UI pada proses manual.
+            DefaultSourceAccountId = command.SourceAccountId,
             Name = name,
             Kind = command.Kind,
             Note = NormalizeNote(command.Note),
             TargetAmount = command.TargetAmount,
             CycleKind = command.CycleKind,
-            CycleAnchorDate = today,
+            CycleAnchorDate = SetAsideCycle.HasCycle(command.CycleKind)
+                ? SetAsideCycle.CurrentCycleStart(today, command.CycleKind, today)
+                : today,
+            CycleFundingShortfall = SetAsideCycle.HasCycle(command.CycleKind) && command.TargetAmount.HasValue
+                ? Math.Max(0m, command.TargetAmount.Value - command.Amount)
+                : 0m,
             Status = SetAsideStatus.Active
         };
 
@@ -95,13 +120,18 @@ public class SetAsideService
 
     private async Task<SetAside> UpdateInternalAsync(Guid setAsideId, UpdateSetAsideCommand command, CancellationToken ct)
     {
+        if (command.CycleKind.HasValue && !Enum.IsDefined(command.CycleKind.Value))
+            throw new ValidationException("Jenis siklus tidak valid.");
         var setAside = await RequireSetAsideAsync(setAsideId, command.ScopeId, ct);
         if (setAside.Status != SetAsideStatus.Active)
             throw new ValidationException("Closed set-aside cannot be updated.");
 
+        var originalTarget = setAside.TargetAmount;
+        var originalCycleKind = setAside.CycleKind;
+
         // Cycle yang sudah berganti dinormalisasi dulu dengan konfigurasi LAMA,
         // sebelum perubahan target/cycle dari command ini diterapkan.
-        await NormalizeCycleAsync(setAside, DateOnly.FromDateTime(DateTime.UtcNow), ct);
+        await NormalizeCycleAsync(setAside, BusinessDate.TodayWib, ct);
 
         if (command.Name is not null)
             setAside.Name = NormalizeName(command.Name);
@@ -112,11 +142,13 @@ public class SetAsideService
         if (command.RemoveTarget)
         {
             setAside.TargetAmount = null;
+            setAside.CycleFundingShortfall = 0m;
             // Tanpa target, normalisasi cycle tidak bermakna.
             if (command.CycleKind is null or SetAsideCycleKind.None)
                 setAside.CycleKind = SetAsideCycleKind.None;
         }
-        else if (command.TargetAmount.HasValue)
+
+        if (command.TargetAmount.HasValue)
         {
             ValidateTarget(command.TargetAmount, command.CycleKind ?? setAside.CycleKind);
             setAside.TargetAmount = command.TargetAmount;
@@ -126,21 +158,24 @@ public class SetAsideService
         {
             var mergedTarget = command.RemoveTarget ? null : command.TargetAmount ?? setAside.TargetAmount;
             ValidateTarget(mergedTarget, command.CycleKind.Value);
+            if (setAside.Kind == SetAsideKind.RoutineBatch
+                && !SetAsideCycle.HasCycle(command.CycleKind.Value))
+                throw new ValidationException("Rutinitas berkala harus memiliki periode berulang.");
             setAside.CycleKind = command.CycleKind.Value;
             // Cycle baru dimulai hari ini agar window-nya deterministik.
-            setAside.CycleAnchorDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            var today = BusinessDate.TodayWib;
+            setAside.CycleAnchorDate = SetAsideCycle.CurrentCycleStart(today, setAside.CycleKind, today);
         }
 
-        if (command.AccountId.HasValue && command.AccountId.Value != setAside.AccountId)
+        if (command.RemoveTarget
+            || command.TargetAmount.HasValue && command.TargetAmount.Value != originalTarget
+            || command.CycleKind.HasValue && command.CycleKind.Value != originalCycleKind)
         {
-            var targetAccount = await RequireAccountAsync(command.AccountId.Value, command.ScopeId, requireActive: true, ct);
-            var reserved = await _balances.GetSetAsideAmountAsync(setAside.Id, ct);
-            var targetAvailable = await _balances.GetAvailableAsync(targetAccount.Id, ct);
-            if (targetAvailable < reserved)
-                throw new ValidationException(
-                    $"Insufficient available balance in '{targetAccount.Name}' to move this set-aside. Available: {targetAvailable:N0}.");
-
-            setAside.AccountId = targetAccount.Id;
+            var currentAmount = await _balances.GetSetAsideAmountAsync(setAside.Id, ct);
+            setAside.CycleFundingShortfall = SetAsideCycle.HasCycle(setAside.CycleKind)
+                && setAside.TargetAmount.HasValue
+                ? Math.Max(0m, setAside.TargetAmount.Value - currentAmount)
+                : 0m;
         }
 
         setAside.UpdatedAt = DateTime.UtcNow;
@@ -150,24 +185,24 @@ public class SetAsideService
 
     // ───────────────────────── Money operations ─────────────────────────
 
-    /// <summary>Menambah saldo yang disisihkan (top-up). Mengurangi Uang Bebas, bukan Expense.</summary>
+    /// <summary>Menambah alokasi dari Uang Bebas scope-wide, bukan Expense atau debit rekening.</summary>
     public Task<SetAsideOperationResult> AddAsync(Guid setAsideId, AddToSetAsideCommand command, CancellationToken ct = default)
         => SerializableCommandRunner.RunAsync(_db, async token =>
         {
             if (command.Amount <= 0)
                 throw new ValidationException("Add amount must be positive.");
             return await ApplyDeltaAsync(setAsideId, command.ScopeId, command.Amount,
-                SetAsideEntryType.Added, command.Note, token);
+                SetAsideEntryType.Added, command.Note, command.SourceAccountId, token);
         }, ct);
 
-    /// <summary>Menarik kembali sebagian saldo disisihkan. Menambah Uang Bebas, bukan Expense.</summary>
+    /// <summary>Melepas alokasi kembali ke Uang Bebas, bukan pemasukan atau kredit rekening.</summary>
     public Task<SetAsideOperationResult> WithdrawAsync(Guid setAsideId, WithdrawFromSetAsideCommand command, CancellationToken ct = default)
         => SerializableCommandRunner.RunAsync(_db, async token =>
         {
             if (command.Amount <= 0)
                 throw new ValidationException("Withdrawal amount must be positive.");
             return await ApplyDeltaAsync(setAsideId, command.ScopeId, -command.Amount,
-                SetAsideEntryType.Withdrawn, command.Note, token);
+                SetAsideEntryType.Withdrawn, command.Note, sourceAccountId: null, token);
         }, ct);
 
     private async Task<SetAsideOperationResult> ApplyDeltaAsync(
@@ -176,21 +211,30 @@ public class SetAsideService
         decimal signedDelta,
         SetAsideEntryType entryType,
         string? note,
+        Guid? sourceAccountId,
         CancellationToken ct)
     {
         var setAside = await RequireSetAsideAsync(setAsideId, scopeId, ct);
         if (setAside.Status != SetAsideStatus.Active)
             throw new ValidationException("Closed set-aside cannot be changed.");
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var normalization = await NormalizeCycleAsync(setAside, today, ct);
         var current = await _balances.GetSetAsideAmountAsync(setAside.Id, ct);
 
         if (signedDelta > 0)
         {
-            var available = await _balances.GetAvailableAsync(setAside.AccountId, ct);
+            // Rekening pilihan hanya disimpan sebagai preferensi; tidak membatasi saldo.
+            if (sourceAccountId.HasValue)
+            {
+                await RequireAccountAsync(sourceAccountId.Value, scopeId, requireActive: true, ct);
+                setAside.DefaultSourceAccountId = sourceAccountId;
+            }
+
+            // Alokasi tambahan hanya memakai Uang Bebas scope-wide.
+            var available = await _balances.GetScopeFreeCashAsync(scopeId, ct);
             if (available < signedDelta)
-                throw new ValidationException($"Insufficient available balance. Available: {available:N0}.");
+                throw new ValidationException($"Uang Bebas tidak cukup. Tersedia: {available:N0}.");
         }
         else
         {
@@ -209,6 +253,9 @@ public class SetAsideService
         };
         _db.SetAsideEntries.Add(entry);
 
+        if (signedDelta > 0 && setAside.CycleFundingShortfall > 0m)
+            setAside.CycleFundingShortfall = Math.Max(0m, setAside.CycleFundingShortfall - signedDelta);
+
         setAside.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
@@ -218,12 +265,13 @@ public class SetAsideService
     /// <summary>
     /// Pengeluaran riil yang diambil dari set-aside.
     ///
-    /// Membuat Transaction Expense (uang benar-benar keluar) DAN melepas
-    /// min(amount, reserved) dari set-aside dalam satu operasi atomik.
-    /// Kelebihan di atas saldo disisihkan ditanggung oleh Uang Bebas —
-    /// dari akun SetAside, atau dari FreeCashAccountId bila dispesifikasi.
-    /// Plafon/target bukan hard limit: pemakaian di atas saldo SetAside tetap sah
-    /// selama available balance sumber mencukupi.
+    /// Membuat Transaction Expense (uang benar-benar keluar dari SourceAccountId)
+    /// DAN melepas min(amount, saldoPos) dari set-aside dalam satu operasi atomik.
+    ///
+    /// SourceAccountId = Sumber Dana tempat uang keluar. Wajib. Seluruh nominal
+    /// keluar dari akun itu (validasi saldo aktual). Porsi di atas saldo pos
+    /// (shortfall) ditanggung Uang Bebas scope-wide.
+    /// Pos tidak terikat ke akun manapun.
     /// </summary>
     public Task<SetAsideOperationResult> SpendAsync(Guid setAsideId, SpendFromSetAsideCommand command, CancellationToken ct = default)
         => SerializableCommandRunner.RunAsync(_db, token => SpendInternalAsync(setAsideId, command, token), ct);
@@ -238,34 +286,33 @@ public class SetAsideService
         if (setAside.Status != SetAsideStatus.Active)
             throw new ValidationException("Closed set-aside cannot be spent.");
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var normalization = await NormalizeCycleAsync(setAside, today, ct);
 
         var current = await _balances.GetSetAsideAmountAsync(setAside.Id, ct);
+        if (setAside.Kind == SetAsideKind.RoutineBatch
+            && await HasExecutionInCurrentCycleAsync(setAside, today, ct))
+        {
+            throw new ValidationException("Rutinitas berkala ini sudah direalisasikan pada periode berjalan.");
+        }
+
         var fromSetAside = Math.Min(command.Amount, current);
         var shortfall = command.Amount - fromSetAside;
 
-        var posAccount = await RequireAccountAsync(setAside.AccountId, command.ScopeId, requireActive: true, ct);
+        // Sumber Dana tempat uang benar-benar keluar.
+        var sourceAccount = await RequireAccountAsync(command.SourceAccountId, command.ScopeId, requireActive: true, ct);
+        var sourceBalance = await _balances.GetActualBalanceAsync(sourceAccount.Id, ct);
+        if (sourceBalance < command.Amount)
+            throw new ValidationException(
+                $"Insufficient balance in '{sourceAccount.Name}'. Balance: {sourceBalance:N0}, needed: {command.Amount:N0}.");
 
-        Guid freeCashAccountId = command.FreeCashAccountId ?? setAside.AccountId;
-        Account freeCashAccount;
-        if (freeCashAccountId == posAccount.Id)
-        {
-            freeCashAccount = posAccount;
-        }
-        else
-        {
-            freeCashAccount = await RequireAccountAsync(freeCashAccountId, command.ScopeId, requireActive: true, ct);
-        }
-
-        // Porsi Uang Bebas tidak boleh melebihi available/free balance rekening sumber.
-        // Available sudah nets out semua active set-asides di akun tersebut.
+        // Porsi di atas saldo pos harus didukung uang yang belum dialokasikan.
         if (shortfall > 0)
         {
-            var freeCashAvailable = await _balances.GetAvailableAsync(freeCashAccount.Id, ct);
-            if (freeCashAvailable < shortfall)
+            var available = await _balances.GetScopeFreeCashAsync(command.ScopeId, ct);
+            if (available < shortfall)
                 throw new ValidationException(
-                    $"Insufficient funds for free-cash portion. Available: {freeCashAvailable:N0}, needed: {shortfall:N0}.");
+                    $"Insufficient available money for free portion. Available: {available:N0}, needed: {shortfall:N0}.");
         }
 
         var transaction = new Transaction
@@ -279,38 +326,13 @@ public class SetAsideService
         };
         _db.Transactions.Add(transaction);
 
-        // Expense satu kali dengan nominal penuh.
-        // Porsi SetAside keluar dari akun pos; porsi shortfall keluar dari rekening Uang Bebas.
-        if (shortfall > 0 && freeCashAccount.Id == posAccount.Id)
+        // Seluruh nominal keluar dari Sumber Dana yang dipilih.
+        _db.TransactionEntries.Add(new TransactionEntry
         {
-            _db.TransactionEntries.Add(new TransactionEntry
-            {
-                TransactionId = transaction.Id,
-                AccountId = posAccount.Id,
-                Amount = -command.Amount
-            });
-        }
-        else
-        {
-            if (fromSetAside > 0)
-            {
-                _db.TransactionEntries.Add(new TransactionEntry
-                {
-                    TransactionId = transaction.Id,
-                    AccountId = posAccount.Id,
-                    Amount = -fromSetAside
-                });
-            }
-            if (shortfall > 0)
-            {
-                _db.TransactionEntries.Add(new TransactionEntry
-                {
-                    TransactionId = transaction.Id,
-                    AccountId = freeCashAccount.Id,
-                    Amount = -shortfall
-                });
-            }
-        }
+            TransactionId = transaction.Id,
+            AccountId = sourceAccount.Id,
+            Amount = -command.Amount
+        });
 
         var entry = new SetAsideEntry
         {
@@ -323,6 +345,45 @@ public class SetAsideService
         };
         _db.SetAsideEntries.Add(entry);
 
+        // Rutinitas berkala diselesaikan satu kali per periode. Sisa yang tidak
+        // terpakai langsung dilepas agar menjadi uang belum dialokasikan.
+        // Biaya aktual tetap boleh melebihi saldo pos (shortfall telah divalidasi).
+        if (setAside.Kind == SetAsideKind.RoutineBatch)
+        {
+            var remaining = current - fromSetAside;
+            if (remaining > 0)
+            {
+                _db.SetAsideEntries.Add(new SetAsideEntry
+                {
+                    SetAsideId = setAside.Id,
+                    ScopeId = command.ScopeId,
+                    Type = SetAsideEntryType.Released,
+                    Amount = -remaining,
+                    TransactionId = transaction.Id,
+                    Note = "Unused cycle allocation returned to available money"
+                });
+            }
+        }
+
+        // Pos Sekali Pakai selesai ketika pengeluaran riil dicatat.
+        // Tutup dan lepaskan sisa dalam transaksi yang sama dengan expense.
+        if (setAside.Kind == SetAsideKind.SingleSpend)
+        {
+            var remaining = current - fromSetAside;
+            _db.SetAsideEntries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = command.ScopeId,
+                Type = SetAsideEntryType.Closed,
+                Amount = -remaining,
+                TransactionId = transaction.Id,
+                Note = "Single-spend set-aside completed"
+            });
+            setAside.Status = SetAsideStatus.Closed;
+            setAside.CloseReason = SetAsideCloseReason.Spent;
+            setAside.CycleFundingShortfall = 0m;
+        }
+
         setAside.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
@@ -330,7 +391,113 @@ public class SetAsideService
     }
 
     /// <summary>
-    /// Menutup set-aside dan melepas sisa saldo yang masih disisihkan ke Uang Bebas.
+    /// Mencatat expense yang memakai pos dari jalur transaksi umum atau realisasi agenda.
+    /// Menyatukan aturan cycle, batas satu eksekusi RoutineBatch, pelepasan sisa, dan
+    /// penutupan SingleSpend agar semua entry point memiliki semantik yang sama.
+    /// Pemanggil harus sudah membuka transaksi database.
+    /// </summary>
+    internal async Task<List<SetAsideEntry>> RecordTransactionExpenseAsync(
+        Guid setAsideId,
+        Guid scopeId,
+        Transaction transaction,
+        decimal amount,
+        CancellationToken ct)
+    {
+        var setAside = await RequireSetAsideAsync(setAsideId, scopeId, ct);
+        if (setAside.Status != SetAsideStatus.Active)
+            throw new ValidationException("Set-aside not found or not active in current Scope.");
+
+        var today = BusinessDate.TodayWib;
+        await NormalizeCycleAsync(setAside, today, ct);
+
+        if (setAside.Kind == SetAsideKind.RoutineBatch
+            && await HasExecutionInCurrentCycleAsync(setAside, today, ct))
+        {
+            throw new ValidationException("Rutinitas berkala ini sudah direalisasikan pada periode berjalan.");
+        }
+
+        var current = await _balances.GetSetAsideAmountAsync(setAside.Id, ct);
+        var fromSetAside = Math.Min(amount, current);
+        var shortfall = amount - fromSetAside;
+        if (shortfall > 0)
+        {
+            var available = await _balances.GetScopeFreeCashAsync(scopeId, ct);
+            if (available < shortfall)
+                throw new ValidationException(
+                    $"Insufficient available money for free portion. Available: {available:N0}, needed: {shortfall:N0}.");
+        }
+
+        var entries = new List<SetAsideEntry>
+        {
+            new()
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = scopeId,
+                Type = SetAsideEntryType.Spent,
+                Amount = -fromSetAside,
+                TransactionId = transaction.Id,
+                Note = "Allocation released by transaction"
+            }
+        };
+
+        if (setAside.Kind == SetAsideKind.RoutineBatch)
+        {
+            var remaining = current - fromSetAside;
+            if (remaining > 0)
+            {
+                entries.Add(new SetAsideEntry
+                {
+                    SetAsideId = setAside.Id,
+                    ScopeId = scopeId,
+                    Type = SetAsideEntryType.Released,
+                    Amount = -remaining,
+                    TransactionId = transaction.Id,
+                    Note = "Unused cycle allocation returned to available money"
+                });
+            }
+        }
+        else if (setAside.Kind == SetAsideKind.SingleSpend)
+        {
+            var remaining = current - fromSetAside;
+            entries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = scopeId,
+                Type = SetAsideEntryType.Closed,
+                Amount = -remaining,
+                TransactionId = transaction.Id,
+                Note = "Single-spend set-aside completed"
+            });
+            setAside.Status = SetAsideStatus.Closed;
+            setAside.CloseReason = SetAsideCloseReason.Spent;
+        }
+
+        setAside.UpdatedAt = DateTime.UtcNow;
+        return entries;
+    }
+
+    private async Task<bool> HasExecutionInCurrentCycleAsync(
+        SetAside setAside, DateOnly today, CancellationToken ct)
+    {
+        var (from, to) = SetAsideCycle.UsageWindow(setAside, today);
+        if (from is null || to is null) return false;
+
+        var fromUtc = BusinessDate.StartOfDayUtc(from.Value);
+        var toExclusiveUtc = BusinessDate.StartOfDayUtc(to.Value.AddDays(1));
+        return await _db.SetAsideEntries.AnyAsync(se =>
+            se.SetAsideId == setAside.Id
+            && se.Type == SetAsideEntryType.Spent
+            && se.TransactionId != null
+            && se.CreatedAt >= fromUtc
+            && se.CreatedAt < toExclusiveUtc
+            && !_db.Transactions.Any(reversal =>
+                reversal.ScopeId == setAside.ScopeId
+                && reversal.Type == TransactionType.Reversal
+                && reversal.RelatedTransactionId == se.TransactionId), ct);
+    }
+
+    /// <summary>
+    /// Menutup set-aside dan melepas sisa saldo yang masih disisihkan ke TotalAvailable.
     /// Menutup tidak pernah membuat Transaction.
     /// </summary>
     public Task<SetAsideOperationResult> CloseAsync(Guid setAsideId, CloseSetAsideCommand command, CancellationToken ct = default)
@@ -339,11 +506,13 @@ public class SetAsideService
     private async Task<SetAsideOperationResult> CloseInternalAsync(
         Guid setAsideId, CloseSetAsideCommand command, CancellationToken ct)
     {
+        if (!Enum.IsDefined(command.Reason))
+            throw new ValidationException("Alasan penutupan tidak valid.");
         var setAside = await RequireSetAsideAsync(setAsideId, command.ScopeId, ct);
         if (setAside.Status != SetAsideStatus.Active)
             throw new ValidationException("Set-aside is already closed.");
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var normalization = await NormalizeCycleAsync(setAside, today, ct);
 
         var remaining = await _balances.GetSetAsideAmountAsync(setAside.Id, ct);
@@ -360,6 +529,7 @@ public class SetAsideService
 
         setAside.Status = SetAsideStatus.Closed;
         setAside.CloseReason = command.Reason;
+        setAside.CycleFundingShortfall = 0m;
         setAside.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
@@ -374,9 +544,11 @@ public class SetAsideService
     ///   fundingRequired = max(0, TargetAmount - current)
     ///   surplus         = max(0, current - TargetAmount)
     ///
-    /// Funding berasal dari Uang Bebas dan tercatat di history set-aside — BUKAN Expense,
-    /// karena expense-nya sudah tercatat saat transaksinya benar-benar terjadi.
-    /// Surplus tidak hilang: dikembalikan ke Uang Bebas.
+    /// Funding berasal dari Uang Bebas scope-wide (uang yang belum dialokasikan
+    /// atau dijanjikan ke agenda pengeluaran)
+    /// dan tercatat di history set-aside — BUKAN Expense, karena expense-nya sudah
+    /// tercatat saat transaksinya benar-benar terjadi. Surplus tidak hilang:
+    /// dikembalikan ke TotalAvailable.
     ///
     /// Bila Uang Bebas tidak cukup, hanya bagian yang mampu didanai yang ditambahkan.
     /// Kekurangannya direpresentasikan eksplisit sebagai shortfall — saldo fiktif tidak
@@ -385,7 +557,7 @@ public class SetAsideService
     /// Hanya dipanggil dari jalur write. GET tidak pernah mengubah database.
     /// </summary>
     private async Task<CycleNormalization> NormalizeCycleAsync(
-        SetAside setAside, DateOnly today, CancellationToken ct)
+        SetAside setAside, DateOnly today, CancellationToken ct, bool persistChanges = true)
     {
         var result = new CycleNormalization();
         if (!SetAsideCycle.IsRolloverPending(setAside, today))
@@ -408,11 +580,14 @@ public class SetAsideService
                     Note = "Cycle surplus returned to available money"
                 });
                 result.Surplus = surplus;
+                setAside.CycleFundingShortfall = 0m;
             }
             else if (current < target)
             {
                 var required = target - current;
-                var available = await _balances.GetAvailableAsync(setAside.AccountId, ct);
+                // Funding hanya dari Uang Bebas; kekurangan target tidak mengikat uang
+                // yang belum tersedia dan akan dicoba kembali saat ada pemasukan.
+                var available = await _balances.GetScopeFreeCashAsync(setAside.ScopeId, ct);
                 var applied = Math.Min(required, Math.Max(0m, available));
 
                 if (applied > 0)
@@ -430,15 +605,118 @@ public class SetAsideService
                 result.FundingRequired = required;
                 result.FundingApplied = applied;
                 result.Shortfall = required - applied;
+                setAside.CycleFundingShortfall = result.Shortfall;
             }
+            else
+            {
+                setAside.CycleFundingShortfall = 0m;
+            }
+        }
+        else
+        {
+            setAside.CycleFundingShortfall = 0m;
         }
 
         setAside.CycleAnchorDate = SetAsideCycle.CurrentCycleStart(
             setAside.CycleAnchorDate, setAside.CycleKind, today);
         setAside.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
+        if (persistChanges)
+            await _db.SaveChangesAsync(ct);
         return result;
+    }
+
+    /// <summary>
+    /// On income, roll active cycles forward and automatically use available FreeCash
+    /// to reduce remaining funding shortfalls in creation order.
+    /// Caller owns the surrounding serializable transaction and has saved the income.
+    /// </summary>
+    internal async Task ApplyIncomeToCycleShortfallsAsync(
+        Guid scopeId, Guid incomeTransactionId, DateOnly today, CancellationToken ct)
+    {
+        var active = await _db.SetAsides
+            .Where(sa => sa.ScopeId == scopeId && sa.Status == SetAsideStatus.Active)
+            .OrderBy(sa => sa.CreatedAt)
+            .ToListAsync(ct);
+
+        foreach (var setAside in active)
+            await NormalizeCycleAsync(setAside, today, ct);
+
+        var available = Math.Max(0m, await _balances.GetScopeFreeCashAsync(scopeId, ct));
+        foreach (var setAside in active.Where(sa =>
+                     SetAsideCycle.HasCycle(sa.CycleKind)
+                     && sa.TargetAmount.HasValue
+                     && sa.CycleFundingShortfall > 0m))
+        {
+            if (available <= 0m) break;
+
+            var funded = Math.Min(setAside.CycleFundingShortfall, available);
+            _db.SetAsideEntries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = scopeId,
+                Type = SetAsideEntryType.CycleFunding,
+                Amount = funded,
+                TransactionId = incomeTransactionId,
+                Note = "Cycle shortfall funded from new income"
+            });
+            setAside.CycleFundingShortfall -= funded;
+            setAside.UpdatedAt = DateTime.UtcNow;
+            available -= funded;
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Explicitly allocated income funds the selected set-aside's current-cycle
+    /// shortfall first. Splitting the ledger entry lets reversal restore that
+    /// shortfall contribution precisely.
+    /// </summary>
+    internal async Task<List<SetAsideEntry>> RecordTransactionIncomeAsync(
+        Guid setAsideId, Guid scopeId, Transaction transaction, decimal amount, CancellationToken ct)
+    {
+        var setAside = await RequireSetAsideAsync(setAsideId, scopeId, ct);
+        if (setAside.Status != SetAsideStatus.Active)
+            throw new ValidationException("Set-aside not found or not active in current Scope.");
+
+        await NormalizeCycleAsync(setAside, BusinessDate.TodayWib, ct, persistChanges: false);
+
+        var cycleFunding = SetAsideCycle.HasCycle(setAside.CycleKind)
+            ? Math.Min(amount, setAside.CycleFundingShortfall)
+            : 0m;
+        setAside.CycleFundingShortfall -= cycleFunding;
+        setAside.UpdatedAt = DateTime.UtcNow;
+
+        var entries = new List<SetAsideEntry>();
+        if (cycleFunding > 0m)
+        {
+            entries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = scopeId,
+                Type = SetAsideEntryType.CycleFunding,
+                Amount = cycleFunding,
+                TransactionId = transaction.Id,
+                Note = "Cycle shortfall funded by allocated income"
+            });
+        }
+
+        var additionalAllocation = amount - cycleFunding;
+        if (additionalAllocation > 0m)
+        {
+            entries.Add(new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = scopeId,
+                Type = SetAsideEntryType.Added,
+                Amount = additionalAllocation,
+                TransactionId = transaction.Id,
+                Note = "Allocation funded by transaction"
+            });
+        }
+
+        return entries;
     }
 
     // ───────────────────────── Queries ─────────────────────────
@@ -455,16 +733,37 @@ public class SetAsideService
         return result.SingleOrDefault();
     }
 
-    public async Task<List<SetAsideEntryProjection>> GetHistoryAsync(
-        Guid setAsideId, Guid scopeId, CancellationToken ct = default)
+    public async Task<SetAsideHistoryPage> GetHistoryAsync(
+        Guid setAsideId, Guid scopeId, string? cursor = null, int pageSize = 30, CancellationToken ct = default)
     {
         var exists = await _db.SetAsides.AnyAsync(sa => sa.Id == setAsideId && sa.ScopeId == scopeId, ct);
         if (!exists)
             throw new ValidationException("Set-aside not found in current Scope.");
 
-        return await _db.SetAsideEntries
-            .Where(se => se.SetAsideId == setAsideId)
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        DateTime? beforeCreatedAt = null;
+        Guid? beforeId = null;
+        if (!string.IsNullOrWhiteSpace(cursor))
+        {
+            var parts = cursor.Split('|', 2);
+            if (parts.Length != 2
+                || !DateTime.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var parsedDate)
+                || !Guid.TryParse(parts[1], out var parsedId))
+                throw new ValidationException("Cursor riwayat tidak valid.");
+            beforeCreatedAt = parsedDate;
+            beforeId = parsedId;
+        }
+
+        var query = _db.SetAsideEntries.Where(se => se.SetAsideId == setAsideId);
+        if (beforeCreatedAt.HasValue && beforeId.HasValue)
+            query = query.Where(se => se.CreatedAt < beforeCreatedAt.Value
+                || (se.CreatedAt == beforeCreatedAt.Value && se.Id.CompareTo(beforeId.Value) < 0));
+
+        var rows = await query
             .OrderByDescending(se => se.CreatedAt)
+            .ThenByDescending(se => se.Id)
+            .Take(pageSize + 1)
             .Select(se => new SetAsideEntryProjection
             {
                 Id = se.Id,
@@ -472,17 +771,61 @@ public class SetAsideService
                 Amount = se.Amount,
                 TransactionId = se.TransactionId,
                 Note = se.Note,
-                CreatedAt = se.CreatedAt
+                CreatedAt = se.CreatedAt,
+                Transaction = se.Transaction == null ? null : new SetAsideTransactionSummary
+                {
+                    Id = se.Transaction.Id,
+                    Type = se.Transaction.Type,
+                    Amount = se.Transaction.Amount,
+                    Description = se.Transaction.Description,
+                    CategoryName = se.Transaction.CategoryName,
+                    OccurredOn = se.Transaction.OccurredOn,
+                    RelatedDescription = se.Transaction.RelatedTransaction != null
+                        ? se.Transaction.RelatedTransaction.Description
+                        : null
+                }
             })
             .ToListAsync(ct);
+
+        // Include newer deltas omitted by the cursor so historical balances are
+        // correct even when the requested page is older than the first page.
+        var first = rows.FirstOrDefault();
+        var newerBalanceDeltas = first is null
+            ? 0m
+            : await _db.SetAsideEntries
+                .Where(se => se.SetAsideId == setAsideId
+                    && (se.CreatedAt > first.CreatedAt
+                        || (se.CreatedAt == first.CreatedAt && se.Id.CompareTo(first.Id) > 0)))
+                .SumAsync(se => (decimal?)se.Amount, ct) ?? 0m;
+        var runningBalance = await _balances.GetSetAsideAmountAsync(setAsideId, ct) - newerBalanceDeltas;
+        foreach (var row in rows)
+        {
+            row.BalanceAfter = runningBalance;
+            runningBalance -= row.Amount;
+        }
+
+        var hasMore = rows.Count > pageSize;
+        if (hasMore) rows.RemoveAt(rows.Count - 1);
+        var last = rows.LastOrDefault();
+        return new SetAsideHistoryPage
+        {
+            Items = rows,
+            HasMore = hasMore,
+            NextCursor = hasMore && last is not null
+                ? $"{last.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)}|{last.Id:D}"
+                : null
+        };
     }
 
     // ───────────────────────── Projection ─────────────────────────
 
     /// <summary>
-    /// Builds projections for a scope. Cycle-funding shortfall is resolved against the
-    /// whole scope so that several set-asides sharing one account cannot each claim the
-    /// same available money.
+    /// Builds projections for a scope. Pending cycle funding is resolved against the
+    /// whole scope-wide available pool (TotalActual − TotalSetAside) so that several
+    /// set-asides cannot each claim the same available money. Claim order = creation order.
+    ///
+    /// LEGACY SetAside.AccountId TIDAK dipakai di sini untuk perhitungan apa pun.
+    /// Nilainya hanya diproyeksikan untuk kompatibilitas tampilan data lama.
     /// </summary>
     internal async Task<List<SetAsideProjection>> ProjectForScopeAsync(
         Guid scopeId,
@@ -499,27 +842,40 @@ public class SetAsideService
 
         if (selected.Count == 0) return [];
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var allIds = scopeSetAsides.Select(sa => sa.Id).ToList();
-        var accountIds = scopeSetAsides.Select(sa => sa.AccountId).Distinct().ToList();
 
         var amounts = await _balances.GetSetAsideAmountsAsync(allIds, ct);
-        var actuals = await _balances.GetActualBalancesAsync(accountIds, ct);
-        var reservedByAccount = await _balances.GetActiveSetAsidesAsync(accountIds, ct);
 
-        var accountNames = await _db.Accounts
-            .Where(a => accountIds.Contains(a.Id))
-            .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
+        // Legacy account names — hanya untuk tampilan data lama, bukan perhitungan.
+        var legacyAccountIds = scopeSetAsides
+            .Where(sa => sa.AccountId.HasValue)
+            .Select(sa => sa.AccountId!.Value)
+            .Distinct()
+            .ToList();
+        // Default source names — hanya untuk pre-select/hint UI pada proses manual.
+        var defaultSourceIds = scopeSetAsides
+            .Where(sa => sa.DefaultSourceAccountId.HasValue)
+            .Select(sa => sa.DefaultSourceAccountId!.Value)
+            .Distinct()
+            .ToList();
+        var lookupIds = legacyAccountIds.Concat(defaultSourceIds).Distinct().ToList();
+        var accountNames = lookupIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.Accounts
+                .Where(a => lookupIds.Contains(a.Id))
+                .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
 
         // "Terpakai" dihitung dari history Spend pada cycle berjalan,
         // atau sepanjang waktu bila set-aside tidak memiliki cycle.
         //
         // Entry Spent hanya menyimpan porsi yang keluar dari saldo pos
-        // (min(amount, reserved)); porsi Uang Bebas tidak masuk ke sana.
+        // (min(amount, reserved)); porsi uang bebas tidak masuk ke sana.
         // Supaya pemakaian yang melewati plafon tetap terlihat, nominalnya
         // diambil dari TransactionEntries transaksi yang terkait.
+        var selectedIdsForUsage = selected.Select(sa => sa.Id).ToList();
         var spentEntries = await _db.SetAsideEntries
-            .Where(se => allIds.Contains(se.SetAsideId) && se.Type == SetAsideEntryType.Spent)
+            .Where(se => selectedIdsForUsage.Contains(se.SetAsideId) && se.Type == SetAsideEntryType.Spent)
             .Select(se => new { se.SetAsideId, se.Amount, se.CreatedAt, se.TransactionId })
             .ToListAsync(ct);
 
@@ -529,6 +885,17 @@ public class SetAsideService
             .Distinct()
             .ToList();
 
+        var reversedSpendTransactionIds = spentTransactionIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _db.Transactions
+                .Where(t => t.ScopeId == scopeId
+                    && t.Type == TransactionType.Reversal
+                    && t.RelatedTransactionId.HasValue
+                    && spentTransactionIds.Contains(t.RelatedTransactionId.Value))
+                .Select(t => t.RelatedTransactionId!.Value)
+                .ToListAsync(ct))
+                .ToHashSet();
+
         var spendByTransaction = spentTransactionIds.Count == 0
             ? new Dictionary<Guid, decimal>()
             : await _db.TransactionEntries
@@ -537,14 +904,17 @@ public class SetAsideService
                 .Select(g => new { g.Key, Spent = -g.Sum(te => te.Amount) })
                 .ToDictionaryAsync(x => x.Key, x => x.Spent, ct);
 
+        var spendsBySetAside = spentEntries.GroupBy(e => e.SetAsideId)
+            .ToDictionary(g => g.Key, g => g.ToList());
         var usedBySetAside = new Dictionary<Guid, decimal>();
-        foreach (var sa in scopeSetAsides)
+        foreach (var sa in selected)
         {
             var (from, to) = SetAsideCycle.UsageWindow(sa, today);
-            var used = spentEntries
-                .Where(e => e.SetAsideId == sa.Id)
-                .Where(e => from is null || e.CreatedAt >= from.Value.ToDateTime(TimeOnly.MinValue))
-                .Where(e => to is null || e.CreatedAt <= to.Value.ToDateTime(TimeOnly.MaxValue))
+            var used = spendsBySetAside.GetValueOrDefault(sa.Id, [])
+                .Where(e => from is null || e.CreatedAt >= BusinessDate.StartOfDayUtc(from.Value))
+                .Where(e => to is null || e.CreatedAt < BusinessDate.StartOfDayUtc(to.Value.AddDays(1)))
+                .Where(e => e.TransactionId is null
+                    || !reversedSpendTransactionIds.Contains(e.TransactionId.Value))
                 .Sum(e => e.TransactionId != null
                     && spendByTransaction.TryGetValue(e.TransactionId.Value, out var spend)
                         ? spend
@@ -552,57 +922,73 @@ public class SetAsideService
             usedBySetAside[sa.Id] = used;
         }
 
-        // Pending cycle funding is allocated across set-asides of the same account in
-        // creation order so the reported shortfall matches what normalization will do.
+        var executedBySetAside = new Dictionary<Guid, bool>();
+        foreach (var sa in selected)
+        {
+            var (from, to) = SetAsideCycle.UsageWindow(sa, today);
+            executedBySetAside[sa.Id] = sa.Kind == SetAsideKind.RoutineBatch
+                && from.HasValue
+                && to.HasValue
+                && spendsBySetAside.GetValueOrDefault(sa.Id, []).Any(e =>
+                    e.TransactionId.HasValue
+                    && !reversedSpendTransactionIds.Contains(e.TransactionId.Value)
+                    && e.CreatedAt >= BusinessDate.StartOfDayUtc(from.Value)
+                    && e.CreatedAt < BusinessDate.StartOfDayUtc(to.Value.AddDays(1)));
+        }
+
+        // Simulasikan pendanaan rollover dari Uang Bebas dengan urutan pos tertua.
+        // Kekurangan yang belum didanai ditampilkan, tetapi tidak mengurangi Uang Bebas.
         var pendingFunding = new Dictionary<Guid, decimal>();
         var pendingSurplus = new Dictionary<Guid, decimal>();
         var pendingShortfall = new Dictionary<Guid, decimal>();
-        var availableByAccount = accountIds.ToDictionary(
-            id => id,
-            id => actuals.GetValueOrDefault(id, 0m) - reservedByAccount.GetValueOrDefault(id, 0m));
 
-        foreach (var accountGroup in scopeSetAsides
-                     .Where(sa => sa.Status == SetAsideStatus.Active)
-                     .GroupBy(sa => sa.AccountId))
+        var scopeAvailable = Math.Max(0m, await _balances.GetScopeFreeCashAsync(scopeId, ct));
+
+        foreach (var sa in scopeSetAsides
+                     .Where(x => x.Status == SetAsideStatus.Active)
+                     .OrderBy(x => x.CreatedAt))
         {
-            var available = Math.Max(0m, availableByAccount.GetValueOrDefault(accountGroup.Key, 0m));
-
-            foreach (var sa in accountGroup.OrderBy(sa => sa.CreatedAt))
+            if (!sa.TargetAmount.HasValue || !SetAsideCycle.HasCycle(sa.CycleKind))
             {
-                if (!SetAsideCycle.IsRolloverPending(sa, today) || !sa.TargetAmount.HasValue)
-                {
-                    pendingFunding[sa.Id] = 0m;
-                    pendingSurplus[sa.Id] = 0m;
-                    pendingShortfall[sa.Id] = 0m;
-                    continue;
-                }
+                pendingFunding[sa.Id] = 0m;
+                pendingSurplus[sa.Id] = 0m;
+                pendingShortfall[sa.Id] = 0m;
+                continue;
+            }
 
-                var current = amounts.GetValueOrDefault(sa.Id, 0m);
-                var target = sa.TargetAmount.Value;
+            if (!SetAsideCycle.IsRolloverPending(sa, today))
+            {
+                pendingFunding[sa.Id] = sa.CycleFundingShortfall;
+                pendingSurplus[sa.Id] = 0m;
+                pendingShortfall[sa.Id] = sa.CycleFundingShortfall;
+                continue;
+            }
 
-                if (current > target)
-                {
-                    var surplus = current - target;
-                    pendingSurplus[sa.Id] = surplus;
-                    pendingFunding[sa.Id] = 0m;
-                    pendingShortfall[sa.Id] = 0m;
-                    available += surplus;
-                }
-                else if (current < target)
-                {
-                    var required = target - current;
-                    var applied = Math.Min(required, available);
-                    pendingFunding[sa.Id] = required;
-                    pendingSurplus[sa.Id] = 0m;
-                    pendingShortfall[sa.Id] = required - applied;
-                    available -= applied;
-                }
-                else
-                {
-                    pendingFunding[sa.Id] = 0m;
-                    pendingSurplus[sa.Id] = 0m;
-                    pendingShortfall[sa.Id] = 0m;
-                }
+            var current = amounts.GetValueOrDefault(sa.Id, 0m);
+            var target = sa.TargetAmount.Value;
+
+            if (current > target)
+            {
+                var surplus = current - target;
+                pendingSurplus[sa.Id] = surplus;
+                pendingFunding[sa.Id] = 0m;
+                pendingShortfall[sa.Id] = 0m;
+                scopeAvailable += surplus;
+            }
+            else if (current < target)
+            {
+                var required = target - current;
+                var applied = Math.Min(required, scopeAvailable);
+                pendingFunding[sa.Id] = required;
+                pendingSurplus[sa.Id] = 0m;
+                pendingShortfall[sa.Id] = required - applied;
+                scopeAvailable -= applied;
+            }
+            else
+            {
+                pendingFunding[sa.Id] = 0m;
+                pendingSurplus[sa.Id] = 0m;
+                pendingShortfall[sa.Id] = 0m;
             }
         }
 
@@ -613,11 +999,33 @@ public class SetAsideService
             var entries = await _db.SetAsideEntries
                 .Where(se => selectedIds.Contains(se.SetAsideId))
                 .OrderByDescending(se => se.CreatedAt)
+                .ThenByDescending(se => se.Id)
+                .Take(20)
+                .Select(se => new SetAsideEntryProjection
+                {
+                    Id = se.Id,
+                    Type = se.Type,
+                    Amount = se.Amount,
+                    TransactionId = se.TransactionId,
+                    Note = se.Note,
+                    CreatedAt = se.CreatedAt,
+                    Transaction = se.Transaction == null ? null : new SetAsideTransactionSummary
+                    {
+                        Id = se.Transaction.Id,
+                        Type = se.Transaction.Type,
+                        Amount = se.Transaction.Amount,
+                        Description = se.Transaction.Description,
+                        CategoryName = se.Transaction.CategoryName,
+                        OccurredOn = se.Transaction.OccurredOn,
+                        RelatedDescription = se.Transaction.RelatedTransaction != null
+                            ? se.Transaction.RelatedTransaction.Description
+                            : null
+                    }
+                })
                 .ToListAsync(ct);
 
-            recentBySetAside = entries
-                .GroupBy(se => se.SetAsideId)
-                .ToDictionary(g => g.Key, g => g.Take(20).Select(ProjectEntry).ToList());
+            recentBySetAside = entries.GroupBy(entry => selected[0].Id)
+                .ToDictionary(g => g.Key, g => g.ToList());
         }
 
         return selected
@@ -632,17 +1040,25 @@ public class SetAsideService
                 return new SetAsideProjection
                 {
                     Id = sa.Id,
+                    // Legacy only — bukan lokasi permanen alokasi.
                     AccountId = sa.AccountId,
-                    AccountName = accountNames.GetValueOrDefault(sa.AccountId, ""),
+                    AccountName = sa.AccountId.HasValue
+                        ? accountNames.GetValueOrDefault(sa.AccountId.Value, "")
+                        : null,
+                    // Hint non-binding untuk pre-select UI proses manual.
+                    DefaultSourceAccountId = sa.DefaultSourceAccountId,
+                    DefaultSourceAccountName = sa.DefaultSourceAccountId.HasValue
+                        ? accountNames.GetValueOrDefault(sa.DefaultSourceAccountId.Value, "")
+                        : null,
                     Name = sa.Name,
                     Kind = sa.Kind,
                     Note = sa.Note,
-                Amount = current,
-                TargetAmount = sa.TargetAmount,
-                TargetShortfall = sa.TargetAmount.HasValue
-                    ? Math.Max(0m, sa.TargetAmount.Value - current)
-                    : 0m,
-                CycleKind = sa.CycleKind,
+                    Amount = current,
+                    TargetAmount = sa.TargetAmount,
+                    TargetShortfall = sa.TargetAmount.HasValue
+                        ? Math.Max(0m, sa.TargetAmount.Value - current)
+                        : 0m,
+                    CycleKind = sa.CycleKind,
                     CycleAnchorDate = sa.CycleAnchorDate,
                     CurrentCycleStart = SetAsideCycle.HasCycle(sa.CycleKind) ? cycleStart : null,
                     CurrentCycleEnd = SetAsideCycle.HasCycle(sa.CycleKind) ? cycleEnd : null,
@@ -652,6 +1068,7 @@ public class SetAsideService
                     CycleFundingShortfall = shortfall,
                     IsUnderfunded = shortfall > 0,
                     UsedAmount = usedBySetAside.GetValueOrDefault(sa.Id, 0m),
+                    IsCycleExecuted = executedBySetAside.GetValueOrDefault(sa.Id),
                     Status = sa.Status,
                     CloseReason = sa.CloseReason,
                     CreatedAt = sa.CreatedAt,
@@ -677,7 +1094,7 @@ public class SetAsideService
             SetAside = projected.Single(),
             Entry = ProjectEntry(entry),
             TransactionId = transactionId,
-            CycleFundingShortfall = normalization.Shortfall
+            CycleFundingShortfall = projected.Single().CycleFundingShortfall
         };
     }
 

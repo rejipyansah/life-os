@@ -9,15 +9,27 @@ namespace LifeOS.Api.Services;
 /// source of truth — tidak ada Account.FreeBalance, tidak ada Finance.UangBebas,
 /// tidak ada Account.AvailableBalance.
 ///
+/// DUA ANGKA TERPISAH (jangan disamakan):
+///   TotalAvailable        = TotalActualBalance − TotalSetAside
+///     Uang yang belum dialokasikan ke Dana yang Disisihkan (sebelum komitmen Rencana).
+///   FreeCash (Uang Bebas) = TotalActualBalance − TotalSetAside
+///                           + PendingCycleSurplus − ScheduledExpenseCommitments
+///     Kekurangan target cycle yang belum didanai tidak mengurangi FreeCash.
+///     Uang yang benar-benar bebas dibelanjakan setelah semua komitmen.
+///
+/// SetAside tidak terikat Sumber Dana — total dihitung scope-wide.
+/// SetAside.AccountId legacy TIDAK dipakai untuk perhitungan apa pun.
+///
 /// Formula:
 ///   TotalActualBalance           = Σ actual balance akun            (= Σ TransactionEntry.Amount)
-///   TotalSetAside                = Σ saldo disisihkan aktif          (= Σ SetAsideEntry.Amount)
-///   PendingCycleFunding          = Σ funding yang dibutuhkan cycle yang belum dinormalisasi
-///   PendingCycleSurplus          = Σ surplus yang akan dikembalikan ke Uang Bebas
-///   TotalCommittedSetAside       = TotalSetAside + PendingCycleFunding - PendingCycleSurplus
+///   TotalSetAside                = Σ saldo disisihkan aktif          (= Σ SetAsideEntry.Amount, scope-wide)
+///   PendingCycleFunding          = Σ kebutuhan pendanaan cycle (informasi; bukan komitmen FreeCash)
+///   PendingCycleSurplus          = Σ surplus cycle yang akan dikembalikan  (scope-wide)
+///   TotalCommittedSetAside       = TotalSetAside − PendingCycleSurplus
+///   TotalAvailable               = TotalActualBalance − TotalSetAside
 ///   DueObligations               = Σ agenda pengeluaran terjadwal yang jatuh tempo/sudah lewat
 ///   ScheduledExpenseCommitments  = Σ SEMUA agenda pengeluaran terjadwal (sekali jalan & ber-siklus)
-///                                   — dikurangi dari Uang Bebas sejak dibuat,
+///                                   — dikurangi dari FreeCash sejak dibuat,
 ///                                   mirip komitmen Pos, tanpa membuat transaksi.
 ///   FreeCash (Uang Bebas)        = TotalActualBalance - TotalCommittedSetAside
 ///                                   - ScheduledExpenseCommitments
@@ -38,6 +50,12 @@ public class FinanceStateProjection
     public decimal PendingCycleFunding { get; set; }
     public decimal PendingCycleSurplus { get; set; }
     public decimal TotalCommittedSetAside { get; set; }
+
+    /// <summary>
+    /// TotalAvailable = TotalActual − TotalSetAside.
+    /// Uang yang belum dialokasikan ke Dana yang Disisihkan.
+    /// BERBEDA dari FreeCash (yang juga mengurangi komitmen Rencana).
+    /// </summary>
     public decimal TotalAvailable { get; set; }
 
     public decimal DueObligations { get; set; }
@@ -46,11 +64,15 @@ public class FinanceStateProjection
 
     /// <summary>
     /// Komitmen agenda pengeluaran terjadwal (sekali jalan & ber-siklus) untuk cycle berjalan.
-    /// Mengurangi Uang Bebas tanpa menjadi transaksi (mirip disisihkan).
+    /// Mengurangi FreeCash tanpa menjadi transaksi (mirip disisihkan).
     /// </summary>
     public decimal ScheduledExpenseCommitments { get; set; }
 
-    /// <summary>Uang Bebas. Derived, tidak disimpan, tidak pernah di-clamp.</summary>
+    /// <summary>
+    /// FreeCash (Uang Bebas) = TotalActual − TotalSetAside + PendingCycleSurplus
+    ///                          − ScheduledExpenseCommitments.
+    /// Derived, tidak disimpan, tidak pernah di-clamp. BERBEDA dari TotalAvailable.
+    /// </summary>
     public decimal FreeCash { get; set; }
 
     public bool HasUnpaidBills { get; set; }
@@ -70,17 +92,20 @@ public class AccountStateProjection
     public AccountType Type { get; set; }
     public bool IsArchived { get; set; }
 
-    /// <summary>Saldo riil. SUM(TransactionEntry.Amount).</summary>
+    /// <summary>Saldo riil. SUM(TransactionEntry.Amount). Lokasi uang di akun ini.</summary>
     public decimal ActualBalance { get; set; }
 
-    /// <summary>Uang yang sedang disisihkan pada akun ini.</summary>
+    /// <summary>
+    /// SELALU 0 — alokasi (Dana yang Disisihkan) scope-wide, bukan milik akun tertentu.
+    /// SetAside.AccountId legacy tidak dipakai untuk mengurangi saldo per akun.
+    /// </summary>
     public decimal SetAsideAmount { get; set; }
 
-    /// <summary>Saldo tersedia = ActualBalance - SetAsideAmount.</summary>
+    /// <summary>
+    /// Saldo aktual akun ini. Uang di akun ini bisa dipakai dari akun ini.
+    /// Alokasi dihitung di TotalAvailable scope-wide, bukan per akun.
+    /// </summary>
     public decimal AvailableBalance { get; set; }
-
-    public decimal PendingCycleFunding { get; set; }
-    public decimal PendingCycleSurplus { get; set; }
 
     public DateTime CreatedAt { get; set; }
 }

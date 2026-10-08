@@ -4,6 +4,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LifeOS.Api.Services;
 
+/// <summary>
+/// Sumber Dana (Account) — lokasi uang.
+///
+/// Saldo akun = SUM(TransactionEntry.Amount). Tidak ada kolom balance tersimpan.
+/// Alokasi (Dana yang Disisihkan) TIDAK mengurangi saldo per akun — alokasi
+/// dihitung scope-wide. SetAside.AccountId legacy tidak dipakai.
+/// </summary>
 public class AccountService
 {
     private readonly ApplicationDbContext _db;
@@ -79,12 +86,14 @@ public class AccountService
 
         var accountIds = accounts.Select(a => a.Id).ToList();
         var balances = await _balances.GetActualBalancesAsync(accountIds, ct);
-        var setAsides = await _balances.GetActiveSetAsidesAsync(accountIds, ct);
+
+        // TotalSetAside dihitung scope-wide — alokasi tidak terikat akun.
+        var totalSetAside = await _balances.GetActiveSetAsideTotalAsync(scopeId, ct);
+        var totalActual = balances.Values.Sum();
 
         var projections = accounts.Select(a =>
         {
             var actual = balances.GetValueOrDefault(a.Id, 0m);
-            var reserved = setAsides.GetValueOrDefault(a.Id, 0m);
             return new AccountProjection
             {
                 Id = a.Id,
@@ -92,8 +101,9 @@ public class AccountService
                 Type = a.Type,
                 IsArchived = a.IsArchived,
                 ActualBalance = actual,
-                SetAsideAmount = reserved,
-                AvailableBalance = actual - reserved,
+                // Alokasi scope-wide — tidak mengurangi saldo per akun.
+                SetAsideAmount = 0m,
+                AvailableBalance = actual,
                 CreatedAt = a.CreatedAt
             };
         }).ToList();
@@ -101,9 +111,10 @@ public class AccountService
         return new AccountListProjection
         {
             Accounts = projections,
-            TotalActualBalance = projections.Sum(p => p.ActualBalance),
-            TotalSetAsideAmount = projections.Sum(p => p.SetAsideAmount),
-            TotalAvailableBalance = projections.Sum(p => p.AvailableBalance)
+            TotalActualBalance = totalActual,
+            TotalSetAsideAmount = totalSetAside,
+            // TotalAvailable = TotalActual − TotalSetAside (berbeda dari FreeCash).
+            TotalAvailableBalance = totalActual - totalSetAside
         };
     }
 
@@ -119,7 +130,6 @@ public class AccountService
             throw new ValidationException("Account not found in current Scope.");
 
         var actual = await _balances.GetActualBalanceAsync(accountId, ct);
-        var reserved = await _balances.GetActiveSetAsideAsync(accountId, ct);
 
         return new AccountProjection
         {
@@ -128,8 +138,8 @@ public class AccountService
             Type = account.Type,
             IsArchived = account.IsArchived,
             ActualBalance = actual,
-            SetAsideAmount = reserved,
-            AvailableBalance = actual - reserved,
+            SetAsideAmount = 0m,
+            AvailableBalance = actual,
             CreatedAt = account.CreatedAt
         };
     }
@@ -175,18 +185,13 @@ public class AccountService
         {
             if (command.IsArchived.Value)
             {
-                // Archive validation: balance must be 0 AND no active set-asides
+                // Arsip hanya dicek saldo aktual. Alokasi (pos) tidak mengikat akun —
+                // pos bisa saja "didanai" dari mana pun, tidak terikat ke akun ini.
                 var balance = await _balances.GetActualBalanceAsync(accountId, ct);
 
                 if (balance != 0)
                     throw new ValidationException(
                         $"Akun belum bisa diarsipkan karena saldonya masih Rp{balance:N0}. Kosongkan saldo terlebih dahulu.");
-
-                var activeSetAside = await _balances.GetActiveSetAsideAsync(accountId, ct);
-
-                if (activeSetAside != 0)
-                    throw new ValidationException(
-                        $"Akun belum bisa diarsipkan karena masih ada uang yang disisihkan sebesar Rp{activeSetAside:N0}. Tarik atau tutup pos terlebih dahulu.");
             }
 
             account.IsArchived = command.IsArchived.Value;

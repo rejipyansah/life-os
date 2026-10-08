@@ -15,6 +15,7 @@ import {
   addToSetAside,
   withdrawFromSetAside,
   closeSetAside,
+  updateSetAside,
   updateAccount as updateAccountRequest,
 } from '../api';
 import type {
@@ -93,8 +94,8 @@ export interface FinanceStateApi {
   dismissToast: (id: number) => void;
   pushToast: (message: string, icon?: string) => void;
 
-  payBill: (id: string) => void;
-  payAllBills: () => void;
+  payBill: (id: string, accountId: string, setAsideId?: string) => void;
+  payAllBills: (accountId: string, setAsideId?: string) => void;
   postponeBill: (id: string) => void;
 
   addAccount: (data: { name: string; role: string; type: Account['type'] }) => void;
@@ -105,23 +106,39 @@ export interface FinanceStateApi {
   saveTransaction: (parsed: ParsedTransaction) => void;
   voidTransaction: (id: string, reason: string) => void;
 
-  topUpPos: (id: string, amount: number) => void;
-  withdrawPos: (id: string, amount: number) => void;
+  topUpPos: (id: string, amount: number, sourceAccountId?: string) => Promise<boolean>;
+  withdrawPos: (id: string, amount: number) => Promise<boolean>;
+  /**
+   * Pakai pos: sourceAccountId = Sumber Dana tempat uang BENAR-BENAR keluar.
+   * Wajib — seluruh nominal keluar dari akun itu; pos melepas min(amount, saldoPos).
+   */
   useIncrementalPos: (
     id: string,
     amount: number,
-    note?: string,
-    freeCashAccountId?: string
-  ) => void;
-  executeBatchPos: (id: string, actualCost: number, note?: string) => void;
-  executeSingleSpendPos: (id: string, actualCost: number, note?: string) => void;
-  createPos: (input: CreatePosInput) => void;
-  deletePos: (id: string) => void;
+    sourceAccountId: string,
+    note?: string
+  ) => Promise<boolean>;
+  executeBatchPos: (
+    id: string,
+    actualCost: number,
+    sourceAccountId: string,
+    note?: string
+  ) => Promise<boolean>;
+  executeSingleSpendPos: (
+    id: string,
+    actualCost: number,
+    sourceAccountId: string,
+    note?: string
+  ) => Promise<boolean>;
+  createPos: (input: CreatePosInput) => Promise<boolean>;
+  deletePos: (id: string) => Promise<boolean>;
+  updatePos: (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) => Promise<boolean>;
 
   skipAgenda: (id: string) => void;
   postponeAgenda: (id: string) => void;
   deleteAgenda: (id: string) => void;
-  finishAgenda: (id: string) => void;
+  /** Selesaikan rencana: accountId wajib (Sumber Dana aktual), setAsideId opsional. */
+  finishAgenda: (id: string, accountId: string, setAsideId?: string) => void;
   createAgenda: (input: CreateAgendaInput) => void;
 }
 
@@ -173,13 +190,15 @@ export function useFinanceState(): FinanceStateApi {
 
   /** Runs a backend mutation, refreshes the read model, and reports failures. */
   const run = useCallback(
-    async (action: () => Promise<unknown>, onSuccess?: () => void) => {
+    async (action: () => Promise<unknown>, onSuccess?: () => void): Promise<boolean> => {
       try {
         await action();
         onSuccess?.();
         refresh();
+        return true;
       } catch (error) {
         pushToast(errorMessage(error), 'error');
+        return false;
       }
     },
     [pushToast, refresh]
@@ -189,23 +208,28 @@ export function useFinanceState(): FinanceStateApi {
     (name: string | undefined): string | undefined => {
       if (!name) return undefined;
       const wanted = name.trim().toLowerCase();
-      return (
-        mapped.accounts.find((a) => a.name.toLowerCase() === wanted)?.id ??
-        mapped.accounts[0]?.id
-      );
+      // HANYA cocokkan nama eksplisit — tanpa fallback ke akun pertama.
+      // Sumber Dana dipilih user, bukan ditebak sistem.
+      return mapped.accounts.find((a) => a.name.toLowerCase() === wanted)?.id;
     },
     [mapped.accounts]
   );
 
   /* ── Jatuh Tempo ────────────────────────────────────────────
    * A bill is a due upcoming cash event. Paying it realizes it into a
-   * real transaction; postponing moves its due date.
+   * real transaction — user memilih Sumber Dana aktual saat membayar.
+   * Rencana tidak terikat akun; akun dipilih di modal realizasi.
    */
   const payBill = useCallback(
-    (id: string) => {
+    (id: string, accountId: string, setAsideId?: string) => {
       const bill = mapped.billsDue.find((b) => b.id === id);
       void run(
-        () => realizeUpcomingEvent(id, { occurredOn: todayIso() }),
+        () =>
+          realizeUpcomingEvent(id, {
+            accountId,
+            setAsideId: setAsideId ?? null,
+            occurredOn: todayIso(),
+          }),
         () => {
           if (bill) pushToast(`Berhasil membayar ${bill.name}`, 'task_alt');
         }
@@ -214,25 +238,32 @@ export function useFinanceState(): FinanceStateApi {
     [mapped.billsDue, pushToast, run]
   );
 
-  const payAllBills = useCallback(() => {
-    const unpaid = mapped.billsDue.filter((b) => b.status === 'unpaid');
-    if (unpaid.length === 0) {
-      pushToast('Semua tagihan hari ini sudah lunas sebelumnya.', 'info');
-      return;
-    }
-    void run(
-      async () => {
-        for (const bill of unpaid) {
-          await realizeUpcomingEvent(bill.id, { occurredOn: todayIso() });
-        }
-      },
-      () =>
-        pushToast(
-          `Seluruh tagihan hari ini (${unpaid.length} tagihan) telah lunas terbayar!`,
-          'check_circle'
-        )
-    );
-  }, [mapped.billsDue, pushToast, run]);
+  const payAllBills = useCallback(
+    (accountId: string, setAsideId?: string) => {
+      const unpaid = mapped.billsDue.filter((b) => b.status === 'unpaid');
+      if (unpaid.length === 0) {
+        pushToast('Semua tagihan hari ini sudah lunas sebelumnya.', 'info');
+        return;
+      }
+      void run(
+        async () => {
+          for (const bill of unpaid) {
+            await realizeUpcomingEvent(bill.id, {
+              accountId,
+              setAsideId: setAsideId ?? null,
+              occurredOn: todayIso(),
+            });
+          }
+        },
+        () =>
+          pushToast(
+            `Seluruh tagihan hari ini (${unpaid.length} tagihan) telah lunas terbayar!`,
+            'check_circle'
+          )
+      );
+    },
+    [mapped.billsDue, pushToast, run]
+  );
 
   const postponeBill = useCallback(
     (id: string) => {
@@ -332,14 +363,11 @@ export function useFinanceState(): FinanceStateApi {
 
       // Set-aside intent: a reservation, never a transaction.
       if (parsed.type === 'Alokasi Pos') {
-        if (!accountId) {
-          pushToast('Sumber Dana tidak ditemukan.', 'error');
-          return;
-        }
         void run(
           () =>
             createSetAside({
-              accountId,
+              // SourceAccountId hanya divalidasi sekali pakai — pos tidak terikat akun.
+              sourceAccountId: accountId ?? null,
               name: parsed.category || 'Pos Dana',
               amount: parsed.amount,
               kind: 'Saving',
@@ -382,10 +410,14 @@ export function useFinanceState(): FinanceStateApi {
                 amount: isIncome ? parsed.amount! : -parsed.amount!,
               },
             ],
+            // Dana yang Disisihkan (opsional) — independen dari Sumber Dana.
+            setAsideId: parsed.setAsideId ?? null,
           }),
         () =>
           pushToast(
-            `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat.`
+            parsed.setAsideLabel
+              ? `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat (pos "${parsed.setAsideLabel}").`
+              : `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat.`
           )
       );
     },
@@ -405,11 +437,16 @@ export function useFinanceState(): FinanceStateApi {
   /* ── Yang Disisihkan ──────────────────────────────────────── */
 
   const topUpPos = useCallback(
-    (id: string, amount: number) => {
-      if (amount <= 0) return;
+    (id: string, amount: number, sourceAccountId?: string) => {
+      if (amount <= 0) return Promise.resolve(false);
       const pos = mapped.posItems.find((p) => p.id === id);
-      void run(
-        () => addToSetAside(id, { amount }),
+      return run(
+        () =>
+          addToSetAside(id, {
+            amount,
+            // SourceAccountId hanya divalidasi sekali pakai — bukan ikatan pos.
+            sourceAccountId: sourceAccountId ?? null,
+          }),
         () => {
           if (pos) {
             pushToast(
@@ -424,10 +461,10 @@ export function useFinanceState(): FinanceStateApi {
 
   const withdrawPos = useCallback(
     (id: string, amount: number) => {
-      if (amount <= 0) return;
+      if (amount <= 0) return Promise.resolve(false);
       const pos = mapped.posItems.find((p) => p.id === id);
       const actual = Math.min(amount, pos?.amount ?? amount);
-      void run(
+      return run(
         () => withdrawFromSetAside(id, { amount }),
         () => {
           if (pos) {
@@ -442,17 +479,18 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const useIncrementalPos = useCallback(
-    (id: string, amount: number, note?: string, freeCashAccountId?: string) => {
-      if (amount <= 0) return;
+    (id: string, amount: number, sourceAccountId: string, note?: string) => {
+      if (amount <= 0) return Promise.resolve(false);
       const pos = mapped.posItems.find((p) => p.id === id);
-      void run(
+      return run(
         () =>
           spendFromSetAside(id, {
+            // Sumber Dana tempat uang BENAR-BENAR keluar. Wajib.
+            sourceAccountId,
             amount,
             description: note || pos?.name || undefined,
             occurredOn: todayIso(),
             note: note || undefined,
-            freeCashAccountId,
           }),
         () => {
           if (pos) {
@@ -467,12 +505,13 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const executeBatchPos = useCallback(
-    (id: string, actualCost: number, note?: string) => {
-      if (actualCost <= 0) return;
+    (id: string, actualCost: number, sourceAccountId: string, note?: string) => {
+      if (actualCost <= 0) return Promise.resolve(false);
       const pos = mapped.posItems.find((p) => p.id === id);
-      void run(
+      return run(
         () =>
           spendFromSetAside(id, {
+            sourceAccountId,
             amount: actualCost,
             description: note || pos?.name || undefined,
             occurredOn: todayIso(),
@@ -491,13 +530,14 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const executeSingleSpendPos = useCallback(
-    (id: string, actualCost: number, note?: string) => {
+    (id: string, actualCost: number, sourceAccountId: string, note?: string) => {
       const pos = mapped.posItems.find((p) => p.id === id);
       const amount = actualCost > 0 ? actualCost : pos?.amount ?? 0;
-      if (amount <= 0) return;
-      void run(
+      if (amount <= 0) return Promise.resolve(false);
+      return run(
         () =>
           spendFromSetAside(id, {
+            sourceAccountId,
             amount,
             description: note || pos?.name || undefined,
             occurredOn: todayIso(),
@@ -515,14 +555,10 @@ export function useFinanceState(): FinanceStateApi {
 
   const createPos = useCallback(
     (input: CreatePosInput) => {
-      const accountId = resolveAccountId(input.accountLabel);
-      if (!accountId) {
-        pushToast('Sumber Dana tidak ditemukan.', 'error');
-        return;
-      }
+      const sourceAccountId = resolveAccountId(input.sourceAccountLabel);
 
-      void run(
-        () => createSetAside(toCreateSetAsideCommand(input, accountId)),
+      return run(
+        () => createSetAside(toCreateSetAsideCommand(input, sourceAccountId)),
         () => pushToast(`Pos "${input.name}" berhasil dibuat.`)
       );
     },
@@ -532,7 +568,7 @@ export function useFinanceState(): FinanceStateApi {
   const deletePos = useCallback(
     (id: string) => {
       const pos = mapped.posItems.find((p) => p.id === id);
-      void run(
+      return run(
         () =>
           closeSetAside(id, {
             reason: 'Cancelled' as SetAsideCloseReason,
@@ -548,6 +584,12 @@ export function useFinanceState(): FinanceStateApi {
       );
     },
     [mapped.posItems, pushToast, run]
+  );
+
+  const updatePos = useCallback(
+    (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) =>
+      run(() => updateSetAside(id, command), () => pushToast('Detail Dana yang Disisihkan diperbarui.')),
+    [pushToast, run]
   );
 
   /* ── Rencana Pengeluaran/Pemasukan ─────────────────────────────────── */
@@ -592,10 +634,16 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const finishAgenda = useCallback(
-    (id: string) => {
+    (id: string, accountId: string, setAsideId?: string) => {
       const agenda = mapped.agendas.find((a) => a.id === id);
       void run(
-        () => realizeUpcomingEvent(id, { occurredOn: todayIso() }),
+        () =>
+          realizeUpcomingEvent(id, {
+            // Sumber Dana dipilih SAAT realizasi — bukan terikat permanen.
+            accountId,
+            setAsideId: setAsideId ?? null,
+            occurredOn: todayIso(),
+          }),
         () => {
           if (agenda) {
             pushToast(`Agenda "${agenda.title}" berhasil diselesaikan!`, 'task_alt');
@@ -608,12 +656,12 @@ export function useFinanceState(): FinanceStateApi {
 
   const createAgenda = useCallback(
     (input: CreateAgendaInput) => {
-      const accountId = resolveAccountId(input.accountLabel);
       const dueDate = input.rawDate || null;
       void run(
         () =>
           createUpcomingEvent({
-            accountId: accountId ?? null,
+            // Rencana TIDAK terikat Sumber Dana — akun dipilih saat realizasi.
+            accountId: null,
             title: input.title,
             amount: input.amount,
             direction: input.isIncome ? 'Income' : 'Expense',
@@ -627,7 +675,7 @@ export function useFinanceState(): FinanceStateApi {
         () => pushToast(`Agenda "${input.title}" berhasil disimpan.`)
       );
     },
-    [pushToast, resolveAccountId, run]
+    [pushToast, run]
   );
 
   return {
@@ -686,6 +734,7 @@ export function useFinanceState(): FinanceStateApi {
     executeSingleSpendPos,
     createPos,
     deletePos,
+    updatePos,
 
     skipAgenda,
     postponeAgenda,

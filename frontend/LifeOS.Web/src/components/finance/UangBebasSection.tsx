@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   formatCurrency,
   formatCurrencyRaw,
+  type Account,
   type BillDue,
   type FinanceDerived,
+  type PosItem,
 } from '../../finance';
 import {
   btnPrimary,
@@ -13,6 +15,7 @@ import {
   Modal,
   moneyClass,
   pillWarning,
+  selectBase,
 } from './shared';
 
 /* ── Uang Bebas card ── */
@@ -69,21 +72,162 @@ export function UangBebasCard({
   );
 }
 
+/* ── Realize modal (Bayar / Bayar Semua) ──
+ * Sumber Dana = rekening tempat uang BENAR-BENAR keluar (wajib).
+ * Dana yang Disisihkan = pos yang dialokasikan/dilepas (opsional).
+ * Tagihan tidak lagi terikat akun — user memilih di modal ini. */
+
+type PayModalState =
+  | { kind: 'single'; bill: BillDue }
+  | { kind: 'all' }
+  | null;
+
+function PayRealizeModal({
+  state,
+  accounts,
+  posItems,
+  totalAmount,
+  onClose,
+  onConfirm,
+}: {
+  state: PayModalState;
+  accounts: Account[];
+  posItems: PosItem[];
+  totalAmount: number;
+  onClose: () => void;
+  onConfirm: (accountId: string, setAsideId?: string) => void;
+}) {
+  const [accountId, setAccountId] = useState('');
+  const [setAsideId, setSetAsideId] = useState('');
+
+  const activeAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
+  const activePos = useMemo(() => posItems.filter((p) => !p.archived), [posItems]);
+
+  if (!state) return null;
+
+  const isSingle = state.kind === 'single';
+  const bill = isSingle ? state.bill : null;
+  const amount = bill ? bill.amount : totalAmount;
+  const title = isSingle ? `Bayar Tagihan — ${bill?.name ?? ''}` : 'Bayar Semua Tagihan';
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={title}
+      subtitle="Pilih Sumber Dana tempat uang keluar; pos bersifat opsional."
+      maxWidth="max-w-md"
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-full text-xs text-lo-text-subtle hover:text-lo-text-ink transition-colors cursor-pointer"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={!accountId}
+            onClick={() => onConfirm(accountId, setAsideId || undefined)}
+            className={`${btnPrimary} disabled:opacity-40`}
+          >
+            <Icon name="check" className="text-base" />
+            <span>{state.kind === 'single' ? 'Bayar Tagihan' : 'Bayar Semua'}</span>
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-lo-text-ink" htmlFor="pay-source-account">
+            Sumber Dana <span className="text-lo-secondary">*</span>
+          </label>
+          <span className="text-[11px] text-lo-text-subtle">
+            Uang keluar dari rekening ini.
+          </span>
+          <select
+            id="pay-source-account"
+            className={selectBase}
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+          >
+            <option value="" disabled>
+              Pilih Sumber Dana…
+            </option>
+            {activeAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} — {formatCurrencyRaw(a.availableBalance)} tersedia
+              </option>
+            ))}
+          </select>
+          {activeAccounts.length === 0 ? (
+            <p className="text-[11px] text-lo-error">
+              Belum ada sumber dana aktif. Tambahkan sumber dana di bagian Sumber Dana.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-lo-text-ink" htmlFor="pay-set-aside">
+            Dana yang Disisihkan (opsional)
+          </label>
+          <span className="text-[11px] text-lo-text-subtle">
+            Pos yang dialokasikan/dilepas untuk pembayaran ini.
+          </span>
+          <select
+            id="pay-set-aside"
+            className={selectBase}
+            value={setAsideId}
+            onChange={(e) => setSetAsideId(e.target.value)}
+          >
+            <option value="">Tanpa pos</option>
+            {activePos.map((p) => (
+              <option
+                key={p.id}
+                value={p.id}
+                disabled={p.category === 'routine_batch' && p.cycleExecuted}
+              >
+                {p.name} — {formatCurrencyRaw(p.amount)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="p-4 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline flex items-center justify-between">
+          <span className="text-[11px] text-lo-text-subtle uppercase tracking-wide">
+            {state.kind === 'single' ? 'Nominal Tagihan' : 'Total Tagihan Hari Ini'}
+          </span>
+          <span className="font-headline text-lg font-semibold tabular-nums text-lo-text-ink">
+            {formatCurrencyRaw(amount)}
+          </span>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ── Jatuh Tempo card ── */
 
 export function JatuhTempoCard({
   derived,
   billsDue,
+  accounts,
+  posItems,
   onPayBill,
   onPayAll,
   onPostponeBill,
 }: {
   derived: FinanceDerived;
   billsDue: BillDue[];
-  onPayBill: (id: string) => void;
-  onPayAll: () => void;
+  accounts: Account[];
+  posItems: PosItem[];
+  onPayBill: (id: string, accountId: string, setAsideId?: string) => void;
+  onPayAll: (accountId: string, setAsideId?: string) => void;
   onPostponeBill: (id: string) => void;
 }) {
+  const [payModal, setPayModal] = useState<PayModalState>(null);
+
   return (
     <div className={`${cardBase} h-full p-7 sm:p-8 flex flex-col justify-between`}>
       <div>
@@ -117,7 +261,11 @@ export function JatuhTempoCard({
           </div>
           <div className="shrink-0 flex items-center gap-2">
             {!derived.allBillsPaid && derived.unpaidBillsCount > 0 ? (
-              <button type="button" onClick={onPayAll} className={btnPrimary}>
+              <button
+                type="button"
+                onClick={() => setPayModal({ kind: 'all' })}
+                className={btnPrimary}
+              >
                 <Icon name="done_all" className="text-[16px]" />
                 <span>
                   Bayar Semua Sekaligus ({formatCurrencyRaw(derived.billsDueTotal)})
@@ -137,7 +285,7 @@ export function JatuhTempoCard({
             <BillRow
               key={bill.id}
               bill={bill}
-              onPay={() => onPayBill(bill.id)}
+              onPay={() => setPayModal({ kind: 'single', bill })}
               onPostpone={() => onPostponeBill(bill.id)}
             />
           ))}
@@ -152,10 +300,30 @@ export function JatuhTempoCard({
       <div className="pt-5 mt-5 border-t border-lo-border-hairline flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-lo-text-subtle">
         <div className="flex items-center gap-1.5">
           <Icon name="verified_user" className="text-sm text-lo-secondary" />
-          <span>Pembayaran langsung dipotong dari sumber dana sumber terpilih.</span>
+          <span>Pembayaran langsung dipotong dari Sumber Dana yang dipilih.</span>
         </div>
         <span className="text-[11px] sm:text-right">Bebas denda keterlambatan</span>
       </div>
+
+      <PayRealizeModal
+        key={
+          payModal
+            ? payModal.kind === 'single'
+              ? `single-${payModal.bill.id}`
+              : 'all'
+            : 'closed'
+        }
+        state={payModal}
+        accounts={accounts}
+        posItems={posItems}
+        totalAmount={derived.billsDueTotal}
+        onClose={() => setPayModal(null)}
+        onConfirm={(accountId, setAsideId) => {
+          if (!payModal) return;
+          if (payModal.kind === 'single') onPayBill(payModal.bill.id, accountId, setAsideId);
+          else onPayAll(accountId, setAsideId);
+        }}
+      />
     </div>
   );
 }
@@ -325,6 +493,16 @@ export function FormulaModal({
             {formatCurrency(free)}
           </span>
         </div>
+        {/* DUA ANGKA TERPISAH — totalAvailable (uang yang belum dialokasikan)
+            hanya mengurangi Dana yang Disisihkan; freeCash juga memotong
+            komitmen Rencana. Jangan disamakan. */}
+        <p className="mt-3 text-[11px] text-lo-text-subtle leading-relaxed">
+          Uang yang belum dialokasikan:{' '}
+          <span className="font-medium text-lo-text-ink tabular-nums">
+            {formatCurrencyRaw(derived.totalAvailable)}
+          </span>{' '}
+          — hanya dikurangi Dana yang Disisihkan, sebelum memotong komitmen Rencana.
+        </p>
       </div>
     </Modal>
   );
@@ -333,14 +511,18 @@ export function FormulaModal({
 export default function UangBebasSection({
   derived,
   billsDue,
+  accounts,
+  posItems,
   onPayBill,
   onPayAll,
   onPostponeBill,
 }: {
   derived: FinanceDerived;
   billsDue: BillDue[];
-  onPayBill: (id: string) => void;
-  onPayAll: () => void;
+  accounts: Account[];
+  posItems: PosItem[];
+  onPayBill: (id: string, accountId: string, setAsideId?: string) => void;
+  onPayAll: (accountId: string, setAsideId?: string) => void;
   onPostponeBill: (id: string) => void;
 }) {
   const [formulaOpen, setFormulaOpen] = useState(false);
@@ -355,6 +537,8 @@ export default function UangBebasSection({
           <JatuhTempoCard
             derived={derived}
             billsDue={billsDue}
+            accounts={accounts}
+            posItems={posItems}
             onPayBill={onPayBill}
             onPayAll={onPayAll}
             onPostponeBill={onPostponeBill}
