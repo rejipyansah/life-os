@@ -123,10 +123,10 @@ dotnet run --project backend/FinanceProjectionBenchmark/FinanceProjectionBenchma
   --configuration Release -- --set-asides 100 --entries 50000 --iterations 5
 ```
 
-Benchmark awal pada lingkungan development lokal menghasilkan rata-rata sekitar **92 ms**, **11 SELECT**, dan **4.14 MiB** alokasi untuk 100 set-aside dan 50.000 entry. Angka ini baseline pengamatan, bukan ambang CI; hasil dapat berbeda antar mesin. Workflow benchmark terjadwal/manual mengunggah hasil sebagai artifact.
+Benchmark awal pada lingkungan development lokal menghasilkan rata-rata sekitar **92 ms**, **11 SELECT**, dan **4.14 MiB** alokasi untuk 100 set-aside dan 50.000 entry. Angka ini baseline pengamatan, bukan ambang CI; hasil dapat berbeda antar mesin. Workflow benchmark dapat dijalankan manual dan mengunggah hasil sebagai artifact.
 
 ## CI dan branch ruleset
 
-GitHub Actions dikonfigurasi menjalankan `npm test` pada pull request dan push ke `main`/`master`, dengan PostgreSQL service dan Chromium Playwright. Ruleset untuk melindungi `main` tersedia di [`docs/github-main-branch-ruleset.json`](docs/github-main-branch-ruleset.json); ruleset mewajibkan pull request, mencegah force-push dan penghapusan branch. Required Actions check sementara tidak diwajibkan karena akun GitHub sedang terkunci oleh billing.
+Workflow test di `.github/workflows/automated-tests.yml` saat ini dinonaktifkan di GitHub dan YAML-nya hanya memiliki pemicu manual. Workflow benchmark juga manual-only, tidak terjadwal. GitHub Actions belum bisa menjalankan keduanya selama account billing lock. Jalankan `npm test` lokal untuk memeriksa perubahan; langkah lengkap ada di bagian automated testing di atas. Ruleset `main` mewajibkan pull request serta mencegah force-push dan penghapusan branch, tanpa required status check Actions sementara.
 
 Detail lebih lanjut mengenai lapisan test, status implementasi, dan gap selanjutnya ada di [`docs/automated-testing-plan.md`](docs/automated-testing-plan.md).

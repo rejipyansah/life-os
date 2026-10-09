@@ -15,9 +15,6 @@ on:
         description: Measured projection iterations
         required: false
         default: '5'
-  schedule:
-    - cron: '30 4 * * 1'
-
 permissions:
   contents: read
 

@@ -57,7 +57,7 @@ Jalankan prosedur ini hanya oleh operator yang berwenang. Database test/E2E waji
 
 Prosedur umum sebelum release:
 
-1. Pastikan automated CI check `Automated tests / test` lulus.
+1. Jalankan `npm test` dari root dengan PostgreSQL/E2E variables jika ingin memverifikasi seluruh lapisan. GitHub Actions saat ini dijeda karena billing lock.
 2. Pastikan backup database tersedia dan restore procedure-nya diketahui.
 3. Terapkan migration sebelum atau sesuai urutan release yang disepakati.
 4. Deploy API dan frontend dengan environment configuration yang cocok.

@@ -11,7 +11,7 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 - Frontend menggunakan Vitest dan sudah memiliki test untuk kalkulasi/mapping finansial serta sebagian komponen.
 - Frontend memiliki skrip `test`, `build`, dan `lint`.
 - Perintah root `npm test` menjalankan backend tests, HTTP/API integration tests, frontend tests, lint, build tool benchmark, dan production build. Jika `LIFEOS_TEST_POSTGRES_CONNECTION` tersedia, perintah ini juga menjalankan test provider PostgreSQL. Jika `LIFEOS_E2E_POSTGRES_CONNECTION` tersedia, perintah ini juga menjalankan E2E browser.
-- Workflow GitHub Actions `.github/workflows/automated-tests.yml` menjalankan pemeriksaan terpadu, PostgreSQL-provider tests, dan Playwright E2E dengan PostgreSQL service pada pull request dan push ke `main`/`master`.
+- Workflow `.github/workflows/automated-tests.yml` memuat semua pemeriksaan dan PostgreSQL/Playwright service, tetapi saat ini dinonaktifkan di GitHub. File test dan benchmark disetel manual-only agar tidak terus gagal karena billing; workflow benchmark tidak lagi terjadwal.
 - Catatan review modul Dana yang Disisihkan mengidentifikasi gap seputar PostgreSQL, beberapa variasi alokasi pemasukan, kontrak HTTP/UI, dan benchmark proyeksi pada data besar.
 
 ## Prinsip
@@ -26,7 +26,7 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 ## Status Implementasi
 
 - **Selesai:** perintah test lokal terpadu dan skrip test frontend.
-- **Selesai:** workflow CI untuk backend unit/service tests, HTTP/API tests, frontend tests, lint, build, PostgreSQL tests, dan Playwright E2E.
+- **Dikonfigurasi, dijeda:** workflow manual untuk backend, HTTP/API, frontend, lint, build, PostgreSQL tests, dan Playwright E2E. GitHub Actions workflow disabled sementara di repo settings karena billing account lock.
 - **Selesai:** test integrasi PostgreSQL untuk migrasi dari schema kosong dan konflik serialisasi yang memverifikasi retry serta refresh entity tracker.
 - **Selesai:** test HTTP/API memakai TestServer memeriksa enum/nominal invalid, pemasukan dan expense lalu reversal, create/postpone agenda, `ScopeId` client diabaikan, serta data transaksi/pos tidak bisa dibaca guest scope lain.
 - **Selesai:** test interaksi frontend mencakup pemilihan sumber dana wajib, pos opsional, submit pembayaran, postpone, dan tutup modal dengan Escape.
@@ -36,15 +36,15 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 - **Selesai:** regresi pemasukan teralokasi di atas shortfall dan histori dengan timestamp identik lintas cursor.
 - **Selesai:** benchmark proyeksi PostgreSQL dengan generator data sintetis, SELECT counter, ukuran dataset/iterasi yang dapat diatur, cleanup schema otomatis, dan workflow mingguan/manual.
 - **Selesai oleh pengguna:** ruleset aktif untuk `main` mewajibkan pull request dan melarang force-push/penghapusan branch.
-- **CI PR #1:** workflow ter-trigger, tetapi job tidak dimulai karena GitHub melaporkan akun repository terkunci akibat masalah billing. Runner tidak mengeksekusi langkah/test; ini bukan kegagalan test kode.
-- **Perubahan sementara:** required Actions status check dilepas dari ruleset supaya PR tidak terkunci oleh billing. Setelah akses Actions pulih, tambahkan kembali required check `Automated tests / test`.
-- **Berikutnya:** pulihkan akses GitHub Actions tanpa mengaktifkan biaya berbayar bila memungkinkan, lalu wajibkan kembali status check dan kumpulkan benchmark berkala.
+- **CI PR #1:** GitHub menolak memulai job karena akun repository terkunci akibat masalah billing. Runner tidak mengeksekusi langkah/test; ini bukan kegagalan test kode.
+- **Perubahan sementara:** workflow Actions dinonaktifkan dan dijadikan manual-only; required Actions status check dilepas dari ruleset. Test lokal `npm test` tetap berjalan penuh.
+- **Berikutnya:** bila akses Actions pulih, aktifkan workflow, pulihkan pemicu PR, dan evaluasi kembali required status check. Tidak perlu menambahkan budget berbayar untuk test lokal.
 
-Template ruleset aktif tersimpan di [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json). Ruleset menargetkan `main`, mewajibkan pull request, serta mencegah force-push dan penghapusan branch. Required status check saat ini tidak dipasang karena GitHub Actions terblokir oleh masalah billing.
+Template ruleset aktif tersimpan di [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json). Ruleset menargetkan `main`, mewajibkan pull request, serta mencegah force-push dan penghapusan branch. Required status check tidak dipasang selama Actions dijeda.
 
 Jalankan semua pemeriksaan lokal dengan `npm test` dari root. Test endpoint HTTP berjalan dengan TestServer dan SQLite in-memory. Untuk suite PostgreSQL/Npgsql, atur `LIFEOS_TEST_POSTGRES_CONNECTION` ke database test terisolasi. Untuk E2E browser, instal Chromium (`npx playwright install chromium`) dan atur `LIFEOS_E2E_POSTGRES_CONNECTION` ke database khusus yang namanya mengandung `test` atau `e2e`; script akan menolak nama database lain dan menerapkan migrasi sebelum menjalankan browser.
 
-Suite regresi kini juga menguji pemasukan teralokasi yang melebihi shortfall siklus dan histori dengan timestamp identik lintas halaman cursor. Tool benchmark menggunakan PostgreSQL, membuat schema sementara sendiri, lalu menghapus schema tersebut setelah pengukuran. Benchmark dapat dijalankan manual atau mingguan melalui `.github/workflows/projection-benchmark.yml`; hasilnya melaporkan waktu proyeksi, SELECT count, dan alokasi memori untuk dataset sintetis. Hasil benchmark diunggah sebagai artifact selama 30 hari.
+Suite regresi kini juga menguji pemasukan teralokasi yang melebihi shortfall siklus dan histori dengan timestamp identik lintas halaman cursor. Tool benchmark menggunakan PostgreSQL, membuat schema sementara sendiri, lalu menghapus schema tersebut setelah pengukuran. Benchmark dapat dijalankan manual melalui `.github/workflows/projection-benchmark.yml`; hasilnya melaporkan waktu proyeksi, SELECT count, dan alokasi memori untuk dataset sintetis. Hasil benchmark diunggah sebagai artifact selama 30 hari.
 
 Verifikasi lokal lengkap dengan Docker berjalan: 385 test unit/service, 2 test integrasi (HTTP/API dan PostgreSQL/Npgsql), 72 test frontend (3 skipped), lint, build, dan 1 Playwright browser E2E lulus. Benchmark lokal pada 100 set-aside dan 50.000 ledger entry mencatat mean 91.8 ms, 11 SELECT, serta 4.14 MiB allocated. Angka ini dicatat sebagai baseline pengamatan dan belum menjadi batas gagal CI.
 
