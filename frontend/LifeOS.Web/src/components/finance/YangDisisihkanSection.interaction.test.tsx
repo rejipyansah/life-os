@@ -81,7 +81,7 @@ describe('Dana tujuan interaksi', () => {
     expect(screen.getByLabelText('Target Dana (Rp)')).toBeTruthy();
     await user.type(screen.getByLabelText(/Nama Dana/), 'Dana Darurat');
     await user.type(screen.getByLabelText('Target Dana (Rp)'), '500000');
-    await user.click(screen.getByRole('button', { name: 'Simpan Pos Baru' }));
+    await user.click(screen.getByRole('button', { name: 'Simpan Dana' }));
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Dana Darurat',

@@ -261,6 +261,7 @@ export interface CreateSetAsideCommand {
 export interface UpdateSetAsideCommand {
   name?: string;
   note?: string;
+  transactionCategory?: string;
   targetAmount?: number;
   removeTarget?: boolean;
   cycleKind?: SetAsideCycleKind;

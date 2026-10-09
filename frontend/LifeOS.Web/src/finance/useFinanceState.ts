@@ -133,7 +133,7 @@ export interface FinanceStateApi {
   createPos: (input: CreatePosInput) => Promise<boolean>;
   deletePos: (id: string) => Promise<boolean>;
   completePos: (id: string) => Promise<boolean>;
-  updatePos: (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) => Promise<boolean>;
+  updatePos: (id: string, command: { name: string; note: string; transactionCategory: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) => Promise<boolean>;
 
   skipAgenda: (id: string) => void;
   postponeAgenda: (id: string) => void;
@@ -583,7 +583,7 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const updatePos = useCallback(
-    (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) =>
+    (id: string, command: { name: string; note: string; transactionCategory: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) =>
       run(() => updateSetAside(id, command), () => pushToast('Detail Dana yang Disisihkan diperbarui.')),
     [pushToast, run]
   );

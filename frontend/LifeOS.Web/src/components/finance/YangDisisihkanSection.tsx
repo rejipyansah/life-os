@@ -76,7 +76,7 @@ interface YangDisisihkanSectionProps {
   onCreate: (input: CreatePosInput) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
   onComplete: (id: string) => Promise<boolean>;
-  onUpdate: (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
+  onUpdate: (id: string, command: { name: string; note: string; transactionCategory: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
 }
 
 const FILTERS: Array<{ key: PosCategory | 'all'; label: string }> = [
@@ -542,11 +542,12 @@ function EditPosModal({
 }: {
   pos: PosItem;
   onClose: () => void;
-  onSave: (command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
+  onSave: (command: { name: string; note: string; transactionCategory: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
 }) {
   const { saving, error, submit } = useSubmitState();
   const [name, setName] = useState(pos.name);
   const [note, setNote] = useState(pos.description);
+  const [transactionCategory, setTransactionCategory] = useState(pos.transactionCategory ?? 'Lainnya');
   const [target, setTarget] = useState(pos.targetAmount ? formatNumberString(String(pos.targetAmount)) : '');
   const [cycleKind, setCycleKind] = useState<SetAsideCycleKind>(pos.cycleKind ?? 'None');
   const nextTarget = parseFormattedNumber(target);
@@ -559,43 +560,36 @@ function EditPosModal({
       : pos.category === 'routine_batch'
         ? 'Estimasi biaya per realisasi'
         : 'Jumlah dana sekali pakai';
-  const targetHelp = pos.category === 'saving'
-    ? 'Target hanya membantu memantau progres, tidak mengubah saldo.'
-    : pos.category === 'routine_incremental'
-      ? 'Batas alokasi untuk setiap siklus. Perubahan tidak menambah/mengurangi saldo saat ini.'
-      : pos.category === 'routine_batch'
-        ? 'Estimasi dana untuk satu realisasi dalam setiap siklus.'
-        : 'Target pos belanja satu kali. Perubahan tidak mengubah saldo yang sudah dialokasikan.';
   const canSave = name.trim().length > 0
     && (!requiresCycleTarget || nextTarget > 0)
     && (!hasCycle || cycleKind !== 'None');
-  const projectedShortfall = hasCycle ? Math.max(0, nextTarget - pos.amount) : 0;
 
   return (
     <Modal open onClose={onClose} title={`Edit ${pos.name}`} icon="edit" maxWidth="max-w-xl">
       <div className="space-y-4">
         <SubmitError message={error} />
         <label className="block text-xs font-medium">Nama dana<input className={`${inputBase} mt-1`} value={name} onChange={(e) => setName(e.target.value)} /></label>
-        <label className="block text-xs font-medium">Catatan<textarea className={`${inputBase} mt-1`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></label>
-        <label className="block text-xs font-medium">{targetLabel} (Rp)
-          <input className={`${inputBase} mt-1`} inputMode="numeric" value={target} onChange={(e) => setTarget(formatNumberString(e.target.value))} placeholder={pos.category === 'saving' ? 'Opsional' : 'Masukkan nominal'} />
-          <span className="mt-1 block text-[11px] font-normal text-lo-text-subtle">{targetHelp}</span>
-        </label>
         {hasCycle ? (
-          <label className="block text-xs font-medium">Siklus
+          <label className="block text-xs font-medium">Dilakukan setiap
             <select className={`${selectBase} mt-1`} value={cycleKind} onChange={(e) => setCycleKind(e.target.value as SetAsideCycleKind)}>
-              <option value="Weekly">Mingguan</option><option value="Monthly">Bulanan</option><option value="Quarterly">Triwulanan</option><option value="SemiAnnual">Semesteran</option><option value="Annual">Tahunan</option>
+              <option value="Weekly">Mingguan</option><option value="Monthly">Bulanan</option><option value="Quarterly">Per 3 Bulan</option><option value="SemiAnnual">Per 6 Bulan</option><option value="Annual">Tahunan</option>
             </select>
           </label>
         ) : null}
-        <div className="rounded-xl bg-lo-accent-wash/60 p-3 text-xs text-lo-text-subtle">
-          {hasCycle ? 'Sebelum siklus/target baru berlaku, siklus lama dinormalisasi. Perubahan metadata tidak mengubah saldo secara langsung.' : 'Perubahan nama, catatan, dan target tidak memindahkan atau mengubah saldo pos.'}
-          <div className="mt-1 font-medium text-lo-text-ink">Saldo saat ini: {formatCurrencyRaw(pos.amount)} · {targetLabel.toLowerCase()}: {nextTarget > 0 ? formatCurrencyRaw(nextTarget) : 'tidak ditentukan'}</div>
-          {projectedShortfall > 0 ? <div className="mt-1">Perkiraan kekurangan menuju target: {formatCurrencyRaw(projectedShortfall)}. Ini informasi, bukan saldo yang sudah tersedia.</div> : null}
-        </div>
+        <label className="block text-xs font-medium">{targetLabel} (Rp)
+          <input className={`${inputBase} mt-1`} inputMode="numeric" value={target} onChange={(e) => setTarget(formatNumberString(e.target.value))} placeholder={pos.category === 'saving' ? 'Opsional' : 'Masukkan nominal'} />
+          <span className="mt-1 block text-[11px] font-normal text-lo-text-subtle">{hasCycle ? 'Batas dana untuk setiap periode.' : pos.category === 'saving' ? 'Opsional, untuk memantau progres.' : 'Nominal dana untuk kebutuhan ini.'}</span>
+        </label>
+        <label className="block text-xs font-medium">Kategori transaksi
+          <select className={`${selectBase} mt-1`} value={transactionCategory} onChange={(e) => setTransactionCategory(e.target.value)}>
+            {TRANSACTION_CATEGORIES.filter((item) => item !== 'Pendapatan').map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="block text-xs font-medium">Catatan (opsional)<textarea className={`${inputBase} mt-1`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <p className="text-[11px] text-lo-text-subtle">Perubahan detail tidak mengubah saldo dana.</p>
         <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-lo-border-hairline bg-lo-surface-cream p-4 sm:static sm:mx-0 sm:mb-0 sm:flex-row sm:justify-end sm:border-0 sm:bg-transparent sm:p-0">
           <button type="button" onClick={onClose} className={`${btnSecondary} justify-center`}>Batal</button>
-          <button type="button" disabled={!canSave || saving} onClick={() => void submit(() => onSave({ name: name.trim(), note, targetAmount: nextTarget || undefined, removeTarget: !requiresCycleTarget && nextTarget <= 0, cycleKind: hasCycle ? cycleKind : 'None' }))} className={`${btnPrimary} justify-center`}>{saving ? 'Menyimpan…' : 'Simpan perubahan'}</button>
+          <button type="button" disabled={!canSave || saving} onClick={() => void submit(() => onSave({ name: name.trim(), note, transactionCategory, targetAmount: nextTarget || undefined, removeTarget: !requiresCycleTarget && nextTarget <= 0, cycleKind: hasCycle ? cycleKind : 'None' }))} className={`${btnPrimary} justify-center`}>{saving ? 'Menyimpan…' : 'Simpan perubahan'}</button>
         </div>
       </div>
     </Modal>
@@ -885,7 +879,7 @@ function CreatePosModal({
             className={`${btnPrimary} disabled:opacity-40 disabled:hover:bg-lo-primary`}
           >
             <Icon name="check" className="text-base" />
-            <span>{saving ? 'Menyimpan…' : 'Simpan Pos Baru'}</span>
+            <span>{saving ? 'Menyimpan…' : 'Simpan Dana'}</span>
           </button>
         </>
       }
@@ -954,7 +948,7 @@ function CreatePosModal({
         {category === 'routine_incremental' ? (
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-cycle-kind">
-              Pengulangan <span className="text-lo-secondary">*</span>
+              Dilakukan Setiap <span className="text-lo-secondary">*</span>
             </label>
             <select
               id="new-pos-cycle-kind"
@@ -999,50 +993,50 @@ function CreatePosModal({
         ) : null}
 
         {category === 'routine_batch' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-cycle">
-                Dilakukan Setiap
-              </label>
-              <select
-                id="new-pos-cycle"
-                className={selectBase}
-                value={cycle}
-                onChange={(e) => setCycle(e.target.value)}
-              >
-                <option value="Bulanan">Bulanan</option>
-                <option value="Per 3 Bulan">Per 3 Bulan</option>
-                <option value="Per 6 Bulan">Per 6 Bulan</option>
-                <option value="Tahunan">Tahunan</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-batch-cost">
-                Estimasi Biaya 1x Eksekusi (Rp) <span className="text-lo-secondary">*</span>
-              </label>
-              <input
-                id="new-pos-batch-cost"
-                type="text"
-                inputMode="numeric"
-                className={inputBase}
-                value={plafon}
-                onChange={(e) => setPlafon(formatNumberString(e.target.value))}
-                placeholder="Contoh: 500000"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              {exceedsAvailable ? (
-                <p className="text-[11px] text-lo-error">
-                  Uang Bebas tidak cukup untuk alokasi awal {formatCurrencyRaw(prepareAmount)}.
-                  Tersedia {formatCurrencyRaw(freeCash)}.
-                </p>
-              ) : (
-                <span className="text-[11px] text-lo-text-subtle">
-                  Dana langsung disisihkan dari uang yang belum dialokasikan saat pos dibuat.
-                  Digunakan saat kebutuhan terjadi.
-                </span>
-              )}
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-cycle">
+              Dilakukan Setiap <span className="text-lo-secondary">*</span>
+            </label>
+            <select
+              id="new-pos-cycle"
+              className={selectBase}
+              value={cycle}
+              onChange={(e) => setCycle(e.target.value)}
+            >
+              <option value="Mingguan">Mingguan</option>
+              <option value="Bulanan">Bulanan</option>
+              <option value="Per 3 Bulan">Per 3 Bulan</option>
+              <option value="Per 6 Bulan">Per 6 Bulan</option>
+              <option value="Tahunan">Tahunan</option>
+            </select>
+          </div>
+        ) : null}
+
+        {category === 'routine_batch' ? (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-batch-cost">
+              Estimasi Biaya 1x Eksekusi (Rp) <span className="text-lo-secondary">*</span>
+            </label>
+            <input
+              id="new-pos-batch-cost"
+              type="text"
+              inputMode="numeric"
+              className={inputBase}
+              value={plafon}
+              onChange={(e) => setPlafon(formatNumberString(e.target.value))}
+              placeholder="Contoh: 500000"
+            />
+            {exceedsAvailable ? (
+              <p className="text-[11px] text-lo-error">
+                Uang Bebas tidak cukup untuk alokasi awal {formatCurrencyRaw(prepareAmount)}.
+                Tersedia {formatCurrencyRaw(freeCash)}.
+              </p>
+            ) : (
+              <span className="text-[11px] text-lo-text-subtle">
+                Dana langsung disisihkan dari uang yang belum dialokasikan saat pos dibuat.
+                Digunakan saat kebutuhan terjadi.
+              </span>
+            )}
           </div>
         ) : null}
 
