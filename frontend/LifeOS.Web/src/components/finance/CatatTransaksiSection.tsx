@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   formatCurrencyRaw,
@@ -18,7 +18,7 @@ import {
 interface CatatTransaksiSectionProps {
   accounts: Account[];
   posItems: PosItem[];
-  onSave: (parsed: ParsedTransaction) => void;
+  onSave: (parsed: ParsedTransaction) => Promise<boolean>;
 }
 
 const QUICK_PHRASES = [
@@ -39,6 +39,8 @@ export default function CatatTransaksiSection({
   const [guidance, setGuidance] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedTransaction | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const selectorAccounts = accounts.filter((a) => !a.archived);
   // Tanpa fallback ke akun pertama — user harus memilih eksplisit,
@@ -131,18 +133,27 @@ export default function CatatTransaksiSection({
     buildParsed(result);
   };
 
-  const handleConfirm = () => {
-    if (!parsed || parsed.status !== 'SUCCESS') return;
-    onSave(parsed);
-    const amount = parsed.amount ?? 0;
-    setSavedMsg(
-      `Transaksi berhasil dicatat: ${parsed.category} (${formatCurrencyRaw(amount)}) melalui ${parsed.account}${
-        parsed.setAsideLabel ? ` · pos "${parsed.setAsideLabel}"` : ''
-      }`
-    );
-    setInput('');
-    setParsed(null);
-    window.setTimeout(() => setSavedMsg(null), 4000);
+  const handleConfirm = async () => {
+    if (!parsed || parsed.status !== 'SUCCESS' || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const saved = await onSave(parsed);
+      if (!saved) return;
+
+      const amount = parsed.amount ?? 0;
+      setSavedMsg(parsed.type === 'Alokasi Pos'
+        ? `Alokasi berhasil dicatat: ${parsed.category} (${formatCurrencyRaw(amount)})`
+        : `Transaksi berhasil dicatat: ${parsed.category} (${formatCurrencyRaw(amount)}) melalui ${parsed.account}${
+            parsed.setAsideLabel ? ` · pos "${parsed.setAsideLabel}"` : ''
+          }`);
+      setInput('');
+      setParsed(null);
+      window.setTimeout(() => setSavedMsg(null), 4000);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -359,11 +370,12 @@ export default function CatatTransaksiSection({
                 </button>
                 <button
                   type="button"
+                  disabled={saving}
                   onClick={handleConfirm}
                   className="px-5 py-2 rounded-full bg-lo-primary text-lo-primary-hover text-white hover:bg-lo-primary-hover text-xs font-medium shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.98]"
                 >
                   <Icon name="check" className="text-[16px]" />
-                  <span>Simpan Transaksi</span>
+                  <span>{saving ? 'Menyimpan…' : 'Simpan Transaksi'}</span>
                 </button>
               </div>
             </div>

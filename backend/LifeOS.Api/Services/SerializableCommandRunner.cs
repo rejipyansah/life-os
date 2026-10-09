@@ -37,12 +37,16 @@ public static class SerializableCommandRunner
             catch (Exception ex) when (IsSerializationFailure(ex) && attempt < MaxSerializationRetries)
             {
                 await SafeRollbackAsync(dbTransaction, ct);
+                // EF Core retains modified entities after a failed transaction. A retry
+                // must reload the committed state instead of reusing stale tracked values.
+                db.ChangeTracker.Clear();
                 // Brief yield to let the winning transaction release its locks
                 await Task.Yield();
             }
             catch (Exception ex) when (IsSerializationFailure(ex))
             {
                 await SafeRollbackAsync(dbTransaction, ct);
+                db.ChangeTracker.Clear();
                 throw new SerializationConflictException();
             }
             catch (Exception)
@@ -72,12 +76,14 @@ public static class SerializableCommandRunner
             catch (Exception ex) when (IsSerializationFailure(ex) && attempt < MaxSerializationRetries)
             {
                 await SafeRollbackAsync(dbTransaction, ct);
+                db.ChangeTracker.Clear();
                 // Brief yield to let the winning transaction release its locks
                 await Task.Yield();
             }
             catch (Exception ex) when (IsSerializationFailure(ex))
             {
                 await SafeRollbackAsync(dbTransaction, ct);
+                db.ChangeTracker.Clear();
                 throw new SerializationConflictException();
             }
             catch (Exception)

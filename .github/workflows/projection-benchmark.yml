@@ -1,0 +1,59 @@
+name: Finance projection benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      setAsides:
+        description: Number of synthetic set-asides
+        required: false
+        default: '100'
+      entries:
+        description: Number of synthetic ledger entries
+        required: false
+        default: '50000'
+      iterations:
+        description: Measured projection iterations
+        required: false
+        default: '5'
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: lifeos_benchmark
+          POSTGRES_USER: lifeos
+          POSTGRES_PASSWORD: lifeos_benchmark_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lifeos -d lifeos_benchmark"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LIFEOS_TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=lifeos_benchmark;Username=lifeos;Password=lifeos_benchmark_password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Run synthetic projection benchmark
+        run: |
+          dotnet run --project backend/FinanceProjectionBenchmark/FinanceProjectionBenchmark.csproj \
+            --configuration Release -- \
+            --set-asides "${{ inputs.setAsides || '100' }}" \
+            --entries "${{ inputs.entries || '50000' }}" \
+            --iterations "${{ inputs.iterations || '5' }}" | tee benchmark-results.txt
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-projection-benchmark-${{ github.run_id }}
+          path: benchmark-results.txt
+          if-no-files-found: ignore
+          retention-days: 30

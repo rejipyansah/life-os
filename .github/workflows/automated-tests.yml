@@ -1,0 +1,55 @@
+name: Automated tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: lifeos_test
+          POSTGRES_USER: lifeos
+          POSTGRES_PASSWORD: lifeos_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lifeos -d lifeos_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LIFEOS_TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=lifeos_test;Username=lifeos;Password=lifeos_test_password
+      LIFEOS_E2E_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=lifeos_test;Username=lifeos;Password=lifeos_test_password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/LifeOS.Web/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend/LifeOS.Web
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend/LifeOS.Web
+      - name: Run automated checks
+        run: npm test
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics-${{ github.run_id }}
+          path: |
+            frontend/LifeOS.Web/playwright-report/
+            frontend/LifeOS.Web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

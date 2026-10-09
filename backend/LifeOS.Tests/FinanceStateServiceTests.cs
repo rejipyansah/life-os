@@ -73,7 +73,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "WiFi Rumah",
             Amount = 340_440m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DueDate = BusinessDate.TodayWib,
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
@@ -99,7 +99,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Sewa",
             Amount = 500_000m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DueDate = BusinessDate.TodayWib,
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
@@ -241,13 +241,14 @@ public class FinanceStateServiceTests : IDisposable
             Title = "WiFi Rumah",
             Amount = 340_440m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DueDate = BusinessDate.TodayWib,
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
         Assert.Equal(340_440m, (await _sut.GetStateAsync(_scopeId)).DueObligations);
 
         await _events.PostponeAsync(agenda.Id, new PostponeUpcomingEventCommand { ScopeId = _scopeId });
+        Assert.Equal(BusinessDate.TodayWib.AddDays(1), agenda.DueDate);
 
         var state = await _sut.GetStateAsync(_scopeId);
         // Keluar dari Jatuh Tempo…
