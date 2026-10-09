@@ -103,7 +103,7 @@ export interface FinanceStateApi {
   deleteAccount: (id: string) => void;
   transfer: (fromId: string, toId: string, amount: number) => void;
 
-  saveTransaction: (parsed: ParsedTransaction) => void;
+  saveTransaction: (parsed: ParsedTransaction) => Promise<boolean>;
   voidTransaction: (id: string, reason: string) => void;
 
   topUpPos: (id: string, amount: number, sourceAccountId?: string) => Promise<boolean>;
@@ -356,14 +356,14 @@ export function useFinanceState(): FinanceStateApi {
   /* ── Catat Transaksi ──────────────────────────────────────── */
 
   const saveTransaction = useCallback(
-    (parsed: ParsedTransaction) => {
-      if (parsed.status !== 'SUCCESS' || !parsed.amount) return;
+    async (parsed: ParsedTransaction) => {
+      if (parsed.status !== 'SUCCESS' || !parsed.amount) return false;
 
       const accountId = resolveAccountId(parsed.account);
 
       // Set-aside intent: a reservation, never a transaction.
       if (parsed.type === 'Alokasi Pos') {
-        void run(
+        return run(
           () =>
             createSetAside({
               // SourceAccountId hanya divalidasi sekali pakai — pos tidak terikat akun.
@@ -377,7 +377,6 @@ export function useFinanceState(): FinanceStateApi {
               `${formatRupiah(parsed.amount!)} disisihkan ke pos "${parsed.category}".`
             )
         );
-        return;
       }
 
       // The natural-input box has no destination field, so a real transfer
@@ -387,16 +386,16 @@ export function useFinanceState(): FinanceStateApi {
           'Transfer butuh rekening tujuan. Gunakan menu Transfer di Sumber Dana.',
           'info'
         );
-        return;
+        return false;
       }
 
       if (!accountId) {
         pushToast('Sumber Dana tidak ditemukan.', 'error');
-        return;
+        return false;
       }
 
       const isIncome = parsed.type === 'Pemasukan';
-      void run(
+      return run(
         () =>
           createTransaction({
             type: isIncome ? 'Income' : 'Expense',

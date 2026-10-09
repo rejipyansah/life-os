@@ -749,6 +749,36 @@ public class SetAsideServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task History_UsesIdAsDeterministicTieBreakerForIdenticalTimestampsAcrossPages()
+    {
+        var setAside = await CreateSetAsideAsync("Riwayat timestamp sama", 0m);
+        var timestamp = new DateTime(2026, 10, 8, 12, 0, 0, DateTimeKind.Utc);
+        var deltasById = new[] { 10m, 20m, -3m, 5m };
+        for (var i = 0; i < deltasById.Length; i++)
+        {
+            _db.SetAsideEntries.Add(new SetAsideEntry
+            {
+                Id = Guid.Parse($"00000000-0000-0000-0000-{i + 1:000000000000}"),
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = deltasById[i] > 0 ? SetAsideEntryType.Added : SetAsideEntryType.Withdrawn,
+                Amount = deltasById[i],
+                CreatedAt = timestamp
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        var first = await _sut.GetHistoryAsync(setAside.Id, _scopeId, pageSize: 2);
+        var second = await _sut.GetHistoryAsync(setAside.Id, _scopeId, first.NextCursor, 2);
+        var items = first.Items.Concat(second.Items).ToList();
+
+        Assert.Equal(4, items.Select(item => item.Id).Distinct().Count());
+        Assert.Equal(Enumerable.Range(1, 4).Reverse().Select(i => Guid.Parse(
+            $"00000000-0000-0000-0000-{i:000000000000}")), items.Select(item => item.Id));
+        Assert.Equal(new[] { 32m, 27m, 30m, 10m }, items.Select(item => item.BalanceAfter));
+    }
+
+    [Fact]
     public async Task IncomeAllocatedToCyclingSetAsideFundsShortfall_AndReversalRestoresIt()
     {
         var account = await CreateAccountAsync("Pemasukan");
@@ -787,6 +817,40 @@ public class SetAsideServiceTests : IDisposable
         var reversed = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
         Assert.Equal(0m, reversed!.Amount);
         Assert.Equal(300_000m, reversed.CycleFundingShortfall);
+    }
+
+    [Fact]
+    public async Task AllocatedIncomeAboveCycleShortfallSplitsFundingAndAdditionalAllocation()
+    {
+        var account = await CreateAccountAsync("Pemasukan alokasi lebih");
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Dana Siklus surplus",
+            Kind = SetAsideKind.RoutineIncremental,
+            TargetAmount = 300_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+
+        var (income, _) = await _transactions.CreateTransactionAsync(new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 400_000m,
+            OccurredOn = BusinessDate.TodayWib,
+            SetAsideId = setAside.Id,
+            Entries = [new CreateTransactionEntryCommand { AccountId = account.Id, Amount = 400_000m }]
+        });
+
+        var history = (await _sut.GetHistoryAsync(setAside.Id, _scopeId)).Items;
+        Assert.Contains(history, entry => entry.Type == SetAsideEntryType.CycleFunding
+            && entry.Amount == 300_000m && entry.TransactionId == income.Id);
+        Assert.Contains(history, entry => entry.Type == SetAsideEntryType.Added
+            && entry.Amount == 100_000m && entry.TransactionId == income.Id);
+        var projected = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+        Assert.Equal(400_000m, projected!.Amount);
+        Assert.Equal(0m, projected.CycleFundingShortfall);
     }
 
     [Fact]
