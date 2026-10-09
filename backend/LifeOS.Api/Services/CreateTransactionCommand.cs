@@ -2,6 +2,14 @@ using LifeOS.Api.Models;
 
 namespace LifeOS.Api.Services;
 
+public static class TransactionInputLimits
+{
+    // Match the largest integer exactly representable by JavaScript clients.
+    public const decimal MaxAmount = 9_007_199_254_740_991m;
+    public const int MaxDescriptionLength = 512;
+    public const int MaxCategoryLength = 128;
+}
+
 public class CreateTransactionCommand
 {
     public Guid ScopeId { get; set; }

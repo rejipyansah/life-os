@@ -361,22 +361,9 @@ export function useFinanceState(): FinanceStateApi {
 
       const accountId = resolveAccountId(parsed.account);
 
-      // Set-aside intent: a reservation, never a transaction.
       if (parsed.type === 'Alokasi Pos') {
-        return run(
-          () =>
-            createSetAside({
-              // SourceAccountId hanya divalidasi sekali pakai — pos tidak terikat akun.
-              sourceAccountId: accountId ?? null,
-              name: parsed.category || 'Pos Dana',
-              amount: parsed.amount,
-              kind: 'Saving',
-            }),
-          () =>
-            pushToast(
-              `${formatRupiah(parsed.amount!)} disisihkan ke pos "${parsed.category}".`
-            )
-        );
+        pushToast('Untuk mengelola alokasi, gunakan modul Dana yang Disisihkan.', 'info');
+        return false;
       }
 
       // The natural-input box has no destination field, so a real transfer
@@ -400,8 +387,8 @@ export function useFinanceState(): FinanceStateApi {
           createTransaction({
             type: isIncome ? 'Income' : 'Expense',
             amount: parsed.amount!,
-            description: parsed.category || undefined,
-            categoryName: isIncome ? 'Pemasukan' : parsed.category || undefined,
+            description: parsed.description || parsed.category || undefined,
+            categoryName: parsed.category || (isIncome ? 'Pendapatan' : undefined),
             occurredOn: todayIso(),
             entries: [
               {
@@ -409,14 +396,10 @@ export function useFinanceState(): FinanceStateApi {
                 amount: isIncome ? parsed.amount! : -parsed.amount!,
               },
             ],
-            // Dana yang Disisihkan (opsional) — independen dari Sumber Dana.
-            setAsideId: parsed.setAsideId ?? null,
           }),
         () =>
           pushToast(
-            parsed.setAsideLabel
-              ? `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat (pos "${parsed.setAsideLabel}").`
-              : `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat.`
+            `${isIncome ? 'Pemasukan' : 'Pengeluaran'} ${formatRupiah(parsed.amount!)} tercatat.${isIncome ? ' Jika ada kekurangan pendanaan siklus, sebagian Uang Bebas dapat otomatis dipakai untuk mengisinya.' : ''}`
           )
       );
     },

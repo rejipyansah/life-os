@@ -26,6 +26,11 @@ export {
 export {
   parseTransactionText,
   detectAccountFromText,
+  TRANSACTION_CATEGORIES,
+  MAX_TRANSACTION_AMOUNT,
+  MAX_TRANSACTION_TEXT_LENGTH,
+  MAX_TRANSACTION_DESCRIPTION_LENGTH,
+  MAX_TRANSACTION_CATEGORY_LENGTH,
 } from './parseTransaction';
 export type {
   Account,

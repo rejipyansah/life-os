@@ -163,6 +163,7 @@ public class TransactionService
         CreateTransactionCommand command,
         CancellationToken ct)
     {
+        ValidateInputLimits(command);
         var scopeId = command.ScopeId;
 
         // Validate all referenced Accounts belong to the current Scope
@@ -243,6 +244,27 @@ public class TransactionService
                 scopeId, transaction.Id, BusinessDate.TodayWib, ct);
 
         return (transaction, entries);
+    }
+
+    private static void ValidateInputLimits(CreateTransactionCommand command)
+    {
+        if (command.Amount > TransactionInputLimits.MaxAmount || command.Amount < -TransactionInputLimits.MaxAmount)
+            throw new ValidationException($"Transaction Amount must not exceed {TransactionInputLimits.MaxAmount:N0}.");
+
+        if (command.FeeAmount.HasValue
+            && (command.FeeAmount.Value > TransactionInputLimits.MaxAmount
+                || command.FeeAmount.Value < -TransactionInputLimits.MaxAmount))
+            throw new ValidationException($"FeeAmount must not exceed {TransactionInputLimits.MaxAmount:N0}.");
+
+        if (command.Description?.Length > TransactionInputLimits.MaxDescriptionLength)
+            throw new ValidationException($"Description must not exceed {TransactionInputLimits.MaxDescriptionLength} characters.");
+
+        if (command.CategoryName?.Length > TransactionInputLimits.MaxCategoryLength)
+            throw new ValidationException($"CategoryName must not exceed {TransactionInputLimits.MaxCategoryLength} characters.");
+
+        if (command.Entries.Any(entry => entry.Amount > TransactionInputLimits.MaxAmount
+            || entry.Amount < -TransactionInputLimits.MaxAmount))
+            throw new ValidationException($"Transaction entry Amount must not exceed {TransactionInputLimits.MaxAmount:N0}.");
     }
 
     /// <summary>

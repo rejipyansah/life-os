@@ -26,25 +26,20 @@ Prasyarat:
 - Node.js 22 atau lebih baru
 - PostgreSQL untuk menjalankan API
 
-Jalankan API dengan connection string PostgreSQL pada konfigurasi `ConnectionStrings:DefaultConnection`, misalnya melalui environment variable:
+Atur connection string PostgreSQL pada konfigurasi `ConnectionStrings:DefaultConnection`. Cara yang disarankan adalah memakai environment variable agar password tidak disimpan di file konfigurasi:
 
 ```powershell
 $env:ConnectionStrings__DefaultConnection = "Host=localhost;Port=5432;Database=lifeos;Username=lifeos;Password=<password>"
-Push-Location backend
-dotnet tool restore
-dotnet tool run dotnet-ef -- database update --project LifeOS.Api/LifeOS.Api.csproj --startup-project LifeOS.Api/LifeOS.Api.csproj --configuration Release
-Pop-Location
-dotnet run --project backend/LifeOS.Api/LifeOS.Api.csproj
 ```
 
-Di terminal lain, install dependency frontend dan jalankan Vite:
+Install dependency frontend satu kali, lalu jalankan API dan frontend bersama-sama dari root repository:
 
 ```powershell
 npm ci --prefix frontend/LifeOS.Web
-npm run dev --prefix frontend/LifeOS.Web
+npm run dev
 ```
 
-Frontend dev server meneruskan request `/api` ke API lokal di `http://localhost:5271`.
+Perintah tersebut menerapkan migration database yang tertunda, lalu menjalankan API di `http://localhost:5271` dan frontend Vite (biasanya `http://localhost:5173`). Frontend meneruskan request `/api` ke API. PostgreSQL harus sudah aktif dan database `lifeos` tersedia; tekan `Ctrl+C` untuk menghentikan kedua server.
 
 ## Automated testing
 

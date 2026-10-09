@@ -316,4 +316,28 @@ describe('parseTransactionText', () => {
     expect(parseTransactionText('transfer 500rb ke SeaBank').type).toBe('Transfer Kas');
     expect(parseTransactionText('sisihkan 500rb tabungan').type).toBe('Alokasi Pos');
   });
+
+  it('rejects ambiguous bare decimals but accepts explicit and grouped amounts', () => {
+    expect(parseTransactionText('beli makan 1.5').status).toBe('AMBIGUOUS_AMOUNT');
+    expect(parseTransactionText('beli makan 1,5').status).toBe('AMBIGUOUS_AMOUNT');
+    expect(parseTransactionText('beli makan 1.5jt').amount).toBe(1_500_000);
+    expect(parseTransactionText('beli makan 1.500').amount).toBe(1_500);
+  });
+
+  it('rejects amounts above the exact integer range supported by the client', () => {
+    expect(parseTransactionText('beli mobil 9007199254740992').status).toBe('AMOUNT_OUT_OF_RANGE');
+    expect(parseTransactionText('beli mobil 9007199254740991').status).toBe('SUCCESS');
+  });
+
+  it('maps common phrases into editable core categories and preserves description words', () => {
+    const coffee = parseTransactionText('jajan kopi 25rb');
+    expect(coffee.category).toBe('Makan & Minum');
+    expect(coffee.description).toBe('kopi');
+    expect(parseTransactionText('bayar wifi 340rb').category).toBe('Tagihan & Utilitas');
+    expect(parseTransactionText('beli dinding 25rb').description).toBe('dinding');
+  });
+
+  it('does not detect account names embedded inside other words', () => {
+    expect(detectAccountFromText('beli cabe 25rb')).toBeNull();
+  });
 });

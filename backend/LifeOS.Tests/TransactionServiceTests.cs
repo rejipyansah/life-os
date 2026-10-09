@@ -108,6 +108,53 @@ public class TransactionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Transaction_AmountAboveExactClientLimit_Rejected()
+    {
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = TransactionInputLimits.MaxAmount + 1m,
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = TransactionInputLimits.MaxAmount + 1m }]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task Transaction_DescriptionOverMaximumLength_Rejected()
+    {
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 1m,
+            Description = new string('x', TransactionInputLimits.MaxDescriptionLength + 1),
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 1m }]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
+    [Fact]
+    public async Task Transaction_CategoryOverMaximumLength_Rejected()
+    {
+        var command = new CreateTransactionCommand
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Income,
+            Amount = 1m,
+            CategoryName = new string('x', TransactionInputLimits.MaxCategoryLength + 1),
+            OccurredOn = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entries = [new CreateTransactionEntryCommand { AccountId = _accountAId, Amount = 1m }]
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => _sut.CreateTransactionAsync(command));
+    }
+
+    [Fact]
     public async Task Income_NegativeAmount_Rejected()
     {
         var command = new CreateTransactionCommand

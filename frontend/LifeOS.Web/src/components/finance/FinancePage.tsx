@@ -72,7 +72,6 @@ export default function FinancePage({
           {/* Row 2: Catat Transaksi */}
           <CatatTransaksiSection
             accounts={state.accounts}
-            posItems={state.posItems}
             onSave={state.saveTransaction}
           />
 

@@ -128,16 +128,15 @@ export interface FinanceToast {
 }
 
 export interface ParsedTransaction {
-  status: 'EMPTY' | 'NO_AMOUNT' | 'SUCCESS';
+  status: 'EMPTY' | 'NO_AMOUNT' | 'AMBIGUOUS_AMOUNT' | 'AMOUNT_OUT_OF_RANGE' | 'SUCCESS';
   amount?: number;
   type?: 'Pengeluaran' | 'Pemasukan' | 'Alokasi Pos' | 'Transfer Kas';
+  /** Kategori inti yang dapat dikoreksi pengguna sebelum disimpan. */
   category?: string;
+  /** Rincian bebas dari teks transaksi, terpisah dari kategori inti. */
+  description?: string;
   /** Sumber Dana — uang keluar/masuk dari mana. */
   account?: string;
-  /** Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas. */
-  setAsideId?: string;
-  /** Nama pos alokasi untuk tampilan. */
-  setAsideLabel?: string;
 }
 
 export interface CreatePosInput {
