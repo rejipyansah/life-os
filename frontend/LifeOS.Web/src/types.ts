@@ -177,6 +177,7 @@ export interface SetAsideEntryProjection {
   amount: number;
   transactionId: string | null;
   note: string | null;
+  transactionCategory?: string | null;
   createdAt: string;
   balanceAfter: number;
   transaction: SetAsideTransactionSummary | null;
@@ -217,6 +218,7 @@ export interface SetAsideProjection {
   name: string;
   kind: SetAsideKind | null;
   note: string | null;
+  transactionCategory?: string | null;
   /** Saldo yang sedang disisihkan, diturunkan dari history. */
   amount: number;
   targetAmount: number | null;
@@ -249,6 +251,7 @@ export interface CreateSetAsideCommand {
   name: string;
   kind?: SetAsideKind;
   note?: string;
+  transactionCategory?: string;
   targetAmount?: number | null;
   cycleKind?: SetAsideCycleKind;
   /** Saldo yang langsung disisihkan saat dibuat. Boleh 0. */

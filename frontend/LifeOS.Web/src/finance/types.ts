@@ -39,6 +39,7 @@ export interface PosItem {
   id: string;
   name: string;
   description: string;
+  transactionCategory?: string;
   category: PosCategory;
   /**
    * LEGACY ONLY — alokasi tidak terikat Sumber Dana.
@@ -142,6 +143,7 @@ export interface ParsedTransaction {
 export interface CreatePosInput {
   name: string;
   description: string;
+  transactionCategory?: string;
   category: PosCategory;
   /**
    * Opsional. Rekening referensi/preferensi; tidak didebit dan bukan batas pendanaan.

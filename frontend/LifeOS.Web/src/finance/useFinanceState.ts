@@ -132,6 +132,7 @@ export interface FinanceStateApi {
   ) => Promise<boolean>;
   createPos: (input: CreatePosInput) => Promise<boolean>;
   deletePos: (id: string) => Promise<boolean>;
+  completePos: (id: string) => Promise<boolean>;
   updatePos: (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) => Promise<boolean>;
 
   skipAgenda: (id: string) => void;
@@ -432,7 +433,7 @@ export function useFinanceState(): FinanceStateApi {
         () => {
           if (pos) {
             pushToast(
-              `Simpanan "${pos.name}" bertambah ${formatRupiah(amount)}.`
+              `Alokasi "${pos.name}" bertambah ${formatRupiah(amount)} dari Uang Bebas. Saldo rekening tidak berubah.`
             );
           }
         }
@@ -451,7 +452,7 @@ export function useFinanceState(): FinanceStateApi {
         () => {
           if (pos) {
             pushToast(
-              `Dana "${pos.name}" ditarik ${formatRupiah(actual)} kembali ke kas.`
+              `${formatRupiah(actual)} dilepas dari alokasi "${pos.name}" ke Uang Bebas. Saldo rekening tidak berubah.`
             );
           }
         }
@@ -562,6 +563,19 @@ export function useFinanceState(): FinanceStateApi {
               'delete'
             );
           }
+        }
+      );
+    },
+    [mapped.posItems, pushToast, run]
+  );
+
+  const completePos = useCallback(
+    (id: string) => {
+      const pos = mapped.posItems.find((p) => p.id === id);
+      return run(
+        () => closeSetAside(id, { reason: 'Spent' as SetAsideCloseReason }),
+        () => {
+          if (pos) pushToast(`Tujuan "${pos.name}" diselesaikan. Sisa alokasi kembali ke Uang Bebas.`);
         }
       );
     },
@@ -716,6 +730,7 @@ export function useFinanceState(): FinanceStateApi {
     executeSingleSpendPos,
     createPos,
     deletePos,
+    completePos,
     updatePos,
 
     skipAgenda,

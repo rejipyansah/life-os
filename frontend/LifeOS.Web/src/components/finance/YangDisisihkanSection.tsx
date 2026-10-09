@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSetAsideHistory } from '../../api';
 import type { SetAsideEntryProjection } from '../../types';
+import { TRANSACTION_CATEGORIES } from '../../finance/parseTransaction';
 
 import type { SetAsideCycleKind } from '../../types';
 import {
@@ -19,6 +20,7 @@ import {
 import {
   btnPrimary,
   btnSecondary,
+  btnDanger,
   cardBase,
   ConfirmDialog,
   EmptyState,
@@ -73,6 +75,7 @@ interface YangDisisihkanSectionProps {
   ) => Promise<boolean>;
   onCreate: (input: CreatePosInput) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
+  onComplete: (id: string) => Promise<boolean>;
   onUpdate: (id: string, command: { name: string; note: string; targetAmount?: number; removeTarget?: boolean; cycleKind: SetAsideCycleKind }) => Promise<boolean>;
 }
 
@@ -104,14 +107,6 @@ function resolveManualSourceAccountId(pos: PosItem, accounts: Account[]): string
   return '';
 }
 
-/** Rekening untuk top-up hanya referensi: tanpa preferensi, jangan menebak akun. */
-function resolveReferenceAccountId(pos: PosItem, accounts: Account[]): string {
-  if (!pos.defaultSourceAccountId) return '';
-  return accounts.some((account) => !account.archived && account.id === pos.defaultSourceAccountId)
-    ? pos.defaultSourceAccountId
-    : '';
-}
-
 export default function YangDisisihkanSection({
   posItems,
   accounts,
@@ -127,10 +122,11 @@ export default function YangDisisihkanSection({
   onExecuteSingle,
   onCreate,
   onDelete,
+  onComplete,
   onUpdate,
 }: YangDisisihkanSectionProps) {
   const [modal, setModal] = useState<ModalMode>(null);
-  const [deleteTarget, setDeleteTarget] = useState<PosItem | null>(null);
+  const [closeTarget, setCloseTarget] = useState<{ pos: PosItem; completed: boolean } | null>(null);
   const [historyTarget, setHistoryTarget] = useState<PosItem | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -237,7 +233,7 @@ export default function YangDisisihkanSection({
               key={pos.id}
               pos={pos}
               onOpen={() => openPosModal(pos, setModal)}
-              onDelete={() => setDeleteTarget(pos)}
+              onDelete={() => setCloseTarget({ pos, completed: false })}
               onEdit={() => setModal({ kind: 'edit', pos })}
               onHistory={() => setHistoryTarget(pos)}
             />
@@ -269,7 +265,6 @@ export default function YangDisisihkanSection({
       <CreatePosModal
         open={modal?.kind === 'create'}
         onClose={() => setModal(null)}
-        accounts={accounts}
         freeCash={freeCash}
         onCreate={async (input) => {
           const ok = await onCreate(input);
@@ -285,8 +280,8 @@ export default function YangDisisihkanSection({
           accounts={accounts}
           freeCash={freeCash}
           onClose={() => setModal(null)}
-          onTopUp={async (amt, sourceAccountId) => {
-            const ok = await onTopUp(modal.pos.id, amt, sourceAccountId);
+          onTopUp={async (amt) => {
+            const ok = await onTopUp(modal.pos.id, amt);
             if (ok) setModal(null);
             return ok;
           }}
@@ -295,8 +290,13 @@ export default function YangDisisihkanSection({
             if (ok) setModal(null);
             return ok;
           }}
-          onDelete={() => {
-            setDeleteTarget(modal.pos);
+          onUse={async (amount, sourceAccountId, note) => {
+            const ok = await onUseIncremental(modal.pos.id, amount, sourceAccountId, note);
+            if (ok) setModal(null);
+            return ok;
+          }}
+          onComplete={() => {
+            setCloseTarget({ pos: modal.pos, completed: true });
             setModal(null);
           }}
         />
@@ -346,19 +346,21 @@ export default function YangDisisihkanSection({
 
       {/* Delete confirm */}
       <ConfirmDialog
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
+        open={closeTarget !== null}
+        onClose={() => setCloseTarget(null)}
         onConfirm={async () => {
-          if (!deleteTarget) return false;
-          const ok = await onDelete(deleteTarget.id);
-          if (ok) setDeleteTarget(null);
+          if (!closeTarget) return false;
+          const ok = closeTarget.completed
+            ? await onComplete(closeTarget.pos.id)
+            : await onDelete(closeTarget.pos.id);
+          if (ok) setCloseTarget(null);
           return ok;
         }}
-        title={`Tutup pos ${deleteTarget?.name ?? ''}?`}
-        description="Pos akan dipindahkan ke arsip. Dana yang tersisa dilepas kembali ke Uang Bebas; riwayatnya tetap dapat dilihat."
-        icon="delete"
-        actionLabel="Tutup Pos"
-        danger
+        title={`${closeTarget?.completed ? 'Selesaikan tujuan' : 'Batalkan pos'} ${closeTarget?.pos.name ?? ''}?`}
+        description={`Pos akan dipindahkan ke arsip. ${closeTarget?.completed ? 'Sisa alokasi dilepas kembali ke Uang Bebas.' : 'Dana yang tersisa dilepas kembali ke Uang Bebas.'} Saldo rekening tidak berubah; riwayatnya tetap dapat dilihat.`}
+        icon={closeTarget?.completed ? 'check_circle' : 'delete'}
+        actionLabel={closeTarget?.completed ? 'Selesaikan Tujuan' : 'Batalkan Pos'}
+        danger={!closeTarget?.completed}
       />
     </div>
   );
@@ -636,9 +638,7 @@ function PosCard({
         ? pos.cycleExecuted ? 'Periode Selesai' : 'Eksekusi Servis'
         : pos.category === 'single_spend'
           ? 'Realisasikan Belanja'
-          : hasTarget
-            ? 'Tarik / Tambah'
-            : 'Kelola Simpanan';
+          : 'Kelola Dana';
 
   const rightStatus =
     pos.category === 'routine_incremental'
@@ -679,6 +679,7 @@ function PosCard({
               </span>
             </div>
             <p className="text-xs text-lo-text-subtle mt-1 truncate">{pos.description}</p>
+            {pos.transactionCategory ? <p className="text-[11px] text-lo-secondary mt-1">Kategori transaksi: {pos.transactionCategory}</p> : null}
           </div>
         </button>
         <div className="text-right shrink-0">
@@ -791,36 +792,29 @@ function PosCard({
   );
 }
 
-/* ── Create pos modal ──
- * Rekening referensi bersifat OPSIONAL — tidak membatasi atau memindahkan dana.
- * Pos tidak pernah terikat ke rekening. */
+/* ── Create pos modal ── */
 
 function CreatePosModal({
   open,
   onClose,
-  accounts,
   freeCash,
   onCreate,
 }: {
   open: boolean;
   onClose: () => void;
-  accounts: Account[];
   freeCash: number;
   onCreate: (input: CreatePosInput) => Promise<boolean>;
 }) {
   const { saving, error, submit } = useSubmitState();
   const [name, setName] = useState('');
   const [category, setCategory] = useState<PosCategory>('saving');
-  const [accountLabel, setAccountLabel] = useState('');
   const [target, setTarget] = useState('');
+  const [targetEnabled, setTargetEnabled] = useState(false);
   const [plafon, setPlafon] = useState('');
   const [cycle, setCycle] = useState('Bulanan');
   const [cycleKind, setCycleKind] = useState<SetAsideCycleKind>('Monthly');
   const [description, setDescription] = useState('');
-
-  // Rekening non-arsip untuk dipilih sebagai referensi (opsional).
-  const baseAccounts = accounts.filter((a) => !a.archived);
-  const selectedAccount = baseAccounts.find((a) => a.name === accountLabel);
+  const [transactionCategory, setTransactionCategory] = useState<string>('Lainnya');
 
   // Dana yang disiapkan = Plafon Siklus / Estimasi Biaya / Target Anggaran
   // (bukan input user). Rutinitas Berkala: dana langsung disisihkan saat create.
@@ -831,18 +825,20 @@ function CreatePosModal({
   const prepareAmount = preparesInitialFunds ? parseFormattedNumber(plafon) : 0;
   const exceedsAvailable = prepareAmount > 0 && prepareAmount > freeCash;
   const missingNominal = preparesInitialFunds && prepareAmount <= 0;
+  const missingTarget = category === 'saving' && targetEnabled && parseFormattedNumber(target) <= 0;
 
-  const canSubmit = name.trim().length >= 2 && !missingNominal && !exceedsAvailable;
+  const canSubmit = name.trim().length >= 2 && !missingNominal && !missingTarget && !exceedsAvailable;
 
   const reset = () => {
     setName('');
     setCategory('saving');
-    setAccountLabel('');
     setTarget('');
+    setTargetEnabled(false);
     setPlafon('');
     setCycle('Bulanan');
     setCycleKind('Monthly');
     setDescription('');
+    setTransactionCategory('Lainnya');
   };
 
   return (
@@ -873,10 +869,10 @@ function CreatePosModal({
             onClick={() => void submit(() => onCreate({
                 name: name.trim(),
                 description: description.trim(),
+                transactionCategory,
                 category,
-                sourceAccountLabel: selectedAccount?.name,
                 targetAmount:
-                  category === 'saving' && target ? parseFormattedNumber(target) : undefined,
+                  category === 'saving' && targetEnabled && target ? parseFormattedNumber(target) : undefined,
                 plafon:
                   category === 'routine_incremental' ||
                   category === 'routine_batch' ||
@@ -896,44 +892,21 @@ function CreatePosModal({
     >
       <div className="flex flex-col gap-5">
         <SubmitError message={error} />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-type">
-              Jenis Dana <span className="text-lo-secondary">*</span>
-            </label>
-            <select
-              id="new-pos-type"
-              className={selectBase}
-              value={category}
-              onChange={(e) => setCategory(e.target.value as PosCategory)}
-            >
-              <option value="saving">Tabungan &amp; Simpanan Organik</option>
-              <option value="routine_incremental">Rutinitas Bertahap</option>
-              <option value="routine_batch">Rutinitas Berkala 1x Pakai</option>
-              <option value="single_spend">Sekali Pakai Non-Rutin</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-account">
-              Rekening Referensi
-            </label>
-            <select
-              id="new-pos-account"
-              className={selectBase}
-              value={accountLabel}
-              onChange={(e) => setAccountLabel(e.target.value)}
-            >
-              <option value="">Tanpa rekening referensi</option>
-              {baseAccounts.map((a) => (
-                <option key={a.id} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-            <span className="text-[11px] text-lo-text-subtle">
-              Penanda rekening yang biasanya digunakan. Top-up memakai Uang Bebas dan tidak memindahkan saldo rekening.
-            </span>
-          </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-type">
+            Jenis Dana <span className="text-lo-secondary">*</span>
+          </label>
+          <select
+            id="new-pos-type"
+            className={selectBase}
+            value={category}
+            onChange={(e) => setCategory(e.target.value as PosCategory)}
+          >
+            <option value="saving">Tabungan &amp; Simpanan Organik</option>
+            <option value="routine_incremental">Rutinitas Bertahap</option>
+            <option value="routine_batch">Rutinitas Berkala 1x Pakai</option>
+            <option value="single_spend">Sekali Pakai Non-Rutin</option>
+          </select>
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -951,22 +924,30 @@ function CreatePosModal({
         </div>
 
         {category === 'saving' ? (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-target">
-              Target Tabungan (Rp)
+          <div className="space-y-3">
+            <label htmlFor="new-pos-has-target" className="flex min-h-16 w-full cursor-pointer items-center gap-3 rounded-xl border border-lo-border-hairline bg-lo-surface-recessed px-4 py-3 active:bg-lo-accent-wash sm:hover:bg-lo-accent-wash">
+              <input
+                id="new-pos-has-target"
+                type="checkbox"
+                checked={targetEnabled}
+                onChange={(e) => {
+                  setTargetEnabled(e.target.checked);
+                  if (!e.target.checked) setTarget('');
+                }}
+                className="h-5 w-5 shrink-0 accent-lo-secondary"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-lo-text-ink">Dana ini punya target</span>
+                <span className="mt-0.5 block text-xs text-lo-text-subtle">Aktifkan untuk memantau progres; target tidak mengubah saldo.</span>
+              </span>
             </label>
-            <input
-              id="new-pos-target"
-              type="text"
-              inputMode="numeric"
-              className={inputBase}
-              value={target}
-              onChange={(e) => setTarget(formatNumberString(e.target.value))}
-              placeholder="Kosongkan jika simpanan bebas fleksibel"
-            />
-            <span className="text-[11px] text-lo-text-subtle">
-              Saldo awal selalu mulai dari Rp 0 dan diisi bertahap lewat Top-Up.
-            </span>
+            {targetEnabled ? (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-target">Target Dana (Rp)</label>
+                <input id="new-pos-target" type="text" inputMode="numeric" className={inputBase} value={target} onChange={(e) => setTarget(formatNumberString(e.target.value))} placeholder="Contoh: 50.000.000" />
+              </div>
+            ) : null}
+            <p className="text-[11px] text-lo-text-subtle">Saldo awal Rp 0. Tambah Alokasi mengurangi Uang Bebas; rekening dipilih saat mencatat pengeluaran.</p>
           </div>
         ) : null}
 
@@ -983,8 +964,8 @@ function CreatePosModal({
             >
               <option value="Weekly">Mingguan</option>
               <option value="Monthly">Bulanan</option>
-              <option value="Quarterly">Triwulanan</option>
-              <option value="SemiAnnual">Semesteran</option>
+              <option value="Quarterly">Per 3 Bulan</option>
+              <option value="SemiAnnual">Per 6 Bulan</option>
               <option value="Annual">Tahunan</option>
             </select>
           </div>
@@ -1065,6 +1046,16 @@ function CreatePosModal({
           </div>
         ) : null}
 
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-transaction-category">
+            Kategori transaksi <span className="text-lo-secondary">*</span>
+          </label>
+          <select id="new-pos-transaction-category" className={selectBase} value={transactionCategory} onChange={(e) => setTransactionCategory(e.target.value)}>
+            {TRANSACTION_CATEGORIES.filter((item) => item !== 'Pendapatan').map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <span className="text-[11px] text-lo-text-subtle">Digunakan sebagai kategori bawaan saat mencatat pengeluaran dari dana ini.</span>
+        </div>
+
         {category === 'single_spend' ? (
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="new-pos-single-budget">
@@ -1112,6 +1103,8 @@ function CreatePosModal({
               ? 'Uang Bebas tidak cukup untuk alokasi awal. Kurangi nominal atau catat pemasukan terlebih dahulu.'
               : missingNominal
                 ? 'Isi plafon siklus / estimasi biaya / target anggaran untuk melanjutkan.'
+                : missingTarget
+                  ? 'Isi nominal target atau nonaktifkan pilihan target.'
                 : 'Isi nama pos untuk melanjutkan.'}
           </p>
         ) : null}
@@ -1129,39 +1122,48 @@ function SavingsModal({
   onClose,
   onTopUp,
   onWithdraw,
-  onDelete,
+  onUse,
+  onComplete,
 }: {
   pos: PosItem;
   accounts: Account[];
   freeCash: number;
   onClose: () => void;
-  onTopUp: (amount: number, sourceAccountId?: string) => Promise<boolean>;
+  onTopUp: (amount: number) => Promise<boolean>;
   onWithdraw: (amount: number) => Promise<boolean>;
-  onDelete: () => void;
+  onUse: (amount: number, sourceAccountId: string, note?: string) => Promise<boolean>;
+  onComplete: () => void;
 }) {
   const { saving, error, submit } = useSubmitState();
-  const [mode, setMode] = useState<'topup' | 'withdraw'>('topup');
+  const [mode, setMode] = useState<'topup' | 'withdraw' | 'spend'>('topup');
   const [amountStr, setAmountStr] = useState('');
-  // Hanya pre-select referensi tersimpan; jangan menebak rekening untuk top-up.
+  const [note, setNote] = useState('');
+  // Hanya pre-select preferensi tersimpan untuk transaksi nyata; alokasi tak memakai rekening.
   const [sourceAccountId, setSourceAccountId] = useState<string>(() =>
-    resolveReferenceAccountId(pos, accounts)
+    resolveManualSourceAccountId(pos, accounts)
   );
   const amount = parseFormattedNumber(amountStr);
 
   const sourceAccounts = sortedSourceAccounts(accounts);
   const selectedSource = sourceAccounts.find((a) => a.id === sourceAccountId);
   const exceedsFreeCash = mode === 'topup' && amount > freeCash;
+  const exceedsSetAside = mode === 'spend' && amount > pos.amount;
+  const exceedsSourceBalance = mode === 'spend' && !!selectedSource && amount > selectedSource.availableBalance;
   const canSubmit =
     amount > 0 &&
     (mode === 'topup'
       ? !exceedsFreeCash
-      : amount <= pos.amount);
+      : mode === 'withdraw'
+        ? amount <= pos.amount
+        : !!selectedSource && !exceedsSetAside && !exceedsSourceBalance);
 
   const setQuick = (v: number) => {
     // Chip "+1k" menambah nominal yang sudah ada, bukan menimpa.
     const current = parseFormattedNumber(amountStr);
     if (mode === 'topup') {
       setAmountStr(formatNumberString(String(current + v)));
+    } else if (mode === 'spend') {
+      setAmountStr(formatNumberString(String(Math.min(current + v, pos.amount, selectedSource?.availableBalance ?? 0))));
     } else {
       setAmountStr(formatNumberString(String(Math.min(current + v, pos.amount))));
     }
@@ -1171,17 +1173,17 @@ function SavingsModal({
     <Modal
       open
       onClose={onClose}
-      title={`Kelola Simpanan: ${pos.name}`}
+      title={`Kelola Dana: ${pos.name}`}
       icon="savings"
       footer={
         <>
           <button
             type="button"
-            onClick={onDelete}
-            className="text-xs text-lo-warning hover:underline inline-flex items-center gap-1 cursor-pointer mr-auto"
+            onClick={onComplete}
+            className={`${btnDanger} mr-auto justify-center rounded-lg px-3 py-2`}
           >
             <Icon name="delete" className="text-base" />
-            Tutup Pos
+            Tutup Dana
           </button>
           <button
             type="button"
@@ -1194,11 +1196,13 @@ function SavingsModal({
             type="button"
             disabled={!canSubmit || saving}
             onClick={() => void submit(() => mode === 'topup'
-              ? onTopUp(amount, selectedSource?.id)
-              : onWithdraw(amount))}
+              ? onTopUp(amount)
+              : mode === 'withdraw'
+                ? onWithdraw(amount)
+                : onUse(amount, sourceAccountId, note.trim() || undefined))}
             className={`${btnPrimary} disabled:opacity-40`}
           >
-            {saving ? 'Menyimpan…' : mode === 'topup' ? 'Konfirmasi Tambah Simpanan' : 'Konfirmasi Tarik Simpanan'}
+            {saving ? 'Menyimpan…' : mode === 'topup' ? 'Tambah Alokasi' : mode === 'withdraw' ? 'Lepas ke Uang Bebas' : 'Catat Pengeluaran'}
           </button>
         </>
       }
@@ -1209,7 +1213,7 @@ function SavingsModal({
         <div className="bg-lo-surface-recessed p-4 rounded-xl flex items-center justify-between">
           <div>
             <span className="text-[11px] text-lo-text-subtle block uppercase tracking-wide">
-              Saldo Tabungan Saat Ini
+              Saldo Dana Saat Ini
             </span>
             <span className="text-2xl font-semibold tabular-nums text-lo-text-ink">
               {formatCurrencyRaw(pos.amount)}
@@ -1217,7 +1221,7 @@ function SavingsModal({
           </div>
           <div className="text-right">
             <span className="text-[11px] text-lo-text-subtle block uppercase tracking-wide">
-              Target Capaian
+              Target Dana
             </span>
             <span className="text-base font-semibold text-lo-text-ink">
               {pos.targetAmount ? formatCurrencyRaw(pos.targetAmount) : 'Fleksibel'}
@@ -1225,64 +1229,78 @@ function SavingsModal({
           </div>
         </div>
 
-        <div className="p-4 rounded-xl border border-lo-border-hairline bg-lo-container-low">
-          <div className="flex items-center p-1 rounded-lg bg-lo-surface-recessed border border-lo-border-hairline mb-3">
+        <div className="space-y-4 rounded-xl border border-lo-border-hairline bg-lo-container-low p-4">
+          <div className="grid min-w-0 grid-cols-3 gap-1.5" role="group" aria-label="Pilih aksi dana">
             <button
               type="button"
-              onClick={() => setMode('topup')}
-              className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 ${
+              onClick={() => { setMode('topup'); setAmountStr(''); }}
+              aria-pressed={mode === 'topup'}
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-xs font-semibold transition-colors cursor-pointer ${
                 mode === 'topup'
-                  ? 'bg-lo-secondary text-lo-surface-cream shadow-xs'
-                  : 'text-lo-text-subtle hover:text-lo-text-ink'
+                  ? 'border-lo-secondary bg-lo-accent-wash text-lo-text-ink ring-1 ring-lo-secondary/30'
+                  : 'border-lo-border-hairline bg-white text-lo-text-subtle hover:border-lo-secondary/50'
               }`}
             >
-              <Icon name="add_circle" className="text-base" />
-              Tambah Simpanan (Top-Up)
+              <Icon name="add_circle" className="shrink-0 text-base" />
+              <span>Top Up</span>
             </button>
             <button
               type="button"
-              onClick={() => setMode('withdraw')}
-              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 ${
+              onClick={() => { setMode('withdraw'); setAmountStr(''); }}
+              aria-pressed={mode === 'withdraw'}
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-xs font-semibold transition-colors cursor-pointer ${
                 mode === 'withdraw'
-                  ? 'bg-lo-secondary text-lo-surface-cream shadow-xs'
-                  : 'text-lo-text-subtle hover:text-lo-text-ink'
+                  ? 'border-lo-secondary bg-lo-accent-wash text-lo-text-ink ring-1 ring-lo-secondary/30'
+                  : 'border-lo-border-hairline bg-white text-lo-text-subtle hover:border-lo-secondary/50'
               }`}
             >
-              <Icon name="remove_circle" className="text-base" />
-              Tarik Simpanan
+              <Icon name="remove_circle" className="shrink-0 text-base" />
+              <span>Withdraw</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('spend'); setAmountStr(''); }}
+              aria-pressed={mode === 'spend'}
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-xs font-semibold transition-colors cursor-pointer ${mode === 'spend' ? 'border-lo-secondary bg-lo-accent-wash text-lo-text-ink ring-1 ring-lo-secondary/30' : 'border-lo-border-hairline bg-white text-lo-text-subtle hover:border-lo-secondary/50'}`}
+            >
+              <Icon name="receipt_long" className="shrink-0 text-base" />
+              <span>Belanja</span>
             </button>
           </div>
-          <p className="text-[12px] text-lo-text-subtle mb-3">
+          <p className="text-xs text-lo-text-subtle">
             {mode === 'topup'
-              ? 'Tambah alokasi tabungan dari Uang Bebas. Saldo rekening tidak berubah; rekening referensi hanya penanda.'
-              : 'Tarik sebagian simpanan. Alokasi yang ditarik dikembalikan ke uang yang belum dialokasikan — saldo rekening tidak berubah.'}
+              ? 'Mengurangi Uang Bebas; saldo rekening tetap.'
+              : mode === 'withdraw'
+                ? 'Mengembalikan alokasi ke Uang Bebas; saldo rekening tetap.'
+                : 'Mencatat transaksi dari rekening dan mengurangi saldo dana.'}
           </p>
 
           {mode === 'topup' ? (
-            <div className="flex flex-col gap-1.5 mb-3">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="pos-topup-source">
-                Rekening Referensi (opsional)
-              </label>
-              <select
-                id="pos-topup-source"
-                className={selectBase}
-                value={sourceAccountId}
-                onChange={(e) => setSourceAccountId(e.target.value)}
-              >
-                <option value="">Tanpa rekening referensi</option>
-                {sourceAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                    {a.name}
-                </option>
-                ))}
-              </select>
-              <span className="text-[11px] text-lo-text-subtle">
-                Penanda rekening yang biasanya digunakan; tidak didebit dan tidak membatasi top-up.
-              </span>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-lo-secondary/20 bg-white px-4 py-3">
+              <span className="text-xs font-medium text-lo-text-subtle">Uang Bebas tersedia</span>
+              <strong className="text-base tabular-nums text-lo-text-ink">{formatCurrencyRaw(freeCash)}</strong>
             </div>
           ) : null}
 
-          <div className="grid grid-cols-4 gap-2 mb-3">
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-lo-text-ink" htmlFor="saving-action-amount">
+              {mode === 'topup' ? 'Nominal Top Up' : mode === 'withdraw' ? 'Nominal Withdraw' : 'Nominal Pengeluaran'}
+            </label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-2.5 text-[11px] text-lo-text-subtle">Rp</span>
+              <input
+                id="saving-action-amount"
+                type="text"
+                inputMode="numeric"
+                className={`${inputBase} pl-9 font-semibold tabular-nums`}
+                value={amountStr}
+                onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
+                placeholder="Masukkan nominal..."
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-2">
             {QUICK_AMOUNTS.map((v) => (
               <button
                 key={v}
@@ -1293,28 +1311,43 @@ function SavingsModal({
                 {quickAmountLabel(v)}
               </button>
             ))}
+            {mode !== 'topup' ? (
+              <button
+                type="button"
+                disabled={pos.amount <= 0}
+                onClick={() => setAmountStr(formatNumberString(String(pos.amount)))}
+                aria-label={`${mode === 'withdraw' ? 'Tarik semua saldo dana' : 'Pakai semua saldo dana'}, ${formatCurrencyRaw(pos.amount)}`}
+                className="min-h-10 rounded-lg border border-lo-secondary bg-lo-accent-wash text-xs font-bold text-lo-secondary transition-colors hover:bg-lo-secondary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lo-secondary/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Semua
+              </button>
+            ) : null}
           </div>
-          <div className="relative">
-            <span className="absolute left-3.5 top-2.5 text-[11px] text-lo-text-subtle">Rp</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              className={`${inputBase} pl-9 font-semibold tabular-nums`}
-              value={amountStr}
-              onChange={(e) => setAmountStr(formatNumberString(e.target.value))}
-              placeholder="Ketik nominal transfer..."
-            />
-          </div>
+
+          {mode === 'spend' ? (
+            <div className="space-y-3 border-t border-lo-border-hairline pt-3">
+              <SourceAccountPicker
+                accounts={accounts}
+                sourceAccountId={sourceAccountId}
+                onChange={setSourceAccountId}
+                id="saving-spend-source"
+                autoSelected={!!pos.defaultSourceAccountId && sourceAccountId === pos.defaultSourceAccountId}
+              />
+              <label className="block text-xs font-medium" htmlFor="saving-spend-note">Keperluan / catatan (opsional)
+                <input id="saving-spend-note" className={`${inputBase} mt-1`} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contoh: Dekorasi" />
+              </label>
+            </div>
+          ) : null}
           {mode === 'topup' && exceedsFreeCash ? (
             <p className="mt-2 text-[12px] text-lo-error">
               Uang Bebas tidak cukup. Tersedia {formatCurrencyRaw(freeCash)}; kurangi nominal atau catat pemasukan terlebih dahulu.
             </p>
           ) : null}
-          <div className="mt-3 p-3 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline text-[12px] text-lo-text-subtle">
-            {mode === 'topup'
-              ? `Maksimal top-up dari Uang Bebas: ${formatCurrencyRaw(freeCash)}.`
-              : `Maksimal tarik: ${formatCurrencyRaw(pos.amount)}.`}
-          </div>
+          {mode === 'spend' && (exceedsSetAside || exceedsSourceBalance) ? (
+            <p className="mt-2 text-[12px] text-lo-error">
+              {exceedsSetAside ? `Nominal melebihi saldo dana ${formatCurrencyRaw(pos.amount)}.` : `Saldo rekening tidak cukup; tersedia ${formatCurrencyRaw(selectedSource?.availableBalance ?? 0)}.`}
+            </p>
+          ) : null}
         </div>
       </div>
     </Modal>

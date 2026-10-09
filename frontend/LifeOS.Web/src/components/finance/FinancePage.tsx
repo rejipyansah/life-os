@@ -93,6 +93,7 @@ export default function FinancePage({
                 onExecuteSingle={state.executeSingleSpendPos}
                 onCreate={state.createPos}
                 onDelete={state.deletePos}
+                onComplete={state.completePos}
                 onUpdate={state.updatePos}
               />
               {/* Seukuran Yang Disisihkan, menutup ruang kosong di kolom kiri. */}

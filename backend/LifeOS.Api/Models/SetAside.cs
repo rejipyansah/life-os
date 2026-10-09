@@ -68,6 +68,10 @@ public class SetAside
     [MaxLength(512)]
     public string? Note { get; set; }
 
+    /// <summary>Default category used when recording a real expense from this set-aside.</summary>
+    [MaxLength(128)]
+    public string? TransactionCategory { get; set; }
+
     /// <summary>Target saldo. Nullable: not every set-aside needs a target.</summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal? TargetAmount { get; set; }

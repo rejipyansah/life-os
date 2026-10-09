@@ -44,6 +44,7 @@ function setAside(overrides: Partial<SetAsideProjection> = {}): SetAsideProjecti
     name: 'Dana Makan',
     kind: 'RoutineIncremental',
     note: null,
+    transactionCategory: 'Makan & Minum',
     amount: 200_000,
     targetAmount: 300_000,
     targetShortfall: 100_000,
@@ -267,6 +268,7 @@ describe('mapPosItem', () => {
     const mapped = mapPosItem(setAside());
 
     expect(mapped.category).toBe('routine_incremental');
+    expect(mapped.transactionCategory).toBe('Makan & Minum');
     expect(mapped.amount).toBe(200_000);
     expect(mapped.targetAmount).toBe(300_000);
     // A cycling set-aside's plafon is its per-cycle target balance.
@@ -327,7 +329,8 @@ describe('toCreateSetAsideCommand', () => {
     return {
       name: 'Dana Makan',
       description: 'Pos dana baru',
-      category: 'routine_incremental',
+        category: 'routine_incremental',
+        transactionCategory: 'Makan & Minum',
       sourceAccountLabel: 'SeaBank',
       plafon: 300_000,
       ...overrides,
@@ -343,6 +346,7 @@ describe('toCreateSetAsideCommand', () => {
     // SourceAccountId hanya divalidasi sekali pakai — bukan ikatan pos.
     expect(command.sourceAccountId).toBe('acc-1');
     expect(command.name).toBe('Dana Makan');
+    expect(command.transactionCategory).toBe('Makan & Minum');
     expect(command.kind).toBe('RoutineIncremental');
     expect(command.targetAmount).toBe(300_000);
     expect(command.cycleKind).toBe('Monthly');

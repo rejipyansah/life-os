@@ -86,6 +86,7 @@ public class SetAsideService
             Name = name,
             Kind = command.Kind,
             Note = NormalizeNote(command.Note),
+            TransactionCategory = NormalizeNote(command.TransactionCategory),
             TargetAmount = command.TargetAmount,
             CycleKind = command.CycleKind,
             CycleAnchorDate = SetAsideCycle.HasCycle(command.CycleKind)
@@ -138,6 +139,9 @@ public class SetAsideService
 
         if (command.Note is not null)
             setAside.Note = NormalizeNote(command.Note);
+
+        if (command.TransactionCategory is not null)
+            setAside.TransactionCategory = NormalizeNote(command.TransactionCategory);
 
         if (command.RemoveTarget)
         {
@@ -321,7 +325,7 @@ public class SetAsideService
             Type = TransactionType.Expense,
             Amount = command.Amount,
             Description = command.Description,
-            CategoryName = command.CategoryName,
+            CategoryName = command.TransactionCategory ?? command.CategoryName ?? setAside.TransactionCategory,
             OccurredOn = command.OccurredOn
         };
         _db.Transactions.Add(transaction);
@@ -1053,6 +1057,7 @@ public class SetAsideService
                     Name = sa.Name,
                     Kind = sa.Kind,
                     Note = sa.Note,
+                    TransactionCategory = sa.TransactionCategory,
                     Amount = current,
                     TargetAmount = sa.TargetAmount,
                     TargetShortfall = sa.TargetAmount.HasValue

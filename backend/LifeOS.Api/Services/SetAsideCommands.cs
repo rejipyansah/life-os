@@ -24,6 +24,7 @@ public class CreateSetAsideCommand
     public string Name { get; set; } = "";
     public SetAsideKind Kind { get; set; } = SetAsideKind.Saving;
     public string? Note { get; set; }
+    public string? TransactionCategory { get; set; }
 
     /// <summary>Target saldo. Null = tanpa target (fleksibel).</summary>
     public decimal? TargetAmount { get; set; }
@@ -40,6 +41,7 @@ public class UpdateSetAsideCommand
     public Guid ScopeId { get; set; }
     public string? Name { get; set; }
     public string? Note { get; set; }
+    public string? TransactionCategory { get; set; }
     public decimal? TargetAmount { get; set; }
     public bool RemoveTarget { get; set; }
     public SetAsideCycleKind? CycleKind { get; set; }
@@ -88,6 +90,7 @@ public class SpendFromSetAsideCommand
     public string? CategoryName { get; set; }
     public DateOnly OccurredOn { get; set; }
     public string? Note { get; set; }
+    public string? TransactionCategory { get; set; }
 }
 
 public class CloseSetAsideCommand
@@ -122,6 +125,7 @@ public class SetAsideProjection
     public string Name { get; set; } = "";
     public SetAsideKind? Kind { get; set; }
     public string? Note { get; set; }
+    public string? TransactionCategory { get; set; }
 
     /// <summary>Saldo yang sedang disisihkan (SUM dari history).</summary>
     public decimal Amount { get; set; }

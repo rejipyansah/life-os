@@ -211,6 +211,7 @@ export function toCreateSetAsideCommand(
     sourceAccountId: sourceAccountId ?? null,
     name: input.name,
     note: input.description || undefined,
+    transactionCategory: input.transactionCategory || undefined,
     kind: fromPosCategory(input.category),
     targetAmount,
     cycleKind,
@@ -291,6 +292,7 @@ export function mapPosItem(item: SetAsideProjection): PosItem {
     id: item.id,
     name: item.name,
     description: item.note ?? '',
+    transactionCategory: item.transactionCategory ?? undefined,
     category,
     // LEGACY ONLY — alokasi tidak terikat Sumber Dana; pos baru tanpa akun.
     accountLabel: item.accountName ?? undefined,
