@@ -15,7 +15,7 @@ Dokumen ini mencatat dokumentasi inti Life OS, sumber kebenaran untuk tiap topik
 | [`api-reference.md`](api-reference.md) | Inventaris route, akses, konvensi wire/error dan tautan ke DTO | Route, metode, autentikasi, request/response, status error, enum atau pagination berubah. Detail command mengikuti DTO/OpenAPI. |
 | [`operations-runbook.md`](operations-runbook.md) | Runtime configuration, migration, diagnosis health, release checklist dan batas prosedur produksi yang belum ditentukan | Environment variable/secret, port/CORS/cookie, migrations, health/monitoring, deployment atau lifecycle data berubah. Lengkapi detail yang ditandai pending sebelum bergantung pada prosedur produksi. |
 | [`automated-testing-plan.md`](automated-testing-plan.md) | Lapisan test, cara menjalankan, CI, E2E, benchmark dan status gap | Test ditambah/dihapus, perintah berubah, dependency test berubah, workflow/branch check berubah, atau hasil verifikasi dan baseline diperbarui. |
-| [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json) | Template aturan GitHub untuk branch `main` dan required check | Nama workflow/job/status check, branch target, atau kebijakan merge berubah. Jaga template ini selaras dengan ruleset aktif di GitHub. |
+| [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json) | Template aturan GitHub untuk branch `main` | Nama branch target atau kebijakan pull request/force-push/deletion berubah. Jaga template ini selaras dengan ruleset aktif di GitHub. |
 
 ## Dokumentasi yang masih perlu dilengkapi
 

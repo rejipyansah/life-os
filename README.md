@@ -127,6 +127,6 @@ Benchmark awal pada lingkungan development lokal menghasilkan rata-rata sekitar 
 
 ## CI dan branch ruleset
 
-GitHub Actions menjalankan `npm test` pada pull request dan push ke `main`/`master`. CI menggunakan PostgreSQL service dan Chromium Playwright. Ruleset untuk melindungi `main` tersedia di [`docs/github-main-branch-ruleset.json`](docs/github-main-branch-ruleset.json); check wajibnya adalah `Automated tests / test`.
+GitHub Actions dikonfigurasi menjalankan `npm test` pada pull request dan push ke `main`/`master`, dengan PostgreSQL service dan Chromium Playwright. Ruleset untuk melindungi `main` tersedia di [`docs/github-main-branch-ruleset.json`](docs/github-main-branch-ruleset.json); ruleset mewajibkan pull request, mencegah force-push dan penghapusan branch. Required Actions check sementara tidak diwajibkan karena akun GitHub sedang terkunci oleh billing.
 
 Detail lebih lanjut mengenai lapisan test, status implementasi, dan gap selanjutnya ada di [`docs/automated-testing-plan.md`](docs/automated-testing-plan.md).

@@ -35,11 +35,12 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 - **Diperkuat:** `SerializableCommandRunner` membersihkan tracked state setelah serialization failure agar retry membaca ulang nilai database terbaru.
 - **Selesai:** regresi pemasukan teralokasi di atas shortfall dan histori dengan timestamp identik lintas cursor.
 - **Selesai:** benchmark proyeksi PostgreSQL dengan generator data sintetis, SELECT counter, ukuran dataset/iterasi yang dapat diatur, cleanup schema otomatis, dan workflow mingguan/manual.
-- **Selesai oleh pengguna:** ruleset untuk `main` diimpor/diaktifkan dengan required check `Automated tests / test`.
+- **Selesai oleh pengguna:** ruleset aktif untuk `main` mewajibkan pull request dan melarang force-push/penghapusan branch.
 - **CI PR #1:** workflow ter-trigger, tetapi job tidak dimulai karena GitHub melaporkan akun repository terkunci akibat masalah billing. Runner tidak mengeksekusi langkah/test; ini bukan kegagalan test kode.
-- **Berikutnya:** pulihkan status billing GitHub dan rerun check PR, lalu kumpulkan hasil benchmark berkala untuk menetapkan baseline performa.
+- **Perubahan sementara:** required Actions status check dilepas dari ruleset supaya PR tidak terkunci oleh billing. Setelah akses Actions pulih, tambahkan kembali required check `Automated tests / test`.
+- **Berikutnya:** pulihkan akses GitHub Actions tanpa mengaktifkan biaya berbayar bila memungkinkan, lalu wajibkan kembali status check dan kumpulkan benchmark berkala.
 
-Template ruleset aktif tersimpan di [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json). Ruleset menargetkan `main`, mewajibkan pull request dan check `Automated tests / test`, serta mencegah force-push dan penghapusan branch.
+Template ruleset aktif tersimpan di [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json). Ruleset menargetkan `main`, mewajibkan pull request, serta mencegah force-push dan penghapusan branch. Required status check saat ini tidak dipasang karena GitHub Actions terblokir oleh masalah billing.
 
 Jalankan semua pemeriksaan lokal dengan `npm test` dari root. Test endpoint HTTP berjalan dengan TestServer dan SQLite in-memory. Untuk suite PostgreSQL/Npgsql, atur `LIFEOS_TEST_POSTGRES_CONNECTION` ke database test terisolasi. Untuk E2E browser, instal Chromium (`npx playwright install chromium`) dan atur `LIFEOS_E2E_POSTGRES_CONNECTION` ke database khusus yang namanya mengandung `test` atau `e2e`; script akan menolak nama database lain dan menerapkan migrasi sebelum menjalankan browser.
 
