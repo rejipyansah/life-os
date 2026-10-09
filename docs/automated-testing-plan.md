@@ -36,7 +36,8 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 - **Selesai:** regresi pemasukan teralokasi di atas shortfall dan histori dengan timestamp identik lintas cursor.
 - **Selesai:** benchmark proyeksi PostgreSQL dengan generator data sintetis, SELECT counter, ukuran dataset/iterasi yang dapat diatur, cleanup schema otomatis, dan workflow mingguan/manual.
 - **Selesai oleh pengguna:** ruleset untuk `main` diimpor/diaktifkan dengan required check `Automated tests / test`.
-- **Berikutnya:** konfirmasi eksekusi CI pertama setelah perubahan terbaru dan kumpulkan hasil benchmark berkala untuk menetapkan baseline performa.
+- **CI PR #1:** workflow ter-trigger, tetapi job tidak dimulai karena GitHub melaporkan akun repository terkunci akibat masalah billing. Runner tidak mengeksekusi langkah/test; ini bukan kegagalan test kode.
+- **Berikutnya:** pulihkan status billing GitHub dan rerun check PR, lalu kumpulkan hasil benchmark berkala untuk menetapkan baseline performa.
 
 Template ruleset aktif tersimpan di [`github-main-branch-ruleset.json`](github-main-branch-ruleset.json). Ruleset menargetkan `main`, mewajibkan pull request dan check `Automated tests / test`, serta mencegah force-push dan penghapusan branch.
 
