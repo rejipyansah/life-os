@@ -288,8 +288,6 @@ export function mapAccount(
   return {
     id: projection.id,
     name: projection.name,
-    // Backend deliberately keeps no Account.Role — the label stays client-only.
-    role: '',
     type,
     balance: projection.actualBalance,
     availableBalance: projection.availableBalance,

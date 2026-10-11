@@ -19,7 +19,6 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'acct-1',
     name: 'TestBank',
-    role: 'Test',
     type: 'bank',
     balance: 0,
     availableBalance: 0,

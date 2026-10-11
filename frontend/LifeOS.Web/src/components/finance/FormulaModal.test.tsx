@@ -7,7 +7,6 @@ import { FormulaModal } from './UangBebasSection';
 const account = (balance: number): Account => ({
   id: 'a1',
   name: 'Rekening',
-  role: 'main',
   type: 'bank',
   balance,
   availableBalance: balance,

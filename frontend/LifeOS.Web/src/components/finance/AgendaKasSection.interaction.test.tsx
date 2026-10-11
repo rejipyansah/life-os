@@ -12,7 +12,6 @@ afterEach(cleanup);
 const account: Account = {
   id: 'account-1',
   name: 'Bank Utama',
-  role: 'main',
   type: 'bank',
   balance: 2_000_000,
   availableBalance: 2_000_000,

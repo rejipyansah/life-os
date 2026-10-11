@@ -100,10 +100,10 @@ export interface FinanceStateApi {
   payAllBills: (accountId: string, setAsideId?: string) => Promise<boolean>;
   postponeBill: (id: string) => void;
 
-  addAccount: (data: { name: string; role: string; type: Account['type'] }) => void;
-  updateAccount: (id: string, data: { name: string; role: string; type: Account['type'] }) => void;
-  deleteAccount: (id: string) => void;
-  transfer: (fromId: string, toId: string, amount: number) => void;
+  addAccount: (data: { name: string; type: Account['type'] }) => Promise<boolean>;
+  updateAccount: (id: string, data: { name: string; type: Account['type'] }) => Promise<boolean>;
+  deleteAccount: (id: string) => Promise<boolean>;
+  transfer: (fromId: string, toId: string, amount: number) => Promise<boolean>;
 
   saveTransaction: (parsed: ParsedTransaction) => Promise<boolean>;
   voidTransaction: (id: string, reason: string) => void;
@@ -297,30 +297,28 @@ export function useFinanceState(): FinanceStateApi {
   /* ── Sumber Dana ──────────────────────────────────────────── */
 
   const addAccount = useCallback(
-    (data: { name: string; role: string; type: Account['type'] }) => {
-      void run(
+    (data: { name: string; type: Account['type'] }) =>
+      run(
         () =>
           createAccount({
             name: data.name,
             type: fromAccountType(data.type),
           }),
         () => pushToast(`Sumber Dana "${data.name}" ditambahkan.`)
-      );
-    },
+      ),
     [pushToast, run]
   );
 
   const updateAccount = useCallback(
-    (id: string, data: { name: string; role: string; type: Account['type'] }) => {
-      void run(
+    (id: string, data: { name: string; type: Account['type'] }) =>
+      run(
         () =>
           updateAccountRequest(id, {
             name: data.name,
             type: fromAccountType(data.type),
           }),
         () => pushToast(`Sumber Dana "${data.name}" diperbarui.`)
-      );
-    },
+      ),
     [pushToast, run]
   );
 
@@ -328,7 +326,7 @@ export function useFinanceState(): FinanceStateApi {
     (id: string) => {
       const target = mapped.accounts.find((a) => a.id === id);
       // Accounts are archived, never hard-deleted, so history stays traceable.
-      void run(
+      return run(
         () => updateAccountRequest(id, { isArchived: true }),
         () => {
           if (target) {
@@ -343,7 +341,7 @@ export function useFinanceState(): FinanceStateApi {
   const transfer = useCallback(
     (fromId: string, toId: string, amount: number) => {
       const target = mapped.accounts.find((a) => a.id === toId);
-      void run(
+      return run(
         () =>
           createTransaction({
             type: 'Transfer',

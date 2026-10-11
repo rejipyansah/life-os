@@ -10,7 +10,7 @@ import YangDisisihkanSection from './YangDisisihkanSection';
 afterEach(cleanup);
 
 const account: Account = {
-  id: 'account-1', name: 'Bank Utama', role: 'main', type: 'bank',
+  id: 'account-1', name: 'Bank Utama', type: 'bank',
   balance: 2_000_000, availableBalance: 2_000_000, icon: 'account_balance', archived: false,
 };
 

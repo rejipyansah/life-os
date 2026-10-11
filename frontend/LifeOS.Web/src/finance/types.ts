@@ -5,7 +5,6 @@ export type AccountType = 'bank' | 'cash' | 'ewallet' | 'credit';
 export interface Account {
   id: string;
   name: string;
-  role: string;
   type: AccountType;
   balance: number;
   /** Saldo aktual rekening; hanya membatasi transaksi uang riil dari rekening ini. */

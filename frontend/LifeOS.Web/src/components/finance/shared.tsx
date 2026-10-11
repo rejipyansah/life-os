@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { FinanceToast, ProgressTone } from '../../finance';
 
@@ -88,14 +88,45 @@ export function Modal({
   maxWidth = 'max-w-md',
   hideHeaderBorder = false,
 }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () =>
+      dialog?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+    const focusTimer = window.setTimeout(() => (focusable()?.[0] ?? dialog)?.focus(), 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = Array.from(focusable() ?? []);
+      if (items.length === 0) {
+        e.preventDefault();
+        dialog?.focus();
+      } else if (e.shiftKey && document.activeElement === items[0]) {
+        e.preventDefault();
+        items[items.length - 1].focus();
+      } else if (!e.shiftKey && document.activeElement === items[items.length - 1]) {
+        e.preventDefault();
+        items[0].focus();
+      }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.clearTimeout(focusTimer);
+      previousFocus?.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -105,6 +136,8 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      tabIndex={-1}
+      ref={dialogRef}
     >
       <div
         className={`bg-lo-surface-cream ${maxWidth} w-full rounded-t-3xl sm:rounded-2xl p-4 pt-5 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 shadow-xl border border-lo-border-hairline max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain animate-[fadeIn_0.2s_cubic-bezier(0.16,1,0.3,1)]`}

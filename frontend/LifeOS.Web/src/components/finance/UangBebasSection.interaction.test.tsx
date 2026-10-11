@@ -14,7 +14,6 @@ const accounts: Account[] = [
   {
     id: 'account-active',
     name: 'Rekening Aktif',
-    role: 'main',
     type: 'bank',
     balance: 1_000_000,
     availableBalance: 1_000_000,
@@ -24,7 +23,6 @@ const accounts: Account[] = [
   {
     id: 'account-archived',
     name: 'Rekening Arsip',
-    role: 'secondary',
     type: 'bank',
     balance: 0,
     availableBalance: 0,

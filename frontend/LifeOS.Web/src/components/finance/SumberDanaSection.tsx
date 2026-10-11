@@ -22,10 +22,10 @@ import {
 
 interface SumberDanaSectionProps {
   accounts: Account[];
-  onAdd: (data: { name: string; role: string; type: AccountType }) => void;
-  onUpdate: (id: string, data: { name: string; role: string; type: AccountType }) => void;
-  onDelete: (id: string) => void;
-  onTransfer: (fromId: string, toId: string, amount: number) => void;
+  onAdd: (data: { name: string; type: AccountType }) => Promise<boolean>;
+  onUpdate: (id: string, data: { name: string; type: AccountType }) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onTransfer: (fromId: string, toId: string, amount: number) => Promise<boolean>;
 }
 
 type ModalMode =
@@ -97,7 +97,7 @@ export default function SumberDanaSection({
           accounts.map((acc) => (
             <div
               key={acc.id}
-              className="px-3.5 py-3 rounded-xl border border-lo-border-hairline/60 bg-lo-surface-cream/50 hover:bg-lo-surface-cream hover:border-lo-secondary/30 transition-all flex items-center justify-between gap-2 group"
+              className="px-3.5 py-3 rounded-xl border border-lo-border-hairline/60 bg-lo-surface-cream/50 hover:bg-lo-surface-cream hover:border-lo-secondary/30 transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 group"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-9 h-9 rounded-lg bg-lo-accent-wash/80 flex items-center justify-center text-lo-primary shrink-0 border border-lo-border-hairline/60">
@@ -112,10 +112,9 @@ export default function SumberDanaSection({
                       {accountTypeLabel(acc.type)}
                     </span>
                   </div>
-                  <p className="text-[11px] text-lo-text-subtle truncate mt-0.5">{acc.role}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-2 shrink-0">
                 <span className="font-headline text-base font-medium text-lo-text-ink tabular-nums leading-tight">
                   {formatCurrencyRaw(acc.balance)}
                 </span>
@@ -123,6 +122,7 @@ export default function SumberDanaSection({
                   <button
                     type="button"
                     title="Edit Sumber Dana"
+                    aria-label={`Edit Sumber Dana ${acc.name}`}
                     onClick={() => setModal({ kind: 'account', mode: 'edit', account: acc })}
                     className="w-8 h-8 rounded-md flex items-center justify-center text-lo-text-subtle hover:text-lo-text-ink hover:bg-lo-surface-recessed transition-all cursor-pointer"
                   >
@@ -131,6 +131,7 @@ export default function SumberDanaSection({
                   <button
                     type="button"
                     title="Hapus"
+                    aria-label={`Arsipkan Sumber Dana ${acc.name}`}
                     onClick={() => setModal({ kind: 'delete', account: acc })}
                     className="w-8 h-8 rounded-md flex items-center justify-center text-lo-text-subtle hover:text-lo-error hover:bg-red-50 transition-all cursor-pointer"
                   >
@@ -157,13 +158,11 @@ export default function SumberDanaSection({
           account={modal.account}
           onClose={() => setModal(null)}
           onSubmit={(data) => {
-            if (modal.mode === 'edit' && modal.account) {
-              onUpdate(modal.account.id, data);
-            } else {
-              onAdd(data);
-            }
-            setModal(null);
+            return modal.mode === 'edit' && modal.account
+              ? onUpdate(modal.account.id, data)
+              : onAdd(data);
           }}
+          onSuccess={() => setModal(null)}
         />
       ) : null}
 
@@ -172,10 +171,8 @@ export default function SumberDanaSection({
         <TransferModal
           accounts={accounts}
           onClose={() => setModal(null)}
-          onSubmit={(fromId, toId, amount) => {
-            onTransfer(fromId, toId, amount);
-            setModal(null);
-          }}
+          onSubmit={onTransfer}
+          onSuccess={() => setModal(null)}
         />
       ) : null}
 
@@ -184,7 +181,7 @@ export default function SumberDanaSection({
         open={modal?.kind === 'delete'}
         onClose={() => setModal(null)}
         onConfirm={() => {
-          if (modal?.kind === 'delete') onDelete(modal.account.id);
+          if (modal?.kind === 'delete') return onDelete(modal.account.id);
         }}
         title={`Hapus Sumber Dana "${modal?.kind === 'delete' ? modal.account.name : ''}"?`}
         description="Sumber dana ini akan diarsipkan dari daftar aktif. Saldo harus Rp 0 terlebih dahulu; Dana yang Disisihkan tidak menghalangi arsip karena alokasi bersifat scope-wide. Riwayat mutasi tetap tersimpan."
@@ -201,25 +198,39 @@ function AccountModal({
   account,
   onClose,
   onSubmit,
+  onSuccess,
 }: {
   mode: 'create' | 'edit';
   account?: Account;
   onClose: () => void;
-  onSubmit: (data: { name: string; role: string; type: AccountType }) => void;
+  onSubmit: (data: { name: string; type: AccountType }) => Promise<boolean>;
+  onSuccess: () => void;
 }) {
   const [name, setName] = useState(account?.name || '');
-  const [role, setRole] = useState(account?.role || '');
   const [type, setType] = useState<AccountType>(account?.type || 'bank');
-  const nameValid = name.trim().length >= 2;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const nameValid = name.trim().length >= 1 && name.trim().length <= 50;
+  const submit = async () => {
+    if (!nameValid || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (await onSubmit({ name: name.trim(), type })) onSuccess();
+      else setError('Sumber dana gagal disimpan. Periksa pesan kesalahan lalu coba lagi.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={saving ? () => {} : onClose}
       title={mode === 'edit' ? 'Edit Sumber Dana' : 'Tambah Sumber Dana'}
       subtitle={
         mode === 'edit'
-          ? `Perbarui informasi sumber dana Anda"`
+          ? 'Perbarui informasi sumber dana Anda'
           : 'Tambahkan tempat Anda menyimpan uang'
       }
       maxWidth="max-w-md"
@@ -228,24 +239,19 @@ function AccountModal({
           <button
             type="button"
             onClick={onClose}
+            disabled={saving}
             className="px-4 py-2 rounded-full bg-lo-surface-recessed hover:bg-lo-border-hairline/60 text-lo-text-ink text-xs font-medium border border-lo-border-hairline transition-colors cursor-pointer active:scale-95"
           >
             Batal
           </button>
           <button
             type="button"
-            disabled={!nameValid}
-            onClick={() =>
-              onSubmit({
-                name: name.trim(),
-                role: role.trim() || 'Kas Operasional',
-                type,
-              })
-            }
+            disabled={!nameValid || saving}
+            onClick={() => void submit()}
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-[16px]" />
-            <span>{mode === 'edit' ? 'Simpan Perubahan' : 'Simpan'}</span>
+            <span>{saving ? 'Menyimpan…' : mode === 'edit' ? 'Simpan Perubahan' : 'Simpan'}</span>
           </button>
         </>
       }
@@ -262,24 +268,28 @@ function AccountModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Contoh: BCA Operasional, SeaBank, Tunai Dompet"
+            maxLength={50}
             autoFocus
           />
-          {name.length > 0 && !nameValid ? (
+          {!nameValid ? (
             <div className="flex items-center gap-1.5 text-xs text-lo-error mt-1">
               <Icon name="error" className="text-[15px]" />
-              <span>Nama akun minimal 2 karakter</span>
+              <span>Nama sumber dana wajib diisi dan maksimal 50 karakter.</span>
             </div>
           ) : null}
+          <p className="text-[11px] text-lo-text-subtle text-right">{name.trim().length}/50</p>
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-lo-text-ink block">Jenis Sumber Dana</label>
-          <div className="p-1 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline flex items-center gap-1">
+          <span className="text-xs font-semibold text-lo-text-ink block">Jenis Sumber Dana</span>
+          <div role="group" aria-label="Jenis Sumber Dana" className="p-1 rounded-xl bg-lo-surface-recessed border border-lo-border-hairline flex items-center gap-1">
             {(['bank', 'ewallet', 'cash', 'credit'] as AccountType[]).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setType(t)}
+                aria-pressed={type === t}
+                aria-label={accountTypeLabel(t)}
                 className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium text-center transition-all border ${
                   type === t
                     ? 'bg-white text-lo-text-ink shadow-xs border-lo-border-hairline'
@@ -292,22 +302,7 @@ function AccountModal({
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-lo-text-ink" htmlFor="acc-role">
-              Tujuan Sumber Dana
-            </label>
-            <span className="text-[11px] text-lo-text-subtle">Opsional</span>
-          </div>
-          <input
-            id="acc-role"
-            type="text"
-            className={inputBase}
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            placeholder="Misal: Kas Operasional, Tabungan Rutin, Dana Darurat"
-          />
-        </div>
+        {error ? <p role="alert" className="text-xs text-lo-error">{error}</p> : null}
       </div>
     </Modal>
   );
@@ -317,22 +312,36 @@ function TransferModal({
   accounts,
   onClose,
   onSubmit,
+  onSuccess,
 }: {
   accounts: Account[];
   onClose: () => void;
-  onSubmit: (fromId: string, toId: string, amount: number) => void;
+  onSubmit: (fromId: string, toId: string, amount: number) => Promise<boolean>;
+  onSuccess: () => void;
 }) {
   const [fromId, setFromId] = useState(accounts[0]?.id || '');
   const [toId, setToId] = useState(accounts[1]?.id || accounts[0]?.id || '');
   const [amountStr, setAmountStr] = useState('');
-  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const fromAcc = accounts.find((a) => a.id === fromId);
   const toAcc = accounts.find((a) => a.id === toId);
   const amount = parseFormattedNumber(amountStr);
   const exceeds = fromAcc ? amount > fromAcc.balance : false;
   const hasEnoughAccounts = accounts.length >= 2;
-  const canSubmit = hasEnoughAccounts && amount > 0 && !exceeds && fromAcc && toAcc;
+  const canSubmit = hasEnoughAccounts && Number.isSafeInteger(amount) && amount > 0 && !exceeds && fromAcc && toAcc && !saving;
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (await onSubmit(fromId, toId, amount)) onSuccess();
+      else setError('Transfer gagal disimpan. Periksa pesan kesalahan lalu coba lagi.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const setQuick = (v: number | 'all') => {
     // Chip "+1k" menambah nominal yang sudah ada, bukan menimpa.
@@ -354,7 +363,7 @@ function TransferModal({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={saving ? () => {} : onClose}
       title="Transfer Dana"
       subtitle="Pindahkan uang antar sumber dana tanpa mengubah total saldo."
       maxWidth="max-w-md"
@@ -363,6 +372,7 @@ function TransferModal({
           <button
             type="button"
             onClick={onClose}
+            disabled={saving}
             className="px-4 py-2 rounded-full bg-lo-surface-recessed hover:bg-lo-border-hairline/60 text-lo-text-ink text-xs font-medium border border-lo-border-hairline transition-colors cursor-pointer active:scale-95"
           >
             Batal
@@ -370,11 +380,11 @@ function TransferModal({
           <button
             type="button"
             disabled={!canSubmit}
-            onClick={() => canSubmit && onSubmit(fromId, toId, amount)}
+            onClick={() => void submit()}
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-[16px]" />
-            <span>Transfer Dana</span>
+            <span>{saving ? 'Memproses…' : 'Transfer Dana'}</span>
           </button>
         </>
       }
@@ -509,22 +519,7 @@ function TransferModal({
           ) : null}
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-lo-text-ink" htmlFor="tr-note">
-              Catatan
-            </label>
-            <span className="text-[11px] text-lo-text-subtle">Opsional</span>
-          </div>
-          <input
-            id="tr-note"
-            type="text"
-            className={`${inputBase} text-xs`}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Misal: Alokasi belanja mingguan, tarik tunai kas"
-          />
-        </div>
+        {error ? <p role="alert" className="text-xs text-lo-error">{error}</p> : null}
       </div>
     </Modal>
   );
