@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react';
 
 import {
   formatCurrencyRaw,
+  todayIso,
+  TRANSACTION_CATEGORIES,
   type Account,
   type AgendaItem,
   type ArchivedAgenda,
   type CreateAgendaInput,
-  type PosItem,
 } from '../../finance';
 import {
   btnPrimary,
@@ -21,14 +22,15 @@ import {
   Modal,
   Pagination,
   pillPassive,
+  pillWarning,
   selectBase,
 } from './shared';
 
 const AGENDA_PER_PAGE = 5;
+const EXPENSE_CATEGORIES = TRANSACTION_CATEGORIES.filter((category) => category !== 'Pendapatan');
 
 interface AgendaKasSectionProps {
   accounts: Account[];
-  posItems: PosItem[];
   agendas: AgendaItem[];
   archivedAgendas: ArchivedAgenda[];
   filter: 'all' | 'scheduled' | 'flexible';
@@ -36,18 +38,18 @@ interface AgendaKasSectionProps {
   onFilterChange: (f: 'all' | 'scheduled' | 'flexible') => void;
   onPageChange: (p: number) => void;
   onSkip: (id: string) => void;
-  onPostpone: (id: string) => void;
-  onDelete: (id: string) => void;
-  /** Selesaikan rencana: accountId wajib (Sumber Dana), setAsideId opsional. */
-  onFinish: (id: string, accountId: string, setAsideId?: string) => void;
-  onCreate: (input: CreateAgendaInput) => void;
+  onScheduleFlexible: (id: string, newDueDate: string) => Promise<boolean>;
+  onStopCycle: (id: string) => void;
+  onUpdate: (id: string, input: CreateAgendaInput) => Promise<boolean>;
+  /** Selesaikan rencana memakai sumber dana aktual yang dipilih. */
+  onFinish: (id: string, accountId: string) => Promise<boolean>;
+  onCreate: (input: CreateAgendaInput) => Promise<boolean>;
 }
 
-type ConfirmKind = 'skip' | 'postpone' | 'delete';
+type ConfirmKind = 'skip' | 'delete';
 
 export default function AgendaKasSection({
   accounts,
-  posItems,
   agendas,
   archivedAgendas,
   filter,
@@ -55,13 +57,15 @@ export default function AgendaKasSection({
   onFilterChange,
   onPageChange,
   onSkip,
-  onPostpone,
-  onDelete,
+  onScheduleFlexible,
+  onStopCycle,
+  onUpdate,
   onFinish,
   onCreate,
 }: AgendaKasSectionProps) {
-  const [createOpen, setCreateOpen] = useState(false);
+  const [editorTarget, setEditorTarget] = useState<AgendaItem | 'new' | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [flexiblePostponeTarget, setFlexiblePostponeTarget] = useState<AgendaItem | null>(null);
   const [confirm, setConfirm] = useState<{ kind: ConfirmKind; agenda: AgendaItem } | null>(
     null
   );
@@ -99,7 +103,7 @@ export default function AgendaKasSection({
           </span>
           <button
             type="button"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => setEditorTarget('new')}
             className="ml-auto sm:ml-2 px-3.5 py-1.5 rounded-full bg-lo-primary hover:bg-lo-secondary text-white text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
           >
             <Icon name="add" className="text-[16px]" />
@@ -112,7 +116,7 @@ export default function AgendaKasSection({
           className="text-xs text-lo-text-subtle hover:text-lo-text-ink flex items-center gap-1.5 cursor-pointer transition-colors self-start sm:self-auto py-1"
         >
           <Icon name="history" className="text-[17px]" />
-          <span>Lihat rencana yang Selesai</span>
+          <span>Lihat Arsip Rencana</span>
         </button>
       </header>
 
@@ -155,8 +159,9 @@ export default function AgendaKasSection({
               key={a.id}
               agenda={a}
               onSkip={() => setConfirm({ kind: 'skip', agenda: a })}
-              onPostpone={() => setConfirm({ kind: 'postpone', agenda: a })}
-              onDelete={() => setConfirm({ kind: 'delete', agenda: a })}
+              onScheduleFlexible={() => setFlexiblePostponeTarget(a)}
+               onStopCycle={() => setConfirm({ kind: 'delete', agenda: a })}
+              onEdit={() => setEditorTarget(a)}
               onFinish={() => setFinishTarget(a)}
             />
           ))
@@ -181,13 +186,32 @@ export default function AgendaKasSection({
       />
 
       <CreateAgendaModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreate={(input) => {
-          onCreate(input);
-          setCreateOpen(false);
+        key={editorTarget === 'new' ? 'new' : editorTarget?.id ?? 'closed'}
+        open={editorTarget !== null}
+        accounts={accounts}
+        initialAgenda={editorTarget && editorTarget !== 'new' ? editorTarget : undefined}
+        onClose={() => setEditorTarget(null)}
+        onSave={async (input) => {
+          const succeeded = editorTarget && editorTarget !== 'new'
+            ? await onUpdate(editorTarget.id, input)
+            : await onCreate(input);
+          if (succeeded) setEditorTarget(null);
+          return succeeded;
         }}
       />
+
+      {flexiblePostponeTarget ? (
+        <FlexiblePostponeModal
+          key={flexiblePostponeTarget.id}
+          agenda={flexiblePostponeTarget}
+          onClose={() => setFlexiblePostponeTarget(null)}
+          onPostpone={async (newDueDate) => {
+            const succeeded = await onScheduleFlexible(flexiblePostponeTarget.id, newDueDate);
+            if (succeeded) setFlexiblePostponeTarget(null);
+            return succeeded;
+          }}
+        />
+      ) : null}
 
       <ArchiveModal
         open={archiveOpen}
@@ -195,18 +219,18 @@ export default function AgendaKasSection({
         items={archivedAgendas}
       />
 
-      {/* Realize modal — akun dipilih di sini, bukan terikat permanen.
+      {/* Realize modal — rekening aktual dipilih di sini; default hanya preselect.
           key memaksa remount per rencana sehingga state selector selalu segar. */}
       {finishTarget ? (
         <FinishAgendaModal
           key={finishTarget.id}
           agenda={finishTarget}
           accounts={accounts}
-          posItems={posItems}
           onClose={() => setFinishTarget(null)}
-          onFinish={(accountId, setAsideId) => {
-            onFinish(finishTarget.id, accountId, setAsideId);
-            setFinishTarget(null);
+          onFinish={async (accountId) => {
+            const succeeded = await onFinish(finishTarget.id, accountId);
+            if (succeeded) setFinishTarget(null);
+            return succeeded;
           }}
         />
       ) : null}
@@ -218,8 +242,7 @@ export default function AgendaKasSection({
           onConfirm={() => {
             const id = confirm.agenda.id;
             if (confirm.kind === 'skip') onSkip(id);
-            else if (confirm.kind === 'postpone') onPostpone(id);
-            else onDelete(id);
+            else onStopCycle(id);
           }}
           title={confirmConfig.title}
           description={confirmConfig.desc}
@@ -228,6 +251,7 @@ export default function AgendaKasSection({
           detailTitle={confirm.agenda.title}
           detailAmount={`${confirm.agenda.isIncome ? '+' : '-'} ${formatCurrencyRaw(confirm.agenda.amount)}`}
           detailAccount={confirm.agenda.displayDate}
+          detailAccountLabel="Tanggal"
           danger={confirm.kind === 'delete'}
         />
       ) : null}
@@ -240,24 +264,21 @@ function buildConfirm(kind: ConfirmKind, a: AgendaItem) {
     case 'skip':
       return {
         title: 'Lewati Agenda Kas?',
-        desc: `Agenda "${a.title}" tidak akan dieksekusi pada jadwal ini dan langsung dialihkan ke arsip.`,
+        desc: a.isIncome
+          ? `Kejadian pemasukan "${a.title}" ini dilewati dan diarsipkan. Jika berulang, siklus berikutnya akan dijadwalkan.`
+          : `Siklus "${a.title}" ini dilewati dan diarsipkan. Jika berulang, siklus berikutnya akan dijadwalkan; komitmen Dana Bebas untuk siklus ini dilepas.`,
         icon: 'redo',
         actionLabel: 'Lewati Agenda',
-      };
-    case 'postpone':
-      return {
-        title: 'Tunda Agenda ke Besok?',
-        desc: `Tanggal jatuh tempo "${a.title}" akan digeser ke hari berikutnya tanpa mengubah data lainnya.`,
-        icon: 'update',
-        actionLabel: 'Tunda ke Besok',
       };
     case 'delete':
     default:
       return {
-        title: 'Hapus Agenda Rencana?',
-        desc: `Rencana "${a.title}" senilai ${formatCurrencyRaw(a.amount)} akan dihapus permanen dari daftar aktif.`,
-        icon: 'delete',
-        actionLabel: 'Hapus Agenda',
+        title: 'Hentikan Siklus Rencana?',
+        desc: a.isIncome
+          ? `Rencana pemasukan "${a.title}" senilai ${formatCurrencyRaw(a.amount)} dihentikan dan disimpan di arsip sebagai Dibatalkan.`
+          : `Rencana "${a.title}" senilai ${formatCurrencyRaw(a.amount)} dihentikan dan disimpan di arsip sebagai Dibatalkan. Komitmen Dana Bebas yang aktif dilepas.`,
+        icon: 'block',
+        actionLabel: 'Hentikan Siklus',
       };
   }
 }
@@ -265,31 +286,36 @@ function buildConfirm(kind: ConfirmKind, a: AgendaItem) {
 function AgendaCard({
   agenda,
   onSkip,
-  onPostpone,
-  onDelete,
+  onScheduleFlexible,
+  onStopCycle,
+  onEdit,
   onFinish,
 }: {
   agenda: AgendaItem;
   onSkip: () => void;
-  onPostpone: () => void;
-  onDelete: () => void;
+  onScheduleFlexible: () => void;
+  onStopCycle: () => void;
+  onEdit: () => void;
   onFinish: () => void;
 }) {
   return (
-    <article className="p-4 sm:p-4.5 rounded-2xl bg-lo-surface-recessed/40 hover:bg-lo-surface-recessed/70 border border-lo-border-hairline/80 hover:border-lo-border-hairline transition-all duration-150">
+    <article className={`p-4 sm:p-4.5 rounded-2xl border border-lo-border-hairline/80 transition-all duration-150 ${agenda.isIncome ? 'bg-lo-secondary-container/25' : 'bg-lo-warning/5'} hover:bg-lo-surface-recessed/70 hover:border-lo-border-hairline`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3.5 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-lo-border-hairline flex items-center justify-center shrink-0 shadow-2xs text-lo-text-ink">
-            <Icon name={agenda.icon} className="text-[20px] text-lo-secondary" />
+           <div className={`w-10 h-10 rounded-2xl bg-white border border-lo-border-hairline flex items-center justify-center shrink-0 shadow-2xs ${agenda.isIncome ? 'text-lo-secondary' : 'text-lo-warning'}`}>
+             <Icon name={agenda.isIncome ? 'south_west' : 'north_east'} className="text-[20px]" />
           </div>
           <div className="min-w-0 space-y-0.5">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-headline font-semibold text-sm sm:text-base text-lo-text-ink truncate">
-                {agenda.title}
-              </h2>
+               <h2 className="font-headline font-semibold text-sm sm:text-base text-lo-text-ink truncate">
+                 {agenda.title}
+               </h2>
+               <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${agenda.isIncome ? 'bg-lo-secondary/10 text-lo-secondary' : 'bg-lo-warning/10 text-lo-warning'}`}>{agenda.isIncome ? 'Pemasukan' : 'Pengeluaran'}</span>
               <span className={pillPassive}>{agenda.repeat}</span>
+              {agenda.isOverdue ? <span className={pillWarning}>Terlambat</span> : null}
+              {agenda.isDue && !agenda.isOverdue ? <span className={pillPassive}>Jatuh tempo hari ini</span> : null}
             </div>
-            <div className="flex items-center gap-2 text-xs text-lo-text-subtle">
+            <div className="flex items-center gap-2 text-xs text-lo-text-subtle flex-wrap">
               <span className="flex items-center gap-1">
                 <Icon name="calendar_today" className="text-[13px]" />
                 <span>{agenda.displayDate}</span>
@@ -297,6 +323,10 @@ function AgendaCard({
               <span className="text-lo-text-subtle/60">·</span>
               <span className="truncate">{agenda.categoryLabel}</span>
             </div>
+            {agenda.note ? <p className="text-xs text-lo-text-subtle truncate">{agenda.note}</p> : null}
+            {agenda.defaultSourceAccountLabel ? (
+              <p className="text-[11px] text-lo-text-subtle">Default: {agenda.defaultSourceAccountLabel}</p>
+            ) : null}
           </div>
         </div>
         <div className="sm:text-right shrink-0 pl-13 sm:pl-0">
@@ -308,29 +338,34 @@ function AgendaCard({
             {agenda.isIncome ? '+' : '−'}
             {formatCurrencyRaw(agenda.amount)}
           </div>
-          <div className="text-[11px] text-lo-text-subtle/80">{agenda.categoryLabel}</div>
         </div>
       </div>
-      <div className="pt-3 mt-3 border-t border-lo-border-hairline/60 flex items-center justify-between gap-2">
+      <div className="pt-3 mt-3 border-t border-lo-border-hairline/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-2 text-xs flex-wrap">
+          <button type="button" onClick={onEdit} className={btnGhost}>
+            <Icon name="edit" className="text-[14px]" />
+            <span>Edit</span>
+          </button>
           <button type="button" onClick={onSkip} className={btnGhost}>
             <Icon name="skip_next" className="text-[14px]" />
             <span>Lewati</span>
           </button>
-          <button
-            type="button"
-            onClick={onPostpone}
-            className="px-3.5 py-1.5 rounded-full border border-lo-border-hairline bg-lo-surface-recessed hover:bg-lo-accent-wash text-lo-text-ink text-xs font-medium transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <Icon name="event_upcoming" className="text-[14px] text-lo-text-subtle" />
-            <span>Tunda Besok</span>
-          </button>
-          <button type="button" onClick={onDelete} className={btnDanger}>
+          {agenda.type === 'flexible' ? (
+            <button
+              type="button"
+              onClick={onScheduleFlexible}
+              className="px-3.5 py-1.5 rounded-full border border-lo-border-hairline bg-lo-surface-recessed hover:bg-lo-accent-wash text-lo-text-ink text-xs font-medium transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Icon name="event_upcoming" className="text-[14px] text-lo-text-subtle" />
+              <span>Atur Tanggal</span>
+            </button>
+          ) : null}
+          <button type="button" onClick={onStopCycle} className={btnDanger}>
             <Icon name="delete" className="text-[14px]" />
-            <span>Hapus</span>
+            <span>Hentikan</span>
           </button>
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center self-end sm:self-auto">
           <button type="button" onClick={onFinish} className={btnPrimary}>
             <Icon
               name={agenda.isIncome ? 'done' : 'check_circle'}
@@ -350,28 +385,29 @@ function AgendaCard({
 function FinishAgendaModal({
   agenda,
   accounts,
-  posItems,
   onClose,
   onFinish,
 }: {
   agenda: AgendaItem;
   accounts: Account[];
-  posItems: PosItem[];
   onClose: () => void;
-  onFinish: (accountId: string, setAsideId?: string) => void;
+  onFinish: (accountId: string) => Promise<boolean>;
 }) {
-  const [accountId, setAccountId] = useState('');
-  const [setAsideId, setSetAsideId] = useState('');
+  const [accountId, setAccountId] = useState(() =>
+    accounts.some((account) => account.id === agenda.defaultSourceAccountId && !account.archived)
+      ? agenda.defaultSourceAccountId ?? ''
+      : ''
+  );
+  const [submitting, setSubmitting] = useState(false);
 
   const activeAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
-  const activePos = useMemo(() => posItems.filter((p) => !p.archived), [posItems]);
 
   return (
     <Modal
       open
       onClose={onClose}
       title={`Selesaikan Rencana — ${agenda.title}`}
-      subtitle="Pilih Sumber Dana tempat uang keluar/masuk; pos bersifat opsional."
+      subtitle="Pilih Sumber Dana aktual untuk mencatat uang masuk atau keluar."
       maxWidth="max-w-md"
       footer={
         <>
@@ -384,8 +420,15 @@ function FinishAgendaModal({
           </button>
           <button
             type="button"
-            disabled={!accountId}
-            onClick={() => onFinish(accountId, setAsideId || undefined)}
+            disabled={!accountId || submitting}
+            onClick={async () => {
+              setSubmitting(true);
+              try {
+                await onFinish(accountId);
+              } finally {
+                setSubmitting(false);
+              }
+            }}
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-base" />
@@ -436,32 +479,66 @@ function FinishAgendaModal({
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-lo-text-ink" htmlFor="finish-set-aside">
-            Dana yang Disisihkan (opsional)
-          </label>
-          <span className="text-[11px] text-lo-text-subtle">
-            Pos yang dialokasikan/dilepas untuk realisasi ini.
-          </span>
-          <select
-            id="finish-set-aside"
-            className={selectBase}
-            value={setAsideId}
-            onChange={(e) => setSetAsideId(e.target.value)}
-          >
-            <option value="">Tanpa pos</option>
-            {activePos.map((p) => (
-              <option
-                key={p.id}
-                value={p.id}
-                disabled={p.category === 'routine_batch' && p.cycleExecuted}
-              >
-                {p.name} — {formatCurrencyRaw(p.amount)}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
+    </Modal>
+  );
+}
+
+function FlexiblePostponeModal({
+  agenda,
+  onClose,
+  onPostpone,
+}: {
+  agenda: AgendaItem;
+  onClose: () => void;
+  onPostpone: (newDueDate: string) => Promise<boolean>;
+}) {
+  const today = todayIso();
+  const [date, setDate] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Atur Tanggal — ${agenda.title}`}
+      subtitle="Rencana fleksibel belum memiliki tanggal. Pilih tanggal baru agar masuk ke agenda terjadwal."
+      maxWidth="max-w-md"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-full text-xs text-lo-text-subtle hover:text-lo-text-ink cursor-pointer">
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={!date || date < today || submitting}
+            onClick={async () => {
+              setSubmitting(true);
+              try {
+                await onPostpone(date);
+              } finally {
+                setSubmitting(false);
+              }
+            }}
+            className={`${btnPrimary} disabled:opacity-40`}
+          >
+            <Icon name="event" className="text-base" />
+            <span>Jadwalkan</span>
+          </button>
+        </>
+      }
+    >
+      <label className="block text-xs font-medium text-lo-text-ink mb-1.5" htmlFor="flexible-agenda-date">
+        Tanggal Mulai <span className="text-lo-secondary">*</span>
+      </label>
+      <input
+        id="flexible-agenda-date"
+        type="date"
+        min={today}
+        className={`${selectBase} text-xs`}
+        value={date}
+        onChange={(event) => setDate(event.target.value)}
+      />
     </Modal>
   );
 }
@@ -471,21 +548,38 @@ function FinishAgendaModal({
 
 function CreateAgendaModal({
   open,
+  accounts,
+  initialAgenda,
   onClose,
-  onCreate,
+  onSave,
 }: {
   open: boolean;
+  accounts: Account[];
+  initialAgenda?: AgendaItem;
   onClose: () => void;
-  onCreate: (input: CreateAgendaInput) => void;
+  onSave: (input: CreateAgendaInput) => Promise<boolean>;
 }) {
-  const [isIncome, setIsIncome] = useState(false);
-  const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('Utilitas Rutin');
-  const [date, setDate] = useState('');
-  const [repeat, setRepeat] = useState('Bulanan');
-  const [agendaType, setAgendaType] = useState<'scheduled' | 'flexible'>('scheduled');
-  const [note, setNote] = useState('');
+  const [isIncome, setIsIncome] = useState(initialAgenda?.isIncome ?? false);
+  const [title, setTitle] = useState(initialAgenda?.title ?? '');
+  const [amount, setAmount] = useState(initialAgenda
+    ? String(initialAgenda.amount).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+    : '');
+  const [category, setCategory] = useState<string>(
+    initialAgenda && !initialAgenda.isIncome && EXPENSE_CATEGORIES.some((categoryName) => categoryName === initialAgenda.categoryLabel)
+      ? initialAgenda.categoryLabel
+      : 'Makan & Minum'
+  );
+  const [date, setDate] = useState(initialAgenda?.rawDate ?? '');
+  const [repeat, setRepeat] = useState(initialAgenda?.repeat ?? 'Satu Kali');
+  const [agendaType, setAgendaType] = useState<'scheduled' | 'flexible'>(initialAgenda?.type ?? 'scheduled');
+  const [note, setNote] = useState(initialAgenda?.note ?? '');
+  const [defaultSourceAccountId, setDefaultSourceAccountId] = useState(() =>
+    accounts.some((account) => account.id === initialAgenda?.defaultSourceAccountId && !account.archived)
+      ? initialAgenda?.defaultSourceAccountId ?? ''
+      : ''
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const today = todayIso();
 
   // Pengeluaran selalu terjadwal (tanggal wajib).
   // Pemasukan terjadwal: tanggal + siklus.
@@ -495,20 +589,25 @@ function CreateAgendaModal({
   const needsCycle = !isIncome || agendaType === 'scheduled';
 
   const amountNum = parseInt(amount.replace(/\D/g, ''), 10) || 0;
+  const amountIsSafe = Number.isSafeInteger(amountNum);
+  const dateIsInPast = needsDate && Boolean(date) && date < today && date !== initialAgenda?.rawDate;
   const canSubmit =
     title.trim().length > 0 &&
     amountNum > 0 &&
-    (!needsDate || date.length > 0);
+    amountIsSafe &&
+    Boolean(defaultSourceAccountId) &&
+    (!needsDate || (date.length > 0 && !dateIsInPast));
 
   const reset = () => {
     setIsIncome(false);
     setTitle('');
     setAmount('');
-    setCategory('Utilitas Rutin');
+    setCategory('Makan & Minum');
     setDate('');
-    setRepeat('Bulanan');
+    setRepeat('Satu Kali');
     setAgendaType('scheduled');
     setNote('');
+    setDefaultSourceAccountId('');
   };
 
   return (
@@ -518,8 +617,8 @@ function CreateAgendaModal({
         reset();
         onClose();
       }}
-      title="Buat Rencana Pengeluaran/Pemasukan"
-      subtitle="Atur penerimaan atau pembayaran yang akan datang. Sumber Dana dipilih saat rencana diselesaikan."
+       title={initialAgenda ? 'Edit Rencana Pengeluaran/Pemasukan' : 'Buat Rencana Pengeluaran/Pemasukan'}
+      subtitle="Catat rencana sebelum uang benar-benar masuk atau keluar."
       maxWidth="max-w-lg"
       footer={
         <>
@@ -535,24 +634,30 @@ function CreateAgendaModal({
           </button>
           <button
             type="button"
-            disabled={!canSubmit}
-            onClick={() => {
-              onCreate({
-                title: title.trim(),
-                amount: amountNum,
-                isIncome,
-                rawDate: needsDate ? date : '',
-                categoryLabel: isIncome ? 'Pemasukan Kas' : category,
-                repeat: needsCycle ? repeat : 'Satu Kali',
-                type: !isIncome ? 'scheduled' : agendaType,
-                note: note.trim() || undefined,
-              });
-              reset();
+            disabled={!canSubmit || submitting}
+            onClick={async () => {
+              setSubmitting(true);
+              try {
+                 const succeeded = await onSave({
+                  title: title.trim(),
+                  amount: amountNum,
+                  isIncome,
+                  rawDate: needsDate ? date : '',
+                  categoryLabel: isIncome ? 'Pendapatan' : category,
+                  repeat: needsCycle ? repeat : 'Satu Kali',
+                  type: !isIncome ? 'scheduled' : agendaType,
+                  defaultSourceAccountId,
+                  note: note.trim() || undefined,
+                });
+                if (succeeded) reset();
+              } finally {
+                setSubmitting(false);
+              }
             }}
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-[15px]" />
-            <span>Simpan</span>
+            <span>{initialAgenda ? 'Simpan Perubahan' : 'Simpan'}</span>
           </button>
         </>
       }
@@ -603,6 +708,7 @@ function CreateAgendaModal({
             <input
               id="agd-title"
               type="text"
+              maxLength={256}
               className={inputBase}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -622,6 +728,8 @@ function CreateAgendaModal({
               <input
                 id="agd-amount"
                 type="text"
+                inputMode="numeric"
+                aria-invalid={amount.length > 0 && !amountIsSafe}
                 className={`${inputBase} pl-10 font-semibold tabular-nums`}
                 value={amount}
                 onChange={(e) =>
@@ -630,32 +738,13 @@ function CreateAgendaModal({
                 placeholder="0"
               />
             </div>
+            {amount.length > 0 && !amountIsSafe ? (
+              <p role="alert" className="text-[11px] text-lo-error mt-1">
+                Nominal terlalu besar. Masukkan nominal hingga Rp9.007.199.254.740.991.
+              </p>
+            ) : null}
           </div>
         </div>
-
-        {!isIncome ? (
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-category">
-                Kategori Pengeluaran<span className="text-lo-secondary">*</span>
-              </label>
-            </div>
-            <select
-              id="agd-category"
-              className={`${selectBase} text-xs`}
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              <option value="Utilitas Rutin">Utilitas Rutin</option>
-              <option value="Tagihan Internet">Tagihan Internet</option>
-              <option value="Belanja Dapur">Belanja Dapur</option>
-              <option value="Asuransi & Kewajiban">Asuransi &amp; Kewajiban</option>
-              <option value="Transportasi">Transportasi</option>
-              <option value="Hiburan Digital">Hiburan Digital</option>
-              <option value="Lainnya">Lainnya</option>
-            </select>
-          </div>
-        ) : null}
 
         {needsDate || needsCycle ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -663,16 +752,23 @@ function CreateAgendaModal({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-date">
-                    Tanggal<span className="text-lo-secondary">*</span>
+                    Tanggal Mulai<span className="text-lo-secondary">*</span>
                   </label>
                 </div>
                 <input
                   id="agd-date"
                   type="date"
+                  min={today}
+                  aria-invalid={dateIsInPast}
                   className={`${selectBase} text-xs`}
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
                 />
+                {dateIsInPast ? (
+                  <p role="alert" className="text-[11px] text-lo-error mt-1">
+                    Tanggal Mulai tidak boleh sebelum hari ini.
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {needsCycle ? (
@@ -690,6 +786,7 @@ function CreateAgendaModal({
                 >
                   <option value="Bulanan">Bulanan</option>
                   <option value="Mingguan">Mingguan</option>
+                  <option value="Per 3 Bulan">Per 3 Bulan</option>
                   <option value="Tahunan">Tahunan</option>
                   <option value="Satu Kali">Satu Kali</option>
                 </select>
@@ -717,6 +814,46 @@ function CreateAgendaModal({
           </div>
         ) : null}
 
+        {!isIncome ? (
+          <div>
+            <label className="block text-xs font-medium text-lo-text-ink mb-1.5" htmlFor="agd-category">
+              Kategori Pengeluaran <span className="text-lo-secondary">*</span>
+            </label>
+            <select
+              id="agd-category"
+              className={`${selectBase} text-xs`}
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              {EXPENSE_CATEGORIES.map((transactionCategory) => (
+                <option key={transactionCategory} value={transactionCategory}>
+                  {transactionCategory}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-default-account">
+            Sumber Dana Default <span className="text-lo-secondary">*</span>
+          </label>
+          <select
+            id="agd-default-account"
+            className={selectBase}
+            value={defaultSourceAccountId}
+            onChange={(e) => setDefaultSourceAccountId(e.target.value)}
+          >
+            <option value="" disabled>Pilih Sumber Dana Default…</option>
+            {accounts.filter((account) => !account.archived).map((account) => (
+              <option key={account.id} value={account.id}>{account.name}</option>
+            ))}
+          </select>
+          {accounts.every((account) => account.archived) ? (
+            <p className="text-[11px] text-lo-error">Tambahkan Sumber Dana aktif sebelum membuat rencana.</p>
+          ) : null}
+        </div>
+
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs font-medium text-lo-text-ink" htmlFor="agd-note">
@@ -727,11 +864,23 @@ function CreateAgendaModal({
           <input
             id="agd-note"
             type="text"
+            maxLength={512}
             className={`${inputBaseSm} text-xs`}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Contoh: No. Pelanggan 019284 / Invoice termin 1"
           />
+        </div>
+
+        <div className="pt-3 border-t border-lo-border-hairline/70 text-[11px] leading-relaxed text-lo-text-subtle space-y-1">
+          {isIncome ? (
+            <p>Rencana pemasukan tidak mengurangi Dana Bebas. Sumber Dana Default hanya saran dan bisa diganti saat pemasukan dicatat.</p>
+          ) : repeat === 'Satu Kali' ? (
+            <p>Rencana Satu Kali langsung mengikat Dana Bebas saat disimpan, meskipun tanggal kejadian masih mendatang. Mengubah tanggal kejadian tidak mengubah komitmen ini.</p>
+          ) : (
+            <p>Untuk rencana berulang, Dana Bebas terikat sejak awal periode kalender: Senin untuk mingguan, tanggal 1 untuk bulanan, awal kuartal untuk per 3 bulan, dan 1 Januari untuk tahunan. Tanggal di atas tetap menunjukkan tanggal kejadiannya.</p>
+          )}
+          {!isIncome ? <p>Sumber Dana Default hanya saran dan tetap bisa diganti saat rencana dibayar.</p> : null}
         </div>
       </div>
     </Modal>
@@ -752,7 +901,7 @@ function ArchiveModal({
       open={open}
       onClose={onClose}
       title="Arsip Agenda Kas"
-      subtitle="Riwayat agenda yang telah diselesaikan atau dilewati."
+      subtitle="Riwayat agenda yang telah diselesaikan, dilewati, atau dibatalkan."
       maxWidth="max-w-lg"
       footer={
         <button
@@ -778,10 +927,15 @@ function ArchiveModal({
               <div className="min-w-0">
                 <p className="text-xs font-medium text-lo-text-ink truncate">{item.title}</p>
                 <p className="text-[11px] text-lo-text-subtle mt-0.5">{item.date}</p>
+                {item.sourceAccountLabel ? (
+                  <p className="text-[11px] text-lo-text-subtle mt-0.5">
+                    Sumber Dana {item.sourceAccountKind === 'actual' ? 'Aktual' : 'Default'}: {item.sourceAccountLabel}
+                  </p>
+                ) : null}
               </div>
               <div className="text-right shrink-0">
-                <p className="text-xs font-semibold text-lo-text-ink tabular-nums">
-                  {formatCurrencyRaw(item.amount)}
+                <p className={`text-xs font-semibold tabular-nums ${item.isIncome ? 'text-lo-secondary' : 'text-lo-text-ink'}`}>
+                  {item.isIncome ? '+' : '−'}{formatCurrencyRaw(item.amount)}
                 </p>
                 <span className="inline-block px-2 py-0.5 rounded-full bg-lo-accent-wash text-lo-secondary text-[10px] font-medium mt-0.5">
                   {item.status}

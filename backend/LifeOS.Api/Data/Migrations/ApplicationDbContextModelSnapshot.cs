@@ -298,6 +298,9 @@ namespace LifeOS.Api.Data.Migrations
 
             modelBuilder.Entity("LifeOS.Api.Models.UpcomingEvent", b =>
                 {
+                    b.Property<Guid?>("DefaultSourceAccountId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
@@ -363,6 +366,8 @@ namespace LifeOS.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
+
+                    b.HasIndex("DefaultSourceAccountId");
 
                     b.HasIndex("RealizedTransactionId");
 
@@ -691,6 +696,11 @@ namespace LifeOS.Api.Data.Migrations
 
             modelBuilder.Entity("LifeOS.Api.Models.UpcomingEvent", b =>
                 {
+                    b.HasOne("LifeOS.Api.Models.Account", "DefaultSourceAccount")
+                        .WithMany()
+                        .HasForeignKey("DefaultSourceAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("LifeOS.Api.Models.Account", "Account")
                         .WithMany()
                         .HasForeignKey("AccountId")
@@ -708,6 +718,8 @@ namespace LifeOS.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
+
+                    b.Navigation("DefaultSourceAccount");
 
                     b.Navigation("RealizedTransaction");
 

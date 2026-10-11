@@ -198,6 +198,7 @@ interface ConfirmDialogProps {
   detailTitle?: string;
   detailAmount?: string;
   detailAccount?: string;
+  detailAccountLabel?: string;
   danger?: boolean;
 }
 
@@ -212,6 +213,7 @@ export function ConfirmDialog({
   detailTitle,
   detailAmount,
   detailAccount,
+  detailAccountLabel = 'Sumber Dana & Tanggal',
   danger = false,
 }: ConfirmDialogProps) {
   const [saving, setSaving] = useState(false);
@@ -264,7 +266,7 @@ export function ConfirmDialog({
             ) : null}
             {detailAccount ? (
               <div className="flex justify-between items-center text-lo-text-subtle">
-                <span>Sumber Dana &amp; Tanggal</span>
+                <span>{detailAccountLabel}</span>
                 <span className="text-lo-text-ink text-right">{detailAccount}</span>
               </div>
             ) : null}

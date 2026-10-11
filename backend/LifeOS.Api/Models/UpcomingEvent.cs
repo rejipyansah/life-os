@@ -22,6 +22,12 @@ public class UpcomingEvent
 
     public Account? Account { get; set; }
 
+    /// <summary>Default realization source only; the user may choose a different account.</summary>
+    [ForeignKey(nameof(DefaultSourceAccount))]
+    public Guid? DefaultSourceAccountId { get; set; }
+
+    public Account? DefaultSourceAccount { get; set; }
+
     [Required]
     [MaxLength(256)]
     public string Title { get; set; } = null!;

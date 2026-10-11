@@ -95,19 +95,54 @@ public class FinanceStateService
             .Where(ue => ue.ScopeId == scopeId)
             .ToListAsync(ct);
 
-        var eventAccountIds = events.Where(e => e.AccountId.HasValue).Select(e => e.AccountId!.Value).Distinct().ToList();
+        var eventAccountIds = events.SelectMany(e => new[] { e.AccountId, e.DefaultSourceAccountId })
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
         var eventAccountNames = eventAccountIds.Count == 0
             ? new Dictionary<Guid, string>()
             : await _db.Accounts
                 .Where(a => eventAccountIds.Contains(a.Id))
                 .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
 
+        var realizedTransactionIds = events
+            .Where(e => e.RealizedTransactionId.HasValue)
+            .Select(e => e.RealizedTransactionId!.Value)
+            .Distinct()
+            .ToList();
+        var realizedSourceEntries = realizedTransactionIds.Count == 0
+            ? []
+            : await _db.TransactionEntries
+                .Where(te => realizedTransactionIds.Contains(te.TransactionId))
+                .Select(te => new { te.TransactionId, te.AccountId, AccountName = te.Account.Name })
+                .ToListAsync(ct);
+        var realizedSourceByTransaction = realizedSourceEntries
+            .GroupBy(entry => entry.TransactionId)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        UpcomingEventProjection ProjectEvent(UpcomingEvent e)
+        {
+            var realizedSource = e.RealizedTransactionId is { } transactionId
+                ? realizedSourceByTransaction.GetValueOrDefault(transactionId)
+                : null;
+            return UpcomingEventService.Project(
+                e,
+                e.AccountId is null ? null : eventAccountNames.GetValueOrDefault(e.AccountId.Value),
+                e.DefaultSourceAccountId is null ? null : eventAccountNames.GetValueOrDefault(e.DefaultSourceAccountId.Value),
+                realizedSource?.AccountId,
+                realizedSource?.AccountName,
+                today);
+        }
+
         var scheduledEvents = events
             .Where(e => e.Status == UpcomingEventStatus.Scheduled)
-            .Select(e => UpcomingEventService.Project(
-                e, e.AccountId is null ? null : eventAccountNames.GetValueOrDefault(e.AccountId.Value), today))
+            .Select(ProjectEvent)
             .OrderBy(e => e.DueDate ?? DateOnly.MaxValue)
             .ThenByDescending(e => e.CreatedAt)
+            .ToList();
+
+        var archivedEvents = events
+            .Where(e => e.Status != UpcomingEventStatus.Scheduled)
+            .Select(ProjectEvent)
+            .OrderByDescending(e => e.UpdatedAt)
             .ToList();
 
         var dueEvents = scheduledEvents.Where(e => e.IsDue).ToList();
@@ -116,12 +151,10 @@ public class FinanceStateService
             .Where(e => e.Direction == UpcomingEventDirection.Expense)
             .Sum(e => e.Amount);
 
-        // SEMUA agenda pengeluaran terjadwal (sekali jalan & ber-siklus) mengikat
-        // FreeCash sejak dibuat — mirip komitmen Pos, derived saja, tanpa transaksi.
-        // Yang sedang jatuh tempo tidak dihitung dua kali karena komitmennya sudah
-        // masuk di sini sejak awal. DueObligations tetap untuk tampilan Jatuh Tempo.
+        // Agenda pengeluaran mengikat FreeCash sejak awal periode kalender siklusnya.
+        // Jatuh Tempo tetap memakai DueDate dan tidak menentukan awal komitmen.
         var scheduledExpenseCommitments = scheduledEvents
-            .Where(e => e.Direction == UpcomingEventDirection.Expense)
+            .Where(e => e.Direction == UpcomingEventDirection.Expense && e.IsCommitmentActive)
             .Sum(e => e.Amount);
 
         var totalActual = accountProjections.Sum(a => a.ActualBalance);
@@ -151,11 +184,15 @@ public class FinanceStateService
             ScheduledExpenseCommitments = scheduledExpenseCommitments,
             FreeCash = freeCash,
             HasUnpaidBills = dueEvents.Any(e => e.Direction == UpcomingEventDirection.Expense),
-            AllBillsPaid = events.Any(e => e.Direction == UpcomingEventDirection.Expense)
+            AllBillsPaid = events.Any(e => e.Direction == UpcomingEventDirection.Expense
+                    && e.Status == UpcomingEventStatus.Realized
+                    && e.DueDate.HasValue
+                    && e.DueDate.Value == today)
                 && !dueEvents.Any(e => e.Direction == UpcomingEventDirection.Expense),
             Accounts = accountProjections,
             SetAsides = setAsideProjections,
             UpcomingEvents = scheduledEvents,
+            ArchivedEvents = archivedEvents,
             DueEvents = dueEvents,
             RecentTransactions = recentTransactions
         };

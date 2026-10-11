@@ -32,6 +32,8 @@ export {
   MAX_TRANSACTION_DESCRIPTION_LENGTH,
   MAX_TRANSACTION_CATEGORY_LENGTH,
 } from './parseTransaction';
+export { todayIso } from './apiMapping';
+export { mapTransaction, transactionMatchesPeriod } from './apiMapping';
 export type {
   Account,
   AccountType,

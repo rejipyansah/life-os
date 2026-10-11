@@ -109,10 +109,19 @@ public sealed class FinanceEndpointTests
 
         var invalidEvent = await PostJsonAsync(client, "/api/finance/upcoming-events", """{"title":"Invalid","amount":0,"direction":"Expense"}""");
         Assert.Equal((HttpStatusCode)422, invalidEvent.StatusCode);
-        var eventResponse = await PostJsonAsync(client, "/api/finance/upcoming-events", $$"""{"title":"Tagihan API","amount":250000,"direction":"Expense","dueDate":"{{BusinessDate.TodayWib:yyyy-MM-dd}}","scheduleKind":"Scheduled"}""");
+        var eventResponse = await PostJsonAsync(client, "/api/finance/upcoming-events", $$"""{"title":"Tagihan API","amount":250000,"direction":"Expense","defaultSourceAccountId":"{{accountId}}","dueDate":"{{BusinessDate.TodayWib:yyyy-MM-dd}}","scheduleKind":"Scheduled"}""");
         Assert.Equal(HttpStatusCode.OK, eventResponse.StatusCode);
         using var eventPayload = System.Text.Json.JsonDocument.Parse(await eventResponse.Content.ReadAsStringAsync());
         var eventId = eventPayload.RootElement.GetProperty("id").GetGuid();
+        Assert.Equal(accountId, eventPayload.RootElement.GetProperty("defaultSourceAccountId").GetGuid());
+        Assert.Equal("Guest account", eventPayload.RootElement.GetProperty("defaultSourceAccountName").GetString());
+
+        using var stateResponse = await client.GetAsync("/api/finance/state");
+        using var statePayload = System.Text.Json.JsonDocument.Parse(await stateResponse.Content.ReadAsStringAsync());
+        var stateEvent = statePayload.RootElement.GetProperty("upcomingEvents").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetGuid() == eventId);
+        Assert.Equal("Guest account", stateEvent.GetProperty("defaultSourceAccountName").GetString());
+
         var postponeResponse = await PostJsonAsync(client, $"/api/finance/upcoming-events/{eventId}/postpone", "{}");
         Assert.Equal(HttpStatusCode.OK, postponeResponse.StatusCode);
         using var postponedPayload = System.Text.Json.JsonDocument.Parse(await postponeResponse.Content.ReadAsStringAsync());

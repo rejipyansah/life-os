@@ -5,7 +5,7 @@ import {
   createSetAside,
   createTransaction,
   createUpcomingEvent,
-  deleteUpcomingEvent,
+  cancelUpcomingEvent,
   getFinanceState,
   postponeUpcomingEvent,
   realizeUpcomingEvent,
@@ -16,11 +16,13 @@ import {
   withdrawFromSetAside,
   closeSetAside,
   updateSetAside,
+  updateUpcomingEvent,
   updateAccount as updateAccountRequest,
 } from '../api';
 import type {
   FinanceStateProjection,
   SetAsideCloseReason,
+  UpdateUpcomingEventCommand,
 } from '../types';
 import type { FinanceDerived } from './financeCalc';
 import {
@@ -94,8 +96,8 @@ export interface FinanceStateApi {
   dismissToast: (id: number) => void;
   pushToast: (message: string, icon?: string) => void;
 
-  payBill: (id: string, accountId: string, setAsideId?: string) => void;
-  payAllBills: (accountId: string, setAsideId?: string) => void;
+  payBill: (id: string, accountId: string, setAsideId?: string) => Promise<boolean>;
+  payAllBills: (accountId: string, setAsideId?: string) => Promise<boolean>;
   postponeBill: (id: string) => void;
 
   addAccount: (data: { name: string; role: string; type: Account['type'] }) => void;
@@ -136,11 +138,12 @@ export interface FinanceStateApi {
   updatePos: (id: string, command: { name: string; note: string; transactionCategory: string; targetAmount?: number; removeTarget?: boolean; cycleKind: import('../types').SetAsideCycleKind }) => Promise<boolean>;
 
   skipAgenda: (id: string) => void;
-  postponeAgenda: (id: string) => void;
-  deleteAgenda: (id: string) => void;
-  /** Selesaikan rencana: accountId wajib (Sumber Dana aktual), setAsideId opsional. */
-  finishAgenda: (id: string, accountId: string, setAsideId?: string) => void;
-  createAgenda: (input: CreateAgendaInput) => void;
+  scheduleFlexibleAgenda: (id: string, newDueDate: string) => Promise<boolean>;
+  cancelAgenda: (id: string) => void;
+  /** Selesaikan rencana dengan sumber dana aktual yang dipilih. */
+  finishAgenda: (id: string, accountId: string) => Promise<boolean>;
+  createAgenda: (input: CreateAgendaInput) => Promise<boolean>;
+  updateAgenda: (id: string, input: CreateAgendaInput) => Promise<boolean>;
 }
 
 export function useFinanceState(): FinanceStateApi {
@@ -219,12 +222,12 @@ export function useFinanceState(): FinanceStateApi {
   /* ── Jatuh Tempo ────────────────────────────────────────────
    * A bill is a due upcoming cash event. Paying it realizes it into a
    * real transaction — user memilih Sumber Dana aktual saat membayar.
-   * Rencana tidak terikat akun; akun dipilih di modal realizasi.
+    * Akun default hanya rekomendasi; pengguna dapat menggantinya saat realisasi.
    */
   const payBill = useCallback(
     (id: string, accountId: string, setAsideId?: string) => {
       const bill = mapped.billsDue.find((b) => b.id === id);
-      void run(
+      return run(
         () =>
           realizeUpcomingEvent(id, {
             accountId,
@@ -240,30 +243,37 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const payAllBills = useCallback(
-    (accountId: string, setAsideId?: string) => {
+    async (accountId: string, setAsideId?: string): Promise<boolean> => {
       const unpaid = mapped.billsDue.filter((b) => b.status === 'unpaid');
       if (unpaid.length === 0) {
         pushToast('Semua tagihan hari ini sudah lunas sebelumnya.', 'info');
-        return;
+        return false;
       }
-      void run(
-        async () => {
-          for (const bill of unpaid) {
-            await realizeUpcomingEvent(bill.id, {
-              accountId,
-              setAsideId: setAsideId ?? null,
-              occurredOn: todayIso(),
-            });
-          }
-        },
-        () =>
-          pushToast(
-            `Seluruh tagihan hari ini (${unpaid.length} tagihan) telah lunas terbayar!`,
-            'check_circle'
-          )
-      );
+
+      let succeeded = 0;
+      let failed = 0;
+      for (const bill of unpaid) {
+        try {
+          await realizeUpcomingEvent(bill.id, {
+            accountId,
+            setAsideId: setAsideId ?? null,
+            occurredOn: todayIso(),
+          });
+          succeeded++;
+        } catch {
+          failed++;
+        }
+      }
+
+      refresh();
+      if (failed === 0) {
+        pushToast(`Seluruh tagihan hari ini (${succeeded} tagihan) telah lunas terbayar!`, 'check_circle');
+      } else {
+        pushToast(`${succeeded} tagihan berhasil dibayar; ${failed} gagal. Daftar telah diperbarui.`, 'error');
+      }
+      return succeeded > 0;
     },
-    [mapped.billsDue, pushToast, run]
+    [mapped.billsDue, pushToast, refresh]
   );
 
   const postponeBill = useCallback(
@@ -603,26 +613,26 @@ export function useFinanceState(): FinanceStateApi {
     [mapped.agendas, pushToast, run]
   );
 
-  const postponeAgenda = useCallback(
-    (id: string) => {
+  const scheduleFlexibleAgenda = useCallback(
+    (id: string, newDueDate: string) => {
       const agenda = mapped.agendas.find((a) => a.id === id);
-      void run(
-        () => postponeUpcomingEvent(id, {}),
+      return run(
+        () => postponeUpcomingEvent(id, { newDueDate }),
         () => {
-          if (agenda) pushToast(`Agenda "${agenda.title}" ditunda ke besok.`);
+          if (agenda) pushToast(`Agenda "${agenda.title}" dijadwalkan pada ${newDueDate}.`);
         }
       );
     },
     [mapped.agendas, pushToast, run]
   );
 
-  const deleteAgenda = useCallback(
+  const cancelAgenda = useCallback(
     (id: string) => {
       const agenda = mapped.agendas.find((a) => a.id === id);
       void run(
-        () => deleteUpcomingEvent(id),
+        () => cancelUpcomingEvent(id, {}),
         () => {
-          if (agenda) pushToast(`Agenda "${agenda.title}" telah dihapus.`);
+          if (agenda) pushToast(`Siklus agenda "${agenda.title}" dihentikan dan dipindahkan ke arsip.`, 'inventory_2');
         }
       );
     },
@@ -630,14 +640,14 @@ export function useFinanceState(): FinanceStateApi {
   );
 
   const finishAgenda = useCallback(
-    (id: string, accountId: string, setAsideId?: string) => {
+    (id: string, accountId: string) => {
       const agenda = mapped.agendas.find((a) => a.id === id);
-      void run(
+      return run(
         () =>
           realizeUpcomingEvent(id, {
             // Sumber Dana dipilih SAAT realizasi — bukan terikat permanen.
             accountId,
-            setAsideId: setAsideId ?? null,
+            setAsideId: null,
             occurredOn: todayIso(),
           }),
         () => {
@@ -653,11 +663,12 @@ export function useFinanceState(): FinanceStateApi {
   const createAgenda = useCallback(
     (input: CreateAgendaInput) => {
       const dueDate = input.rawDate || null;
-      void run(
+      return run(
         () =>
           createUpcomingEvent({
             // Rencana TIDAK terikat Sumber Dana — akun dipilih saat realizasi.
             accountId: null,
+            defaultSourceAccountId: input.defaultSourceAccountId,
             title: input.title,
             amount: input.amount,
             direction: input.isIncome ? 'Income' : 'Expense',
@@ -672,6 +683,36 @@ export function useFinanceState(): FinanceStateApi {
       );
     },
     [pushToast, run]
+  );
+
+  const updateAgenda = useCallback(
+    (id: string, input: CreateAgendaInput) => {
+      const agenda = mapped.agendas.find((item) => item.id === id);
+      if (!agenda) return Promise.resolve(false);
+
+      const dueDate = input.rawDate || null;
+      const command: UpdateUpcomingEventCommand = {
+        title: input.title,
+        amount: input.amount,
+        direction: input.isIncome ? 'Income' : 'Expense',
+        categoryName: input.categoryLabel,
+        note: input.note ?? '',
+        defaultSourceAccountId: input.defaultSourceAccountId,
+        scheduleKind: input.type === 'flexible' ? 'Flexible' : 'Scheduled',
+        recurrence: fromRepeatLabel(input.repeat),
+        ...(dueDate === null
+          ? { clearDueDate: true }
+          : dueDate !== agenda.rawDate
+            ? { dueDate }
+            : {}),
+      };
+
+      return run(
+        () => updateUpcomingEvent(id, command),
+        () => pushToast(`Agenda "${input.title}" berhasil diperbarui.`)
+      );
+    },
+    [mapped.agendas, pushToast, run]
   );
 
   return {
@@ -734,10 +775,11 @@ export function useFinanceState(): FinanceStateApi {
     updatePos,
 
     skipAgenda,
-    postponeAgenda,
-    deleteAgenda,
+    scheduleFlexibleAgenda,
+    cancelAgenda,
     finishAgenda,
     createAgenda,
+    updateAgenda,
   };
 }
 

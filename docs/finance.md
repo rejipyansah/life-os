@@ -225,15 +225,21 @@ Fields:
 - Status: Scheduled / Realized / Skipped / Cancelled
 - RealizedTransactionId: Guid?
 - AccountId: Guid? — LEGACY ONLY. Rencana baru tidak pernah mengisi akun ini.
+- DefaultSourceAccountId: Guid? — default Sumber Dana untuk memudahkan realisasi; bukan ikatan permanen dan dapat diganti.
 
 Rules:
 
-- Rencana does NOT belong to any Account. It is not tied to a Sumber Dana.
-- AccountId on realization is chosen by the user at realize time (RealizeUpcomingEventCommand.AccountId is required). The source account at plan creation is irrelevant.
-- Scheduled expense commitments reduce FreeCash from the moment the plan is created — derived only, no transaction.
+- Rencana is not permanently tied to a Sumber Dana. A default source account can be saved for convenience; it is only a recommendation and can be changed at realization (RealizeUpcomingEventCommand.AccountId is required).
+- Scheduled expense commitments reduce FreeCash once the calendar period containing their DueDate begins — derived only, no transaction. Weekly periods begin Monday, monthly periods on day 1, quarterly periods at the first month of the calendar quarter, and annual periods on January 1. A non-recurring one-time event commits FreeCash immediately when created, regardless of its DueDate; changing its DueDate does not change the commitment start. A future recurring period does not reserve FreeCash.
+- Creating or moving a scheduled agenda to a date before the current WIB business date is rejected. Existing agenda dates can naturally become overdue as time passes.
 - Only realization turns an event into a real Transaction; passing the date does not.
+- Archived realized events expose the actual source account from the realized transaction entry; skipped/cancelled events retain and expose the plan's non-binding default source account.
+- `CategoryName` on an expense agenda uses the same category labels as expense transactions; realized income uses `Pendapatan`.
+- A scheduled agenda with recurrence creates its next occurrence when the current occurrence is realized or skipped. “Lewati” advances directly to the next cycle; the skipped occurrence is not charged to FreeCash, and the successor affects FreeCash when its calendar period begins. The next due date advances from the current due date by one week, month, quarter, or year; calendar arithmetic clamps to the last valid day of shorter months/years. The successor keeps the title, amount, direction, category, note, recurrence, and default source account.
+- Cancelling or deleting an occurrence stops that recurrence chain. Flexible agendas cannot recur because they have no scheduled due date.
+- The Rencana UI's **Hentikan Siklus** action cancels and archives the active occurrence (Status=Cancelled), preserving its default source-account reference; the destructive DELETE API remains available for explicit permanent removal.
 - Realization may optionally release a set-aside (SetAsideId): the expense then draws min(amount, posBalance) from the pos, with the shortfall covered by unallocated money.
-- Postpone/skip/cancel never move money.
+- Postpone/skip/cancel never create transactions. Moving an expense to a later calendar period releases its FreeCash commitment until that period begins; changing its due date within the same already-started period does not release the commitment. “Tunda Besok” moves the event date forward by one day. Deleting an occurrence stops its recurrence chain and releases any active commitment.
 - Realized agendas cannot be deleted; reverse the transaction instead.
 
 ---
@@ -244,13 +250,15 @@ Rules:
 |---|---|---|---|
 | Sumber Dana | Account | Where money is located right now | — (is the account) |
 | Dana yang Disisihkan | SetAside | Allocation/purpose of money (scope-wide pool) | NO — never permanently |
-| Rencana | UpcomingEvent | Planned future cash event | NO — account chosen only at realize time |
+| Rencana | UpcomingEvent | Planned future cash event | A default source may be selected for convenience; user may change it at realization |
 
 When recording a transaction, Sumber Dana and Dana yang Disisihkan are TWO INDEPENDENT selections:
 - Sumber Dana → where money actually leaves/enters (required, validated against actual balance).
 - Dana yang Disisihkan → which allocation is released (expense) or funded (income) (optional).
 
-Defaults/recommendations may ease input, but no permanent binding between a set-aside/plan and a specific account is ever created.
+The plan's source account is a required default recommendation in the creation form, never a permanent binding; users may choose another account when realizing the event. Set-asides also remain independent of accounts.
+
+For recurring agendas, **Tanggal Mulai** is the event date/recurrence anchor. Dana Bebas is committed at the start of the calendar period containing that date, not on the event date itself. Due obligations still use the actual event date. A date change recalculates the period; moving to a later period releases the commitment until the new period begins. A one-time event commits immediately from creation; moving its due date does not release that commitment.
 
 Key example: Dana Pacaran Rp500.000, transfer Rp200.000 from SeaBank to Tunai → the pos balance stays Rp500.000; only the money's location changed. Transfer validates only the source account's actual balance; allocations are untouched.
 

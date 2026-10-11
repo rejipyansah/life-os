@@ -15,6 +15,9 @@ public class CreateUpcomingEventCommand
     /// </summary>
     public Guid? AccountId { get; set; }
 
+    /// <summary>Default source account shown at realization; user can change it.</summary>
+    public Guid? DefaultSourceAccountId { get; set; }
+
     public string Title { get; set; } = "";
     public decimal Amount { get; set; }
     public UpcomingEventDirection Direction { get; set; } = UpcomingEventDirection.Expense;
@@ -33,6 +36,7 @@ public class UpdateUpcomingEventCommand
     public UpcomingEventDirection? Direction { get; set; }
     public string? CategoryName { get; set; }
     public string? Note { get; set; }
+    public Guid? DefaultSourceAccountId { get; set; }
     public DateOnly? DueDate { get; set; }
     public bool ClearDueDate { get; set; }
     public UpcomingEventScheduleKind? ScheduleKind { get; set; }
@@ -93,6 +97,11 @@ public class UpcomingEventProjection
     /// <summary>LEGACY ONLY. Tidak dipakai untuk perhitungan.</summary>
     public string? AccountName { get; set; }
 
+    public Guid? DefaultSourceAccountId { get; set; }
+    public string? DefaultSourceAccountName { get; set; }
+    public Guid? RealizedSourceAccountId { get; set; }
+    public string? RealizedSourceAccountName { get; set; }
+
     public string Title { get; set; } = "";
     public decimal Amount { get; set; }
     public UpcomingEventDirection Direction { get; set; }
@@ -106,6 +115,8 @@ public class UpcomingEventProjection
     public string? StatusReason { get; set; }
     public bool IsDue { get; set; }
     public bool IsOverdue { get; set; }
+    public DateOnly? CommitmentStartDate { get; set; }
+    public bool IsCommitmentActive { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

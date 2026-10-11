@@ -99,7 +99,6 @@ export default function FinancePage({
               {/* Seukuran Yang Disisihkan, menutup ruang kosong di kolom kiri. */}
               <AgendaKasSection
                 accounts={state.accounts}
-                posItems={state.posItems}
                 agendas={state.agendas}
                 archivedAgendas={state.archivedAgendas}
                 filter={state.agendaFilter}
@@ -107,10 +106,11 @@ export default function FinancePage({
                 onFilterChange={state.setAgendaFilter}
                 onPageChange={state.setAgendaPage}
                 onSkip={state.skipAgenda}
-                onPostpone={state.postponeAgenda}
-                onDelete={state.deleteAgenda}
+                onScheduleFlexible={state.scheduleFlexibleAgenda}
+                onStopCycle={state.cancelAgenda}
                 onFinish={state.finishAgenda}
                 onCreate={state.createAgenda}
+                onUpdate={state.updateAgenda}
               />
             </div>
             <div className="lg:col-span-5 flex flex-col gap-6">

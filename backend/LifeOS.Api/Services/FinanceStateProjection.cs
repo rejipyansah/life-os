@@ -81,6 +81,7 @@ public class FinanceStateProjection
     public List<AccountStateProjection> Accounts { get; set; } = [];
     public List<SetAsideProjection> SetAsides { get; set; } = [];
     public List<UpcomingEventProjection> UpcomingEvents { get; set; } = [];
+    public List<UpcomingEventProjection> ArchivedEvents { get; set; } = [];
     public List<UpcomingEventProjection> DueEvents { get; set; } = [];
     public List<TransactionProjection> RecentTransactions { get; set; } = [];
 }

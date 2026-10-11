@@ -286,6 +286,11 @@ public class ApplicationDbContext : IdentityDbContext
                 .HasForeignKey(ue => ue.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            e.HasOne(ue => ue.DefaultSourceAccount)
+                .WithMany()
+                .HasForeignKey(ue => ue.DefaultSourceAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             e.HasOne(ue => ue.RealizedTransaction)
                 .WithMany()
                 .HasForeignKey(ue => ue.RealizedTransactionId)
@@ -293,6 +298,7 @@ public class ApplicationDbContext : IdentityDbContext
 
             e.HasIndex(ue => ue.ScopeId);
             e.HasIndex(ue => ue.AccountId);
+            e.HasIndex(ue => ue.DefaultSourceAccountId);
             e.HasIndex(ue => new { ue.ScopeId, ue.Status });
             e.HasIndex(ue => ue.RealizedTransactionId);
         });

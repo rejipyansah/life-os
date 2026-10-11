@@ -286,6 +286,10 @@ export interface UpcomingEventProjection {
   accountId: string | null;
   /** LEGACY ONLY. */
   accountName: string | null;
+  defaultSourceAccountId?: string | null;
+  defaultSourceAccountName?: string | null;
+  realizedSourceAccountId?: string | null;
+  realizedSourceAccountName?: string | null;
   title: string;
   amount: number;
   direction: UpcomingEventDirection;
@@ -299,6 +303,8 @@ export interface UpcomingEventProjection {
   statusReason: string | null;
   isDue: boolean;
   isOverdue: boolean;
+  commitmentStartDate?: string | null;
+  isCommitmentActive?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -309,6 +315,7 @@ export interface CreateUpcomingEventCommand {
    * Akun hanya dipilih saat realizasi.
    */
   accountId?: string | null;
+  defaultSourceAccountId?: string | null;
   title: string;
   amount: number;
   direction: UpcomingEventDirection;
@@ -325,6 +332,7 @@ export interface UpdateUpcomingEventCommand {
   direction?: UpcomingEventDirection;
   categoryName?: string;
   note?: string;
+  defaultSourceAccountId?: string | null;
   dueDate?: string | null;
   clearDueDate?: boolean;
   scheduleKind?: UpcomingEventScheduleKind;
@@ -397,6 +405,7 @@ export interface FinanceStateProjection {
   accounts: AccountStateProjection[];
   setAsides: SetAsideProjection[];
   upcomingEvents: UpcomingEventProjection[];
+  archivedEvents?: UpcomingEventProjection[];
   dueEvents: UpcomingEventProjection[];
   recentTransactions: TransactionProjection[];
 }

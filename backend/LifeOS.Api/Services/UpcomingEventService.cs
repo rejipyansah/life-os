@@ -21,6 +21,8 @@ namespace LifeOS.Api.Services;
 /// </summary>
 public class UpcomingEventService
 {
+    private const decimal MaxAgendaAmount = 9_007_199_254_740_991m;
+
     private readonly ApplicationDbContext _db;
     private readonly BalanceCalculator _balances;
     private readonly SetAsideService _setAsides;
@@ -43,6 +45,8 @@ public class UpcomingEventService
 
         if (command.Amount <= 0)
             throw new ValidationException("Agenda amount must be positive.");
+        if (command.Amount > MaxAgendaAmount)
+            throw new ValidationException($"Agenda amount cannot exceed {MaxAgendaAmount:N0}.");
 
         if (!Enum.IsDefined(command.Direction))
             throw new ValidationException($"Invalid direction: {command.Direction}");
@@ -52,14 +56,19 @@ public class UpcomingEventService
             throw new ValidationException($"Invalid recurrence: {command.Recurrence}");
 
         ValidateSchedule(command.ScheduleKind, command.DueDate);
+        ValidateRecurrence(command.ScheduleKind, command.Recurrence);
+        ValidateNotPast(command.ScheduleKind, command.DueDate);
+
+        if (command.DefaultSourceAccountId.HasValue)
+            await RequireAccountAsync(command.DefaultSourceAccountId.Value, command.ScopeId, requireActive: true, ct);
 
         var now = DateTime.UtcNow;
         var agenda = new UpcomingEvent
         {
             ScopeId = command.ScopeId,
-            // AccountId tidak ditulis — Rencana tidak terikat Sumber Dana.
-            // Akun hanya dipilih saat realizasi.
+            // AccountId legacy tidak ditulis; default source hanya preferensi realisasi.
             AccountId = null,
+            DefaultSourceAccountId = command.DefaultSourceAccountId,
             Title = title,
             Amount = command.Amount,
             Direction = command.Direction,
@@ -94,6 +103,8 @@ public class UpcomingEventService
         {
             if (command.Amount.Value <= 0)
                 throw new ValidationException("Agenda amount must be positive.");
+            if (command.Amount.Value > MaxAgendaAmount)
+                throw new ValidationException($"Agenda amount cannot exceed {MaxAgendaAmount:N0}.");
             agenda.Amount = command.Amount.Value;
         }
 
@@ -109,6 +120,12 @@ public class UpcomingEventService
 
         if (command.Note is not null)
             agenda.Note = NormalizeOptional(command.Note, 512);
+
+        if (command.DefaultSourceAccountId.HasValue)
+        {
+            await RequireAccountAsync(command.DefaultSourceAccountId.Value, command.ScopeId, requireActive: true, ct);
+            agenda.DefaultSourceAccountId = command.DefaultSourceAccountId.Value;
+        }
 
         if (command.ScheduleKind.HasValue)
         {
@@ -134,6 +151,9 @@ public class UpcomingEventService
         }
 
         ValidateSchedule(agenda.ScheduleKind, agenda.DueDate);
+        ValidateRecurrence(agenda.ScheduleKind, agenda.Recurrence);
+        if (command.DueDate.HasValue)
+            ValidateNotPast(agenda.ScheduleKind, agenda.DueDate);
         if (agenda.ScheduleKind == UpcomingEventScheduleKind.Flexible)
             agenda.DueDate = null;
 
@@ -144,10 +164,7 @@ public class UpcomingEventService
 
     // ───────────────────────── Lifecycle ─────────────────────────
 
-    /// <summary>
-    /// Menunda agenda ke tanggal berikutnya tanpa mengubah data lainnya.
-    /// Tanpa NewDueDate, tanggalnya digeser satu hari.
-    /// </summary>
+    /// <summary>Menunda agenda ke tanggal berikutnya tanpa mengubah data lainnya.</summary>
     public Task<UpcomingEvent> PostponeAsync(Guid eventId, PostponeUpcomingEventCommand command, CancellationToken ct = default)
         => SerializableCommandRunner.RunAsync(_db, token => PostponeInternalAsync(eventId, command, token), ct);
 
@@ -160,8 +177,10 @@ public class UpcomingEventService
         if (agenda.ScheduleKind == UpcomingEventScheduleKind.Flexible && !command.NewDueDate.HasValue)
             throw new ValidationException("A flexible agenda has no date to postpone. Provide a new due date.");
 
-        var newDate = command.NewDueDate
-            ?? (agenda.DueDate ?? BusinessDate.TodayWib).AddDays(1);
+        var newDate = command.NewDueDate ?? (agenda.DueDate ?? BusinessDate.TodayWib).AddDays(1);
+
+        if (agenda.ScheduleKind == UpcomingEventScheduleKind.Flexible && newDate < BusinessDate.TodayWib)
+            throw new ValidationException("A flexible agenda must be postponed to today or a future date.");
 
         if (agenda.DueDate.HasValue && newDate < agenda.DueDate.Value)
             throw new ValidationException("Postponing must move the due date forward.");
@@ -175,7 +194,7 @@ public class UpcomingEventService
         return agenda;
     }
 
-    /// <summary>Menandai agenda dilewati. Tidak ada pergerakan uang.</summary>
+    /// <summary>Lewati kejadian siklus ini dan jadwalkan kejadian siklus berikutnya.</summary>
     public Task<UpcomingEvent> SkipAsync(Guid eventId, SettleUpcomingEventCommand command, CancellationToken ct = default)
         => SettleAsync(eventId, command, UpcomingEventStatus.Skipped, ct);
 
@@ -194,6 +213,9 @@ public class UpcomingEventService
             agenda.Status = status;
             agenda.StatusReason = NormalizeOptional(command.Reason, 512);
             agenda.UpdatedAt = DateTime.UtcNow;
+
+            if (status == UpcomingEventStatus.Skipped)
+                AddNextOccurrence(agenda);
 
             await _db.SaveChangesAsync(token);
             return agenda;
@@ -310,11 +332,17 @@ public class UpcomingEventService
         agenda.RealizedTransactionId = transaction.Id;
         agenda.UpdatedAt = DateTime.UtcNow;
 
+        AddNextOccurrence(agenda);
+
         await _db.SaveChangesAsync(ct);
 
         return new RealizeUpcomingEventResult
         {
-            Event = Project(agenda, account.Name, BusinessDate.TodayWib),
+            Event = Project(agenda, null,
+                agenda.DefaultSourceAccountId == account.Id ? account.Name : null,
+                account.Id,
+                account.Name,
+                BusinessDate.TodayWib),
             TransactionId = transaction.Id
         };
     }
@@ -328,19 +356,44 @@ public class UpcomingEventService
             .ToListAsync(ct);
 
         // Legacy account names — hanya untuk kompatibilitas data lama, bukan perhitungan.
-        var accountIds = all.Where(ue => ue.AccountId.HasValue).Select(ue => ue.AccountId!.Value).Distinct().ToList();
+        var accountIds = all.SelectMany(ue => new[] { ue.AccountId, ue.DefaultSourceAccountId })
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
         var accountNames = accountIds.Count == 0
             ? new Dictionary<Guid, string>()
             : await _db.Accounts
                 .Where(a => accountIds.Contains(a.Id))
-                .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
+            .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
+
+        var realizedTransactionIds = all
+            .Where(ue => ue.RealizedTransactionId.HasValue)
+            .Select(ue => ue.RealizedTransactionId!.Value)
+            .Distinct()
+            .ToList();
+        var realizedSources = realizedTransactionIds.Count == 0
+            ? []
+            : await _db.TransactionEntries
+                .Where(te => realizedTransactionIds.Contains(te.TransactionId))
+                .Select(te => new { te.TransactionId, te.AccountId, AccountName = te.Account.Name })
+                .ToListAsync(ct);
+        var realizedSourceByTransaction = realizedSources
+            .GroupBy(source => source.TransactionId)
+            .ToDictionary(group => group.Key, group => group.First());
 
         var today = BusinessDate.TodayWib;
         return all
             .OrderBy(ue => ue.Status == UpcomingEventStatus.Scheduled ? 0 : 1)
             .ThenBy(ue => ue.DueDate ?? DateOnly.MaxValue)
             .ThenByDescending(ue => ue.CreatedAt)
-            .Select(ue => Project(ue, ue.AccountId is null ? null : accountNames.GetValueOrDefault(ue.AccountId.Value), today))
+            .Select(ue => Project(ue,
+                ue.AccountId is null ? null : accountNames.GetValueOrDefault(ue.AccountId.Value),
+                ue.DefaultSourceAccountId is null ? null : accountNames.GetValueOrDefault(ue.DefaultSourceAccountId.Value),
+                ue.RealizedTransactionId is { } transactionId && realizedSourceByTransaction.TryGetValue(transactionId, out var source)
+                    ? source.AccountId
+                    : null,
+                ue.RealizedTransactionId is { } realizedId && realizedSourceByTransaction.TryGetValue(realizedId, out var realizedSource)
+                    ? realizedSource.AccountName
+                    : null,
+                today))
             .ToList();
     }
 
@@ -355,20 +408,50 @@ public class UpcomingEventService
             ? null
             : await _db.Accounts.Where(a => a.Id == agenda.AccountId).Select(a => a.Name).FirstOrDefaultAsync(ct);
 
-        return Project(agenda, accountName, BusinessDate.TodayWib);
+        var defaultSourceAccountName = agenda.DefaultSourceAccountId is null
+            ? null
+            : await _db.Accounts.Where(a => a.Id == agenda.DefaultSourceAccountId).Select(a => a.Name).FirstOrDefaultAsync(ct);
+
+        Guid? realizedSourceAccountId = null;
+        string? realizedSourceAccountName = null;
+        if (agenda.RealizedTransactionId.HasValue)
+        {
+            var realizedSource = await _db.TransactionEntries
+                .Where(te => te.TransactionId == agenda.RealizedTransactionId.Value)
+                .Select(te => new { te.AccountId, AccountName = te.Account.Name })
+                .FirstOrDefaultAsync(ct);
+            realizedSourceAccountId = realizedSource?.AccountId;
+            realizedSourceAccountName = realizedSource?.AccountName;
+        }
+
+        return Project(agenda, accountName, defaultSourceAccountName,
+            realizedSourceAccountId, realizedSourceAccountName, BusinessDate.TodayWib);
     }
 
-    internal static UpcomingEventProjection Project(UpcomingEvent agenda, string? accountName, DateOnly today)
+    internal static UpcomingEventProjection Project(
+        UpcomingEvent agenda,
+        string? accountName,
+        string? defaultSourceAccountName,
+        Guid? realizedSourceAccountId,
+        string? realizedSourceAccountName,
+        DateOnly today)
     {
         var isScheduled = agenda.Status == UpcomingEventStatus.Scheduled;
         var isDue = isScheduled && agenda.DueDate.HasValue && agenda.DueDate.Value <= today;
+        var commitmentStartDate = agenda.ScheduleKind == UpcomingEventScheduleKind.Scheduled && agenda.DueDate.HasValue
+            ? GetCommitmentStartDate(agenda.DueDate.Value, agenda.Recurrence, agenda.CreatedAt)
+            : (DateOnly?)null;
 
         return new UpcomingEventProjection
         {
             Id = agenda.Id,
-            // LEGACY ONLY — Rencana baru tidak pernah mengisi akun.
+            // AccountId legacy; DefaultSourceAccountId is a non-binding preference.
             AccountId = agenda.AccountId,
             AccountName = accountName,
+            DefaultSourceAccountId = agenda.DefaultSourceAccountId,
+            DefaultSourceAccountName = defaultSourceAccountName,
+            RealizedSourceAccountId = realizedSourceAccountId,
+            RealizedSourceAccountName = realizedSourceAccountName,
             Title = agenda.Title,
             Amount = agenda.Amount,
             Direction = agenda.Direction,
@@ -382,10 +465,26 @@ public class UpcomingEventService
             StatusReason = agenda.StatusReason,
             IsDue = isDue,
             IsOverdue = isScheduled && agenda.DueDate.HasValue && agenda.DueDate.Value < today,
+            CommitmentStartDate = commitmentStartDate,
+            IsCommitmentActive = isScheduled
+                && agenda.Direction == UpcomingEventDirection.Expense
+                && commitmentStartDate.HasValue
+                && commitmentStartDate.Value <= today,
             CreatedAt = agenda.CreatedAt,
             UpdatedAt = agenda.UpdatedAt
         };
     }
+
+    public static DateOnly GetCommitmentStartDate(
+        DateOnly dueDate, UpcomingEventRecurrence recurrence, DateTime createdAtUtc)
+        => recurrence switch
+        {
+            UpcomingEventRecurrence.Weekly => dueDate.AddDays(-(((int)dueDate.DayOfWeek + 6) % 7)),
+            UpcomingEventRecurrence.Monthly => new DateOnly(dueDate.Year, dueDate.Month, 1),
+            UpcomingEventRecurrence.Quarterly => new DateOnly(dueDate.Year, ((dueDate.Month - 1) / 3 * 3) + 1, 1),
+            UpcomingEventRecurrence.Annual => new DateOnly(dueDate.Year, 1, 1),
+            _ => DateOnly.FromDateTime(createdAtUtc.AddHours(7))
+        };
 
     // ───────────────────────── Helpers ─────────────────────────
 
@@ -410,6 +509,67 @@ public class UpcomingEventService
     {
         if (scheduleKind == UpcomingEventScheduleKind.Scheduled && !dueDate.HasValue)
             throw new ValidationException("A scheduled agenda requires a due date.");
+    }
+
+    private static void ValidateNotPast(UpcomingEventScheduleKind scheduleKind, DateOnly? dueDate)
+    {
+        if (scheduleKind == UpcomingEventScheduleKind.Scheduled
+            && dueDate.HasValue
+            && dueDate.Value < BusinessDate.TodayWib)
+        {
+            throw new ValidationException("A scheduled agenda date cannot be before today.");
+        }
+    }
+
+    private static void ValidateRecurrence(
+        UpcomingEventScheduleKind scheduleKind,
+        UpcomingEventRecurrence recurrence)
+    {
+        if (recurrence != UpcomingEventRecurrence.None
+            && scheduleKind != UpcomingEventScheduleKind.Scheduled)
+        {
+            throw new ValidationException("A recurring agenda must have a scheduled due date.");
+        }
+    }
+
+    private void AddNextOccurrence(UpcomingEvent agenda)
+    {
+        if (agenda.Recurrence == UpcomingEventRecurrence.None
+            || agenda.ScheduleKind != UpcomingEventScheduleKind.Scheduled
+            || !agenda.DueDate.HasValue)
+        {
+            return;
+        }
+
+        var nextDueDate = agenda.Recurrence switch
+        {
+            UpcomingEventRecurrence.Weekly => agenda.DueDate.Value.AddDays(7),
+            UpcomingEventRecurrence.Monthly => agenda.DueDate.Value.AddMonths(1),
+            UpcomingEventRecurrence.Quarterly => agenda.DueDate.Value.AddMonths(3),
+            UpcomingEventRecurrence.Annual => agenda.DueDate.Value.AddYears(1),
+            _ => (DateOnly?)null
+        };
+
+        if (!nextDueDate.HasValue) return;
+
+        var now = DateTime.UtcNow;
+        _db.UpcomingEvents.Add(new UpcomingEvent
+        {
+            ScopeId = agenda.ScopeId,
+            AccountId = null,
+            DefaultSourceAccountId = agenda.DefaultSourceAccountId,
+            Title = agenda.Title,
+            Amount = agenda.Amount,
+            Direction = agenda.Direction,
+            CategoryName = agenda.CategoryName,
+            Note = agenda.Note,
+            DueDate = nextDueDate,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = agenda.Recurrence,
+            Status = UpcomingEventStatus.Scheduled,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
     }
 
     private static string NormalizeRequired(string value, int maxLength, string error)

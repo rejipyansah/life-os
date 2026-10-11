@@ -238,7 +238,9 @@ public class SetAsideServiceTests : IDisposable
             Title = "Tagihan terjadwal",
             Amount = 500_000m,
             Direction = UpcomingEventDirection.Expense,
-            Status = UpcomingEventStatus.Scheduled
+            Status = UpcomingEventStatus.Scheduled,
+            DueDate = BusinessDate.TodayWib,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
         await _db.SaveChangesAsync();
 

@@ -95,10 +95,11 @@ function PayRealizeModal({
   posItems: PosItem[];
   totalAmount: number;
   onClose: () => void;
-  onConfirm: (accountId: string, setAsideId?: string) => void;
+  onConfirm: (accountId: string, setAsideId?: string) => Promise<boolean>;
 }) {
   const [accountId, setAccountId] = useState('');
   const [setAsideId, setSetAsideId] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const activeAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
   const activePos = useMemo(() => posItems.filter((p) => !p.archived), [posItems]);
@@ -128,8 +129,16 @@ function PayRealizeModal({
           </button>
           <button
             type="button"
-            disabled={!accountId}
-            onClick={() => onConfirm(accountId, setAsideId || undefined)}
+            disabled={!accountId || submitting}
+            onClick={async () => {
+              setSubmitting(true);
+              try {
+                const succeeded = await onConfirm(accountId, setAsideId || undefined);
+                if (succeeded) onClose();
+              } finally {
+                setSubmitting(false);
+              }
+            }}
             className={`${btnPrimary} disabled:opacity-40`}
           >
             <Icon name="check" className="text-base" />
@@ -222,8 +231,8 @@ export function JatuhTempoCard({
   billsDue: BillDue[];
   accounts: Account[];
   posItems: PosItem[];
-  onPayBill: (id: string, accountId: string, setAsideId?: string) => void;
-  onPayAll: (accountId: string, setAsideId?: string) => void;
+  onPayBill: (id: string, accountId: string, setAsideId?: string) => Promise<boolean>;
+  onPayAll: (accountId: string, setAsideId?: string) => Promise<boolean>;
   onPostponeBill: (id: string) => void;
 }) {
   const [payModal, setPayModal] = useState<PayModalState>(null);
@@ -248,13 +257,19 @@ export function JatuhTempoCard({
                 </>
               ) : (
                 <>
-                  <span className="text-lo-text-ink font-semibold">
-                    {derived.unpaidBillsCount} Tagihan Aktif
-                  </span>{' '}
-                  · Total{' '}
-                  <span className="font-semibold text-lo-warning tabular-nums">
-                    {formatCurrencyRaw(derived.billsDueTotal)}
-                  </span>
+                  {derived.unpaidBillsCount > 0 ? (
+                    <>
+                      <span className="text-lo-text-ink font-semibold">
+                        {derived.unpaidBillsCount} Tagihan Aktif
+                      </span>{' '}
+                      · Total{' '}
+                      <span className="font-semibold text-lo-warning tabular-nums">
+                        {formatCurrencyRaw(derived.billsDueTotal)}
+                      </span>
+                    </>
+                  ) : (
+                    'Tidak ada tagihan jatuh tempo hari ini.'
+                  )}
                 </>
               )}
             </p>
@@ -274,7 +289,7 @@ export function JatuhTempoCard({
             ) : (
               <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-lo-accent-wash text-lo-secondary text-xs font-semibold">
                 <Icon name="done_all" className="text-[16px]" />
-                <span>Semua Tagihan Lunas</span>
+                <span>{derived.allBillsPaid ? 'Semua Tagihan Lunas' : 'Tidak ada tagihan jatuh tempo'}</span>
               </span>
             )}
           </div>
@@ -319,9 +334,9 @@ export function JatuhTempoCard({
         totalAmount={derived.billsDueTotal}
         onClose={() => setPayModal(null)}
         onConfirm={(accountId, setAsideId) => {
-          if (!payModal) return;
-          if (payModal.kind === 'single') onPayBill(payModal.bill.id, accountId, setAsideId);
-          else onPayAll(accountId, setAsideId);
+          if (!payModal) return Promise.resolve(false);
+          if (payModal.kind === 'single') return onPayBill(payModal.bill.id, accountId, setAsideId);
+          return onPayAll(accountId, setAsideId);
         }}
       />
     </div>
@@ -521,8 +536,8 @@ export default function UangBebasSection({
   billsDue: BillDue[];
   accounts: Account[];
   posItems: PosItem[];
-  onPayBill: (id: string, accountId: string, setAsideId?: string) => void;
-  onPayAll: (accountId: string, setAsideId?: string) => void;
+  onPayBill: (id: string, accountId: string, setAsideId?: string) => Promise<boolean>;
+  onPayAll: (accountId: string, setAsideId?: string) => Promise<boolean>;
   onPostponeBill: (id: string) => void;
 }) {
   const [formulaOpen, setFormulaOpen] = useState(false);

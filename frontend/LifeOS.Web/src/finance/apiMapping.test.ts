@@ -15,10 +15,25 @@ import {
   mapPosItem,
   mapTransaction,
   signedAmountFor,
+  transactionMatchesPeriod,
   toAccountType,
   toCreateSetAsideCommand,
   toPosCategory,
 } from './apiMapping';
+
+describe('transactionMatchesPeriod', () => {
+  it('matches current-day, rolling 7-day week and calendar month without including future dates', () => {
+    const today = '2026-10-11';
+    expect(transactionMatchesPeriod('2026-10-11', 'today', today)).toBe(true);
+    expect(transactionMatchesPeriod('2026-10-05', 'week', today)).toBe(true);
+    expect(transactionMatchesPeriod('2026-10-04', 'week', today)).toBe(false);
+    expect(transactionMatchesPeriod('2026-10-01', 'month', today)).toBe(true);
+    expect(transactionMatchesPeriod('2026-09-30', 'month', today)).toBe(false);
+    expect(transactionMatchesPeriod('2026-10-12', 'week', today)).toBe(false);
+    expect(transactionMatchesPeriod('invalid', 'all', today)).toBe(true);
+    expect(transactionMatchesPeriod('invalid', 'month', today)).toBe(false);
+  });
+});
 
 function account(overrides: Partial<AccountStateProjection> = {}): AccountStateProjection {
   return {
@@ -206,8 +221,16 @@ describe('mapFinanceState', () => {
       projection({
         upcomingEvents: [
           event({ id: 'live', status: 'Scheduled' }),
-          event({ id: 'done', status: 'Realized', dueDate: '2026-09-20' }),
-          event({ id: 'skipped', status: 'Skipped', dueDate: '2026-09-21' }),
+        ],
+        archivedEvents: [
+          event({
+            id: 'done', status: 'Realized', dueDate: '2026-09-20',
+            realizedSourceAccountId: 'acc-2', realizedSourceAccountName: 'BCA',
+          }),
+          event({
+            id: 'skipped', status: 'Skipped', dueDate: '2026-09-21',
+            defaultSourceAccountId: 'acc-1', defaultSourceAccountName: 'Mandiri',
+          }),
         ],
         dueEvents: [],
       })
@@ -217,6 +240,10 @@ describe('mapFinanceState', () => {
     expect(result.archivedAgendas.map((a) => a.id)).toEqual(['done', 'skipped']);
     expect(result.archivedAgendas.find((a) => a.id === 'done')?.status).toBe('Selesai');
     expect(result.archivedAgendas.find((a) => a.id === 'skipped')?.status).toBe('Dilewati');
+    expect(result.archivedAgendas.find((a) => a.id === 'done')?.sourceAccountLabel).toBe('BCA');
+    expect(result.archivedAgendas.find((a) => a.id === 'done')?.sourceAccountKind).toBe('actual');
+    expect(result.archivedAgendas.find((a) => a.id === 'skipped')?.sourceAccountLabel).toBe('Mandiri');
+    expect(result.archivedAgendas.find((a) => a.id === 'skipped')?.sourceAccountKind).toBe('default');
   });
 
   it('maps upcoming income events as income and leaves expense as expense', () => {
@@ -534,14 +561,25 @@ describe('mapTransaction', () => {
     const mapped = mapTransaction(transaction({ type: 'Reversal' }), 'Expense');
     expect(mapped.isReversal).toBe(true);
   });
+
+  it('keeps transfers distinct from income and expense flows', () => {
+    const mapped = mapTransaction(transaction({ type: 'Transfer' }), undefined);
+    expect(mapped.isTransfer).toBe(true);
+    expect(mapped.amount).toBe(250_000);
+  });
 });
 
 describe('mapArchivedAgenda', () => {
   it('renders a realized event with its archive status', () => {
     const mapped = mapArchivedAgenda(
-      event({ status: 'Realized', dueDate: '2026-09-20' })
+      event({
+        status: 'Realized', dueDate: '2026-09-20',
+        realizedSourceAccountId: 'acc-2', realizedSourceAccountName: 'BCA',
+      })
     );
     expect(mapped.status).toBe('Selesai');
     expect(mapped.date).toBe('20 Sep 2026');
+    expect(mapped.sourceAccountLabel).toBe('BCA');
+    expect(mapped.sourceAccountKind).toBe('actual');
   });
 });

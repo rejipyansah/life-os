@@ -29,7 +29,7 @@ Endpoint autentikasi lengkap memakai konfigurasi ASP.NET Core Identity di `Progr
 
 | Method | Path | Fungsi |
 |---|---|---|
-| `GET` | `/api/finance/state` | Read model Finance terpadu untuk akun, alokasi, agenda, kewajiban, transaksi terbaru dan angka turunan. |
+| `GET` | `/api/finance/state` | Read model Finance terpadu untuk akun, alokasi, agenda, kewajiban, maksimal 20 transaksi terbaru dan angka turunan. |
 
 ## Accounts
 
@@ -44,7 +44,7 @@ Endpoint autentikasi lengkap memakai konfigurasi ASP.NET Core Identity di `Progr
 
 | Method | Path | Fungsi |
 |---|---|---|
-| `GET` | `/api/finance/transactions` | Daftar transaksi pada scope aktif. |
+| `GET` | `/api/finance/transactions` | Seluruh transaksi pada scope aktif, urut tanggal kejadian dan waktu pencatatan terbaru lebih dahulu. Dipakai untuk riwayat lengkap; berbeda dari maksimal 20 transaksi pada finance state. |
 | `GET` | `/api/finance/transactions/{id}` | Detail transaksi pada scope aktif. |
 | `POST` | `/api/finance/transactions` | Membuat Income, Expense, Transfer, Refund atau transaksi domain lain yang didukung command. |
 | `POST` | `/api/finance/transactions/{id}/reverse` | Membuat transaksi reversal append-only untuk transaksi asli. |
@@ -68,14 +68,20 @@ Endpoint autentikasi lengkap memakai konfigurasi ASP.NET Core Identity di `Progr
 | Method | Path | Fungsi |
 |---|---|---|
 | `GET` | `/api/finance/upcoming-events` | Daftar agenda pada scope aktif. |
-| `POST` | `/api/finance/upcoming-events` | Membuat agenda. |
+| `POST` | `/api/finance/upcoming-events` | Membuat agenda; `defaultSourceAccountId` menyimpan sumber dana rekomendasi yang dapat diganti saat realisasi. |
 | `GET` | `/api/finance/upcoming-events/{id}` | Detail agenda pada scope aktif. |
 | `PATCH` | `/api/finance/upcoming-events/{id}` | Memperbarui agenda. |
-| `POST` | `/api/finance/upcoming-events/{id}/postpone` | Menunda agenda. |
+| `POST` | `/api/finance/upcoming-events/{id}/postpone` | Menunda agenda terjadwal atau memberi tanggal pada agenda fleksibel; digunakan sebagai aksi cepat di Jatuh Tempo. |
 | `POST` | `/api/finance/upcoming-events/{id}/skip` | Menandai agenda dilewati. |
 | `POST` | `/api/finance/upcoming-events/{id}/cancel` | Membatalkan agenda. |
-| `POST` | `/api/finance/upcoming-events/{id}/realize` | Merealisasikan agenda menjadi transaksi; sumber dana dipilih saat realisasi. |
+| `POST` | `/api/finance/upcoming-events/{id}/realize` | Merealisasikan agenda menjadi transaksi; sumber dana default dapat diganti saat realisasi. |
 | `DELETE` | `/api/finance/upcoming-events/{id}` | Menghapus agenda yang masih dapat dihapus menurut lifecycle domain. |
+
+Formulir UI mewajibkan pilihan Sumber Dana Default. Field API tetap nullable untuk kompatibilitas dan pembuatan agenda melalui input natural-language yang tidak menyebut akun. Endpoint pembuatan dan pembaruan menolak tanggal terjadwal yang lebih awal dari tanggal bisnis hari ini; agenda fleksibel tidak memiliki tanggal sampai dijadwalkan.
+
+Aksi **Hentikan Siklus** di UI memanggil endpoint cancel sehingga kejadian disimpan di arsip sebagai `Cancelled`. DELETE tetap berarti penghapusan permanen.
+
+Proyeksi agenda menyertakan `commitmentStartDate` dan `isCommitmentActive`. Keduanya terpisah dari `isDue`/`isOverdue`: status jatuh tempo mengikuti tanggal kejadian, sedangkan komitmen Dana Bebas mengikuti awal periode kalender siklus. Agenda Satu Kali menggunakan tanggal pembuatan agenda sebagai awal komitmen.
 
 ## Interpretasi input natural language
 

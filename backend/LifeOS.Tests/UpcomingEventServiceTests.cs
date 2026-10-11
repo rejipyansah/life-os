@@ -70,13 +70,99 @@ public class UpcomingEventServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_DefaultSourceAccountIsARealizationHint()
+    {
+        var account = await CreateAccountAsync("Mandiri");
+        var agenda = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Internet",
+            Amount = 100_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            DefaultSourceAccountId = account.Id
+        });
+
+        var projected = await _sut.GetByIdAsync(agenda.Id, _scopeId);
+
+        Assert.Equal(account.Id, projected!.DefaultSourceAccountId);
+        Assert.Equal(account.Name, projected.DefaultSourceAccountName);
+        Assert.Null(projected.AccountId);
+    }
+
+    [Fact]
+    public async Task Realize_ArchiveShowsActualSourceSeparatelyFromDefault()
+    {
+        var defaultAccount = await CreateAccountAsync("Mandiri");
+        var actualAccount = await CreateAccountAsync("BCA");
+        var agenda = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Gaji",
+            Amount = 500_000m,
+            Direction = UpcomingEventDirection.Income,
+            DueDate = BusinessDate.TodayWib,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            DefaultSourceAccountId = defaultAccount.Id
+        });
+
+        await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = actualAccount.Id
+        });
+
+        var realized = Assert.Single(await _sut.GetAsync(_scopeId), item => item.Id == agenda.Id);
+        Assert.Equal(defaultAccount.Name, realized.DefaultSourceAccountName);
+        Assert.Equal(actualAccount.Id, realized.RealizedSourceAccountId);
+        Assert.Equal(actualAccount.Name, realized.RealizedSourceAccountName);
+    }
+
+    [Fact]
+    public async Task SkippedAndCancelledArchivesRetainDefaultSourceAccount()
+    {
+        var account = await CreateAccountAsync("Mandiri");
+        var skipped = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Tagihan bulanan",
+            Amount = 50_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly,
+            DefaultSourceAccountId = account.Id
+        });
+        var cancelled = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Pembayaran dihentikan",
+            Amount = 25_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib.AddDays(2),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            DefaultSourceAccountId = account.Id
+        });
+
+        await _sut.SkipAsync(skipped.Id, new SettleUpcomingEventCommand { ScopeId = _scopeId });
+        await _sut.CancelAsync(cancelled.Id, new SettleUpcomingEventCommand { ScopeId = _scopeId });
+
+        var archive = await _sut.GetAsync(_scopeId);
+        Assert.Equal(account.Name, archive.Single(item => item.Id == skipped.Id).DefaultSourceAccountName);
+        Assert.Equal(account.Name, archive.Single(item => item.Id == cancelled.Id).DefaultSourceAccountName);
+    }
+
+    [Fact]
     public async Task PassingTheDueDate_DoesNotTurnEventIntoTransaction()
     {
         var account = await CreateAccountAsync("Mandiri");
         await SeedBalanceAsync(account.Id, 2_000_000m);
 
         var agenda = await _sut.CreateAsync(NewExpense("Sewa", 1_200_000m, account.Id,
-            dueDate: DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-3)));
+            dueDate: BusinessDate.TodayWib));
+        agenda.DueDate = BusinessDate.TodayWib.AddDays(-3);
+        await _db.SaveChangesAsync();
 
         var projected = await _sut.GetByIdAsync(agenda.Id, _scopeId);
 
@@ -85,6 +171,23 @@ public class UpcomingEventServiceTests : IDisposable
         Assert.True(projected.IsOverdue);
         Assert.Equal(UpcomingEventStatus.Scheduled, projected.Status);
         Assert.Equal(2_000_000m, await _balances.GetActualBalanceAsync(account.Id));
+    }
+
+    [Theory]
+    [InlineData(2026, 10, 14, UpcomingEventRecurrence.Weekly, 2026, 10, 12)]
+    [InlineData(2026, 10, 25, UpcomingEventRecurrence.Monthly, 2026, 10, 1)]
+    [InlineData(2026, 11, 25, UpcomingEventRecurrence.Quarterly, 2026, 10, 1)]
+    [InlineData(2026, 10, 25, UpcomingEventRecurrence.Annual, 2026, 1, 1)]
+    [InlineData(2026, 10, 25, UpcomingEventRecurrence.None, 2026, 10, 11)]
+    public void CommitmentStartDate_UsesCalendarCycleScope(
+        int dueYear, int dueMonth, int dueDay, UpcomingEventRecurrence recurrence,
+        int expectedYear, int expectedMonth, int expectedDay)
+    {
+        var start = UpcomingEventService.GetCommitmentStartDate(
+            new DateOnly(dueYear, dueMonth, dueDay), recurrence,
+            new DateTime(2026, 10, 11, 3, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(new DateOnly(expectedYear, expectedMonth, expectedDay), start);
     }
 
     // ───────────────────────── 12–13: realizing creates a real transaction ─────────────────────────
@@ -114,6 +217,75 @@ public class UpcomingEventServiceTests : IDisposable
         Assert.Equal(5_500_000m, await _balances.GetActualBalanceAsync(account.Id));
         Assert.Equal(UpcomingEventStatus.Realized, result.Event.Status);
         Assert.Equal(result.TransactionId, result.Event.RealizedTransactionId);
+    }
+
+    [Fact]
+    public async Task Realize_RecurringExpense_CreatesNextCycleAndKeepsTransactionCategory()
+    {
+        var account = await CreateAccountAsync("Mandiri");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var agenda = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Internet",
+            Amount = 100_000m,
+            Direction = UpcomingEventDirection.Expense,
+            CategoryName = "Tagihan & Utilitas",
+            DueDate = new DateOnly(2099, 1, 31),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly
+        });
+
+        var result = await _sut.RealizeAsync(agenda.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = account.Id
+        });
+
+        var transaction = await _db.Transactions.SingleAsync(t => t.Id == result.TransactionId);
+        Assert.Equal("Tagihan & Utilitas", transaction.CategoryName);
+
+        var next = await _db.UpcomingEvents.SingleAsync(e => e.Id != agenda.Id);
+        Assert.Equal(new DateOnly(2099, 2, 28), next.DueDate);
+        Assert.Equal(UpcomingEventRecurrence.Monthly, next.Recurrence);
+        Assert.Equal(UpcomingEventStatus.Scheduled, next.Status);
+        Assert.Equal("Tagihan & Utilitas", next.CategoryName);
+    }
+
+    [Fact]
+    public async Task Skip_RecurringAgenda_CreatesNextCycle_ButCancelStopsCycle()
+    {
+        var skipped = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Tagihan mingguan",
+            Amount = 10_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Weekly
+        });
+
+        await _sut.SkipAsync(skipped.Id, new SettleUpcomingEventCommand { ScopeId = _scopeId });
+
+        var next = await _db.UpcomingEvents.SingleAsync(e => e.Id != skipped.Id);
+        Assert.Equal(BusinessDate.TodayWib.AddDays(7), next.DueDate);
+        Assert.Equal(UpcomingEventStatus.Scheduled, next.Status);
+
+        var cancelled = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Langganan tahunan",
+            Amount = 50_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib.AddDays(10),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Annual
+        });
+
+        await _sut.CancelAsync(cancelled.Id, new SettleUpcomingEventCommand { ScopeId = _scopeId });
+
+        Assert.Equal(3, await _db.UpcomingEvents.CountAsync());
     }
 
     [Fact]
@@ -258,7 +430,7 @@ public class UpcomingEventServiceTests : IDisposable
     [Fact]
     public async Task Postpone_MovesDueDateForward()
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var agenda = await _sut.CreateAsync(NewExpense("WiFi", 340_440m, await CreateAccountIdAsync("Mandiri"), today));
 
         await _sut.PostponeAsync(agenda.Id, new PostponeUpcomingEventCommand { ScopeId = _scopeId });
@@ -271,7 +443,7 @@ public class UpcomingEventServiceTests : IDisposable
     [Fact]
     public async Task Postpone_ExplicitDate_IsApplied()
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var agenda = await _sut.CreateAsync(NewExpense("WiFi", 340_440m, await CreateAccountIdAsync("Mandiri"), today));
         var nextWeek = today.AddDays(7);
 
@@ -283,7 +455,7 @@ public class UpcomingEventServiceTests : IDisposable
     [Fact]
     public async Task Postpone_Backwards_IsRejected()
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = BusinessDate.TodayWib;
         var agenda = await _sut.CreateAsync(NewExpense("WiFi", 340_440m, await CreateAccountIdAsync("Mandiri"), today));
 
         await Assert.ThrowsAsync<ValidationException>(() =>
@@ -456,12 +628,69 @@ public class UpcomingEventServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Flexible_RecurringAgenda_IsRejected()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.CreateAsync(new CreateUpcomingEventCommand
+            {
+                ScopeId = _scopeId,
+                Title = "Pemasukan fleksibel",
+                Amount = 200_000m,
+                Direction = UpcomingEventDirection.Income,
+                ScheduleKind = UpcomingEventScheduleKind.Flexible,
+                Recurrence = UpcomingEventRecurrence.Monthly
+            }));
+    }
+
+    [Fact]
     public async Task ZeroAmount_IsRejected()
     {
         var accountId = await CreateAccountIdAsync("Mandiri");
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             _sut.CreateAsync(NewExpense("WiFi", 0m, accountId)));
+    }
+
+    [Fact]
+    public async Task AmountAboveSafeIntegerLimit_IsRejected()
+    {
+        var accountId = await CreateAccountIdAsync("Mandiri");
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.CreateAsync(NewExpense("Nominal terlalu besar", 9_007_199_254_740_992m, accountId)));
+    }
+
+    [Fact]
+    public async Task Create_ScheduledPastDate_IsRejected()
+    {
+        var accountId = await CreateAccountIdAsync("Mandiri");
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _sut.CreateAsync(NewExpense("Tanggal lampau", 10_000m, accountId, BusinessDate.TodayWib.AddDays(-1))));
+    }
+
+    [Fact]
+    public async Task Postpone_FlexibleAgenda_WithNewDate_SchedulesIt()
+    {
+        var agenda = await _sut.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Pemasukan belum pasti",
+            Amount = 200_000m,
+            Direction = UpcomingEventDirection.Income,
+            ScheduleKind = UpcomingEventScheduleKind.Flexible
+        });
+
+        var plannedDate = BusinessDate.TodayWib.AddDays(4);
+        await _sut.PostponeAsync(agenda.Id, new PostponeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            NewDueDate = plannedDate
+        });
+
+        var updated = await _sut.GetByIdAsync(agenda.Id, _scopeId);
+        Assert.Equal(UpcomingEventScheduleKind.Scheduled, updated!.ScheduleKind);
+        Assert.Equal(plannedDate, updated.DueDate);
     }
 
     [Fact]
@@ -509,7 +738,7 @@ public class UpcomingEventServiceTests : IDisposable
             Amount = amount,
             Direction = UpcomingEventDirection.Expense,
             CategoryName = "Rutin",
-            DueDate = dueDate ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1),
+            DueDate = dueDate ?? BusinessDate.TodayWib.AddDays(1),
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         };
 
@@ -523,7 +752,7 @@ public class UpcomingEventServiceTests : IDisposable
             Amount = amount,
             Direction = UpcomingEventDirection.Income,
             CategoryName = "Pemasukan",
-            DueDate = dueDate ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1),
+            DueDate = dueDate ?? BusinessDate.TodayWib.AddDays(1),
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         };
 

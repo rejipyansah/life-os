@@ -99,6 +99,21 @@ function timePeriodFor(isoDate: string): TimePeriod {
   return 'month';
 }
 
+export function transactionMatchesPeriod(
+  occurredOn: string,
+  period: TimePeriod | 'all',
+  today = todayIso(),
+): boolean {
+  if (period === 'all') return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) return false;
+  if (period === 'today') return occurredOn === today;
+  if (period === 'month') return occurredOn.startsWith(today.slice(0, 7));
+  const date = Date.parse(`${occurredOn}T00:00:00Z`);
+  const todayTime = Date.parse(`${today}T00:00:00Z`);
+  const daysAgo = Math.floor((todayTime - date) / 86_400_000);
+  return daysAgo >= 0 && daysAgo < 7;
+}
+
 // ───────────────────────── enum maps ─────────────────────────
 
 export function toAccountType(
@@ -327,13 +342,17 @@ export function mapAgenda(event: UpcomingEventProjection): AgendaItem {
     isIncome,
     displayDate: formatDateDisplay(event.dueDate ?? ''),
     rawDate: event.dueDate ?? '',
-    // LEGACY ONLY — Rencana tidak terikat Sumber Dana; rencana baru tanpa akun.
+    // AccountId tetap legacy; pilihan sumber default disimpan terpisah.
     accountLabel: event.accountName ?? undefined,
+    defaultSourceAccountId: event.defaultSourceAccountId ?? undefined,
+    defaultSourceAccountLabel: event.defaultSourceAccountName ?? undefined,
     categoryLabel: event.categoryName ?? (isIncome ? 'Pemasukan Kas' : 'Lainnya'),
     repeat: toRepeatLabel(event.recurrence),
     type: event.scheduleKind === 'Scheduled' ? 'scheduled' : 'flexible',
     note: event.note ?? undefined,
     icon: isIncome ? 'payments' : 'receipt_long',
+    isDue: event.isDue,
+    isOverdue: event.isOverdue,
   };
 }
 
@@ -345,15 +364,22 @@ const ARCHIVE_STATUS: Record<UpcomingEventStatus, string> = {
 };
 
 export function mapArchivedAgenda(event: UpcomingEventProjection): ArchivedAgenda {
+  const isRealized = event.status === 'Realized';
+  const sourceAccountLabel = isRealized
+    ? event.realizedSourceAccountName ?? event.accountName ?? undefined
+    : event.defaultSourceAccountName ?? event.accountName ?? undefined;
   return {
     id: event.id,
     title: event.title,
     amount: event.amount,
+    isIncome: event.direction === 'Income',
     // Only realized/skipped/cancelled events reach the archive; the date shown is
     // the event's own schedule, formatted from real data.
     date: formatDateDisplay(event.dueDate ?? ''),
     // LEGACY ONLY.
     accountLabel: event.accountName ?? undefined,
+    sourceAccountLabel,
+    sourceAccountKind: isRealized ? 'actual' : 'default',
     status: ARCHIVE_STATUS[event.status],
   };
 }
@@ -418,6 +444,7 @@ export function mapTransaction(
     // Opsional. Alokasi Dana yang Disisihkan — independen dari Sumber Dana.
     setAsideLabel: tx.setAsideName ?? undefined,
     date: formatDateShort(tx.occurredOn),
+    occurredOn: tx.occurredOn,
     time: formatTime(tx.createdAt),
     dateGroup: formatDateDisplay(tx.occurredOn),
     timePeriod: timePeriodFor(tx.occurredOn),
@@ -427,6 +454,7 @@ export function mapTransaction(
     isVoided: tx.isReversed,
     voidReason: tx.reversalReason,
     isReversal: tx.type === 'Reversal',
+    isTransfer: tx.type === 'Transfer',
   };
 }
 
@@ -489,9 +517,8 @@ export function mapFinanceState(
   const scheduled = projection.upcomingEvents.filter(
     (e) => e.status === 'Scheduled'
   );
-  const archived = projection.upcomingEvents.filter(
-    (e) => e.status !== 'Scheduled'
-  );
+  const archived = projection.archivedEvents
+    ?? projection.upcomingEvents.filter((e) => e.status !== 'Scheduled');
   const dueBills = projection.dueEvents.filter(
     (e) => e.direction === 'Expense'
   );

@@ -1,12 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   formatCurrencyRaw,
   formatSignedCurrency,
+  mapTransaction,
+  transactionMatchesPeriod,
   type Account,
   type TimePeriod,
   type Transaction,
 } from '../../finance';
+import { getTransactions } from '../../api';
 import {
   cardBase,
   EmptyState,
@@ -52,10 +55,7 @@ export default function AktivitasTerkiniSection({
   const filtered = useMemo(() => {
     return transactions.filter((item) => {
       if (filter === 'all') return true;
-      if (filter === 'today') return item.timePeriod === 'today';
-      if (filter === 'week')
-        return item.timePeriod === 'today' || item.timePeriod === 'week';
-      return true;
+      return transactionMatchesPeriod(item.occurredOn, filter);
     });
   }, [transactions, filter]);
 
@@ -149,7 +149,6 @@ export default function AktivitasTerkiniSection({
 
       {modal?.kind === 'history' ? (
         <HistoryModal
-          transactions={transactions}
           accounts={accounts}
           onClose={() => setModal(null)}
           onVoid={(id) => {
@@ -189,7 +188,7 @@ function TxRow({
   let amountColor = isIncome ? 'text-lo-secondary font-semibold' : 'text-lo-text-ink font-semibold';
   let avatarBg = isIncome
     ? 'bg-lo-secondary-container/60 text-lo-secondary'
-    : 'bg-lo-surface-recessed text-lo-text-subtle';
+    : 'bg-lo-warning/10 text-lo-warning';
   let cardBg = compact ? 'hover:bg-lo-surface-cream/70' : 'bg-lo-surface/50 hover:bg-lo-surface-recessed/60';
   let titleStyle = `font-medium text-lo-text-ink ${compact ? 'text-xs sm:text-sm' : 'text-xs sm:text-sm'} truncate leading-snug`;
 
@@ -236,6 +235,11 @@ function TxRow({
           <span className="inline-block px-2 py-0.5 rounded-full bg-lo-surface-recessed text-lo-text-subtle text-[10px] font-medium">
             {tx.category}
           </span>
+          {!isVoided && !isReversal ? (
+            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${isIncome ? 'bg-lo-secondary/10 text-lo-secondary' : 'bg-lo-warning/10 text-lo-warning'}`}>
+              {tx.isTransfer ? 'Transfer' : isIncome ? 'Pemasukan' : 'Pengeluaran'}
+            </span>
+          ) : null}
           {isVoided ? (
             <span
               className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-lo-warning/10 text-lo-warning text-[10px] font-medium"
@@ -267,12 +271,10 @@ function TxRow({
 }
 
 function HistoryModal({
-  transactions,
   accounts,
   onClose,
   onVoid,
 }: {
-  transactions: Transaction[];
   accounts: Account[];
   onClose: () => void;
   onVoid: (id: string) => void;
@@ -280,12 +282,32 @@ function HistoryModal({
   const [query, setQuery] = useState('');
   const [flow, setFlow] = useState<'all' | 'out' | 'in'>('all');
   const [accountFilter, setAccountFilter] = useState('all');
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTransactions()
+      .then(({ items }) => {
+        if (cancelled) return;
+        const relatedTypes = new Map(items.map((item) => [item.id, item.type]));
+        setAllTransactions(items.map((item) => mapTransaction(item, relatedTypes.get(item.relatedTransactionId ?? ''))));
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'Riwayat gagal dimuat.');
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const filtered = useMemo(() => {
-    return transactions.filter((item) => {
+    return allTransactions.filter((item) => {
       let matchFlow = true;
-      if (flow === 'out') matchFlow = item.amount < 0;
-      else if (flow === 'in') matchFlow = item.amount > 0;
+      if (flow === 'out') matchFlow = item.amount < 0 && !item.isTransfer;
+      else if (flow === 'in') matchFlow = item.amount > 0 && !item.isTransfer;
 
       let matchAccount = true;
       if (accountFilter !== 'all') {
@@ -305,7 +327,7 @@ function HistoryModal({
 
       return matchFlow && matchAccount && matchQuery;
     });
-  }, [transactions, flow, accountFilter, query]);
+  }, [allTransactions, flow, accountFilter, query]);
 
   const groups = useMemo(() => {
     const map = new Map<string, Transaction[]>();
@@ -330,7 +352,7 @@ function HistoryModal({
           <div className="flex items-center gap-2 mr-auto">
             <span className="w-2 h-2 rounded-full bg-lo-secondary/80" />
             <span className="text-xs text-lo-text-subtle">
-              Menampilkan {filtered.length} dari {transactions.length} transaksi tersinkron
+              {loading ? 'Memuat riwayat…' : `Menampilkan ${filtered.length} dari ${allTransactions.length} transaksi`}
             </span>
           </div>
           <button
@@ -398,9 +420,9 @@ function HistoryModal({
               onChange={(e) => setAccountFilter(e.target.value)}
             >
               <option value="all">Semua Sumber Dana</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.name}>
-                  {a.name}
+              {[...new Set([...accounts.map((account) => account.name), ...allTransactions.map((transaction) => transaction.accountLabel).filter((name) => name !== '-')])].map((accountName) => (
+                <option key={accountName} value={accountName}>
+                  {accountName}
                 </option>
               ))}
             </select>
@@ -409,7 +431,9 @@ function HistoryModal({
       </div>
 
       <div className="mt-4 space-y-6 max-h-[50vh] overflow-y-auto pr-1">
-        {filtered.length === 0 ? (
+        {loading ? <p className="py-10 text-center text-xs text-lo-text-subtle">Memuat semua riwayat transaksi…</p> : null}
+        {!loading && loadError ? <div role="alert" className="py-8 text-center text-xs text-lo-error">{loadError}<button type="button" onClick={onClose} className="ml-2 underline">Tutup dan coba lagi</button></div> : null}
+        {!loading && !loadError && filtered.length === 0 ? (
           <div className="py-16 text-center">
             <div className="w-12 h-12 rounded-2xl bg-lo-surface-recessed flex items-center justify-center text-lo-text-subtle mx-auto mb-3">
               <Icon name="search_off" className="text-[24px]" />
@@ -421,7 +445,7 @@ function HistoryModal({
               Coba gunakan kata kunci pencarian atau sesuaikan filter sumber dana &amp; arah kas.
             </p>
           </div>
-        ) : (
+        ) : !loading && !loadError ? (
           groups.map(([groupName, items]) => (
             <div key={groupName} className="space-y-2">
               <div className="flex items-center gap-2 pt-1 pb-1">
@@ -446,11 +470,11 @@ function HistoryModal({
               </div>
             </div>
           ))
-        )}
-        <div className="pt-3 pb-1 text-center">
+        ) : null}
+          <div className="pt-3 pb-1 text-center">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-lo-surface-recessed/80 text-[11px] text-lo-text-subtle">
             <Icon name="history" className="text-[14px]" />
-            <span>Semua riwayat mutasi riil terindeks teratur</span>
+            <span>Riwayat diurutkan dari tanggal terbaru</span>
           </div>
         </div>
       </div>

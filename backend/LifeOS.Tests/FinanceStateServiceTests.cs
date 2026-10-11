@@ -229,7 +229,70 @@ public class FinanceStateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PostponedEvent_IsNoLongerADueObligation_ButStillCommitsFreeCash()
+    public async Task ArchivedAgendas_IncludeDefaultAndActualSourceAccounts()
+    {
+        var defaultAccount = await CreateAccountAsync("Mandiri");
+        var actualAccount = await CreateAccountAsync("BCA");
+        var income = await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Gaji",
+            Amount = 500_000m,
+            Direction = UpcomingEventDirection.Income,
+            DueDate = BusinessDate.TodayWib,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            DefaultSourceAccountId = defaultAccount.Id
+        });
+        var cancelled = await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Tagihan dibatalkan",
+            Amount = 100_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib.AddDays(4),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            DefaultSourceAccountId = defaultAccount.Id
+        });
+
+        await _events.RealizeAsync(income.Id, new RealizeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            AccountId = actualAccount.Id
+        });
+        await _events.CancelAsync(cancelled.Id, new SettleUpcomingEventCommand { ScopeId = _scopeId });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+        var realized = Assert.Single(state.ArchivedEvents, e => e.Id == income.Id);
+        var stopped = Assert.Single(state.ArchivedEvents, e => e.Id == cancelled.Id);
+        Assert.Equal(actualAccount.Name, realized.RealizedSourceAccountName);
+        Assert.Equal(defaultAccount.Name, realized.DefaultSourceAccountName);
+        Assert.Equal(UpcomingEventStatus.Cancelled, stopped.Status);
+        Assert.Equal(defaultAccount.Name, stopped.DefaultSourceAccountName);
+    }
+
+    [Fact]
+    public async Task ActiveAgendaProjection_ContainsChosenDefaultSourceAccount()
+    {
+        var account = await CreateAccountAsync("Bank Pilihan");
+        await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Bonus",
+            Amount = 100_000m,
+            Direction = UpcomingEventDirection.Income,
+            DueDate = BusinessDate.TodayWib.AddDays(3),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            DefaultSourceAccountId = account.Id
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+        var agenda = Assert.Single(state.UpcomingEvents);
+        Assert.Equal(account.Id, agenda.DefaultSourceAccountId);
+        Assert.Equal(account.Name, agenda.DefaultSourceAccountName);
+    }
+
+    [Fact]
+    public async Task PostponedOneTimeEvent_KeepsCommitmentFromCreation()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
@@ -253,14 +316,14 @@ public class FinanceStateServiceTests : IDisposable
         var state = await _sut.GetStateAsync(_scopeId);
         // Keluar dari Jatuh Tempo…
         Assert.Equal(0m, state.DueObligations);
-        // …tapi tetap direncanakan, jadi Uang Bebas masih terikat.
+        // Komitmen Satu Kali tetap terikat sejak rencana dibuat, meski tanggal digeser.
         Assert.Equal(340_440m, state.ScheduledExpenseCommitments);
         Assert.Equal(659_560m, state.FreeCash);
         Assert.Single(state.UpcomingEvents);
     }
 
     [Fact]
-    public async Task FutureEvent_ReducesFreeCash_AsPlannedCommitment()
+    public async Task FutureOneTimeExpense_ReducesFreeCashWhenPlanIsCreated()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
@@ -272,14 +335,14 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Sewa",
             Amount = 1_200_000m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10),
+            DueDate = BusinessDate.TodayWib.AddMonths(1).AddDays(10),
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
         var state = await _sut.GetStateAsync(_scopeId);
         // Belum jatuh tempo — tidak muncul di Jatuh Tempo…
         Assert.Equal(0m, state.DueObligations);
-        // …tapi tetap mengikat Uang Bebas sebagai rencana, mirip disisihkan.
+        // Komitmen Satu Kali berlaku sejak rencana dibuat, meski tanggal kejadian mendatang.
         Assert.Equal(1_200_000m, state.ScheduledExpenseCommitments);
         Assert.Equal(-200_000m, state.FreeCash);
         Assert.Single(state.UpcomingEvents);
@@ -287,7 +350,34 @@ public class FinanceStateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CyclingExpense_AlwaysReducesFreeCash_EvenBeforeDueDate()
+    public async Task MovingOneTimeExpenseDate_DoesNotReleaseCreationCommitment()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var agenda = await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Pembelian terencana",
+            Amount = 300_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib.AddDays(3),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.None
+        });
+
+        await _events.UpdateAsync(agenda.Id, new UpdateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            DueDate = BusinessDate.TodayWib.AddMonths(2)
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+        Assert.Equal(300_000m, state.ScheduledExpenseCommitments);
+        Assert.Equal(700_000m, state.FreeCash);
+    }
+
+    [Fact]
+    public async Task CyclingExpense_DoesNotReduceFreeCashBeforeTheNextCalendarCycle()
     {
         var account = await CreateAccountAsync("SeaBank");
         await SeedBalanceAsync(account.Id, 1_000_000m);
@@ -299,7 +389,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Internet Bulanan",
             Amount = 350_000m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10),
+            DueDate = BusinessDate.TodayWib.AddMonths(1).AddDays(10),
             ScheduleKind = UpcomingEventScheduleKind.Scheduled,
             Recurrence = UpcomingEventRecurrence.Monthly
         });
@@ -307,11 +397,67 @@ public class FinanceStateServiceTests : IDisposable
         var state = await _sut.GetStateAsync(_scopeId);
 
         Assert.Equal(0m, state.DueObligations);
-        Assert.Equal(350_000m, state.ScheduledExpenseCommitments);
-        // Mirip disisihkan: Uang Bebas turun, tapi belum jadi transaksi.
-        Assert.Equal(650_000m, state.FreeCash);
+        Assert.Equal(0m, state.ScheduledExpenseCommitments);
+        Assert.Equal(1_000_000m, state.FreeCash);
         Assert.DoesNotContain(state.RecentTransactions, t => t.Description == "Internet Bulanan");
         Assert.Single(state.RecentTransactions);
+    }
+
+    [Fact]
+    public async Task MonthlyExpense_ReducesFreeCashFromMonthStartBeforeDueDate()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var today = BusinessDate.TodayWib;
+        var monthEnd = new DateOnly(today.Year, today.Month,
+            DateTime.DaysInMonth(today.Year, today.Month));
+
+        await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Internet Bulanan",
+            Amount = 300_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = monthEnd,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+
+        Assert.Equal(300_000m, state.ScheduledExpenseCommitments);
+        Assert.Equal(700_000m, state.FreeCash);
+        Assert.Equal(monthEnd <= today ? 300_000m : 0m, state.DueObligations);
+    }
+
+    [Fact]
+    public async Task MovingMonthlyExpenseToNextPeriod_ReleasesCurrentFreeCashCommitment()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+        var today = BusinessDate.TodayWib;
+        var monthEnd = new DateOnly(today.Year, today.Month,
+            DateTime.DaysInMonth(today.Year, today.Month));
+        var agenda = await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Internet Bulanan",
+            Amount = 300_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = monthEnd,
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled,
+            Recurrence = UpcomingEventRecurrence.Monthly
+        });
+
+        await _events.PostponeAsync(agenda.Id, new PostponeUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            NewDueDate = new DateOnly(today.Year, today.Month, 1).AddMonths(1)
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+        Assert.Equal(0m, state.ScheduledExpenseCommitments);
+        Assert.Equal(1_000_000m, state.FreeCash);
     }
 
     [Fact]
@@ -327,7 +473,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Internet Bulanan",
             Amount = 350_000m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DueDate = BusinessDate.TodayWib,
             ScheduleKind = UpcomingEventScheduleKind.Scheduled,
             Recurrence = UpcomingEventRecurrence.Monthly
         });
@@ -354,7 +500,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Gaji Bulanan",
             Amount = 5_000_000m,
             Direction = UpcomingEventDirection.Income,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5),
+            DueDate = BusinessDate.TodayWib.AddDays(5),
             ScheduleKind = UpcomingEventScheduleKind.Scheduled,
             Recurrence = UpcomingEventRecurrence.Monthly
         });
@@ -378,7 +524,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Gaji",
             Amount = 5_000_000m,
             Direction = UpcomingEventDirection.Income,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DueDate = BusinessDate.TodayWib,
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
@@ -401,7 +547,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "Belum terjadi",
             Amount = 50_000m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1),
+            DueDate = BusinessDate.TodayWib.AddDays(1),
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
@@ -427,7 +573,7 @@ public class FinanceStateServiceTests : IDisposable
             Title = "WiFi Rumah",
             Amount = 340_440m,
             Direction = UpcomingEventDirection.Expense,
-            DueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            DueDate = BusinessDate.TodayWib,
             ScheduleKind = UpcomingEventScheduleKind.Scheduled
         });
 
@@ -442,6 +588,28 @@ public class FinanceStateServiceTests : IDisposable
         var state = await _sut.GetStateAsync(_scopeId);
         Assert.False(state.HasUnpaidBills);
         Assert.True(state.AllBillsPaid);
+    }
+
+    [Fact]
+    public async Task AllBillsPaid_IsFalseWhenOnlyFutureExpenseExists()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        await SeedBalanceAsync(account.Id, 1_000_000m);
+
+        await _events.CreateAsync(new CreateUpcomingEventCommand
+        {
+            ScopeId = _scopeId,
+            Title = "Tagihan mendatang",
+            Amount = 100_000m,
+            Direction = UpcomingEventDirection.Expense,
+            DueDate = BusinessDate.TodayWib.AddDays(1),
+            ScheduleKind = UpcomingEventScheduleKind.Scheduled
+        });
+
+        var state = await _sut.GetStateAsync(_scopeId);
+
+        Assert.False(state.AllBillsPaid);
+        Assert.Empty(state.DueEvents);
     }
 
     [Fact]

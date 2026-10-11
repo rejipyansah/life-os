@@ -77,24 +77,30 @@ export interface AgendaItem {
   displayDate: string;
   rawDate: string;
   /**
-   * LEGACY ONLY — Rencana tidak terikat Sumber Dana.
-   * Hanya ditampilkan untuk data lama; rencana baru tidak memiliki akun.
+   * LEGACY ONLY — AccountId lama. Sumber default ada di defaultSourceAccountId.
    */
   accountLabel?: string;
+  defaultSourceAccountId?: string;
+  defaultSourceAccountLabel?: string;
   categoryLabel: string;
   repeat: string;
   type: AgendaType;
   note?: string;
   icon: string;
+  isDue?: boolean;
+  isOverdue?: boolean;
 }
 
 export interface ArchivedAgenda {
   id: string;
   title: string;
   amount: number;
+  isIncome: boolean;
   date: string;
   /** LEGACY ONLY. */
   accountLabel?: string;
+  sourceAccountLabel?: string;
+  sourceAccountKind?: 'default' | 'actual';
   status: string;
 }
 
@@ -111,6 +117,8 @@ export interface Transaction {
    */
   setAsideLabel?: string;
   date: string;
+  /** ISO calendar date from the API, retained for exact period filtering. */
+  occurredOn: string;
   time: string;
   dateGroup: string;
   timePeriod: TimePeriod;
@@ -120,6 +128,7 @@ export interface Transaction {
   isVoided?: boolean;
   voidReason?: string | null;
   isReversal?: boolean;
+  isTransfer?: boolean;
 }
 
 export interface FinanceToast {
@@ -169,6 +178,7 @@ export interface CreateAgendaInput {
   categoryLabel: string;
   repeat: string;
   type: AgendaType;
+  defaultSourceAccountId?: string;
   note?: string;
   icon?: string;
 }

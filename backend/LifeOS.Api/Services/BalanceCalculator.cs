@@ -101,18 +101,25 @@ public class BalanceCalculator
     }
 
     /// <summary>
-    /// Actual cash not allocated to set-asides or scheduled expense commitments.
+    /// Actual cash not allocated to set-asides or expense commitments whose cycle period has begun.
     /// Unfunded cycle targets are informational and do not reduce this amount.
     /// </summary>
     public async Task<decimal> GetScopeFreeCashAsync(Guid scopeId, CancellationToken ct = default)
     {
         var totalActual = await GetScopeActualTotalAsync(scopeId, ct);
         var totalSetAside = await GetActiveSetAsideTotalAsync(scopeId, ct);
-        var scheduledExpenses = await _db.UpcomingEvents
+        var today = BusinessDate.TodayWib;
+        var scheduledExpenseEvents = await _db.UpcomingEvents
             .Where(e => e.ScopeId == scopeId
                 && e.Status == UpcomingEventStatus.Scheduled
-                && e.Direction == UpcomingEventDirection.Expense)
-            .SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
+                && e.Direction == UpcomingEventDirection.Expense
+                && e.ScheduleKind == UpcomingEventScheduleKind.Scheduled
+                && e.DueDate.HasValue)
+            .ToListAsync(ct);
+        var scheduledExpenses = scheduledExpenseEvents
+            .Where(e => UpcomingEventService.GetCommitmentStartDate(
+                e.DueDate!.Value, e.Recurrence, e.CreatedAt) <= today)
+            .Sum(e => e.Amount);
         var activeCycles = await _db.SetAsides
             .Where(sa => sa.ScopeId == scopeId
                 && sa.Status == SetAsideStatus.Active
@@ -122,7 +129,6 @@ public class BalanceCalculator
         var cycleSurplus = 0m;
         var activeCycleIds = activeCycles.Select(sa => sa.Id).ToList();
         var cycleAmounts = await GetSetAsideAmountsAsync(activeCycleIds, ct);
-        var today = BusinessDate.TodayWib;
         foreach (var setAside in activeCycles.Where(sa => SetAsideCycle.IsRolloverPending(sa, today)))
         {
             var current = cycleAmounts.GetValueOrDefault(setAside.Id, 0m);

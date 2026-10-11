@@ -16,7 +16,7 @@ public static class InterpretEndpoint
 
     private static readonly HashSet<string> ValidFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "amount", "account", "toAccount", "setAsideName", "title", "direction", "date"
+        "amount", "account", "toAccount", "setAsideName", "title", "direction", "date", "eventDate"
     };
 
     private static readonly Dictionary<string, string> FieldMessages = new(StringComparer.OrdinalIgnoreCase)
@@ -27,7 +27,8 @@ public static class InterpretEndpoint
         ["setAsideName"] = "Untuk keperluan apa?",
         ["title"] = "Agendanya untuk apa?",
         ["direction"] = "Apakah ini pemasukan atau pengeluaran?",
-        ["date"] = "Tanggalnya kapan?"
+        ["date"] = "Tanggalnya kapan?",
+        ["eventDate"] = "Tanggal rencana harus hari ini atau setelahnya. Kapan rencana ini berlangsung?"
     };
 
     private const string IntentTransaction = "CreateTransaction";
@@ -150,8 +151,8 @@ public static class InterpretEndpoint
         if (raw.Direction is not ("Income" or "Expense"))
             AddField(fields, "direction");
 
-        // Rencana tidak terikat Sumber Dana — akun dipilih saat realizasi.
-        // Hanya minta klarifikasi bila user menyebut akun tapi namanya tidak dikenal.
+        // Sumber Dana yang disebut pengguna menjadi default rekomendasi saat realisasi.
+        // Hanya minta klarifikasi bila nama akun yang disebut tidak dikenal.
         if (!string.IsNullOrWhiteSpace(raw.Account)
             && !TryResolveAccount(raw.Account, eligibleAccounts, out _))
         {
@@ -159,8 +160,11 @@ public static class InterpretEndpoint
         }
 
         // Agenda fleksibel boleh tanpa tanggal; tanpa tanggal ia otomatis Flexible.
-        if (!string.IsNullOrWhiteSpace(raw.Date) && !TryParseDate(raw.Date, out _))
-            AddField(fields, "date");
+        if (!string.IsNullOrWhiteSpace(raw.Date))
+        {
+            if (!TryParseDate(raw.Date, out var plannedDate) || plannedDate < BusinessDate.TodayWib)
+                AddField(fields, "eventDate");
+        }
     }
 
     private static void CollectTransactionFields(
@@ -303,7 +307,9 @@ public static class InterpretEndpoint
         var command = new CreateUpcomingEventCommand
         {
             ScopeId = scopeId,
-            // AccountId sengaja tidak diisi — rencana independen dari Sumber Dana.
+            DefaultSourceAccountId = TryResolveAccount(raw.Account, eligibleAccounts, out var defaultAccount)
+                ? defaultAccount
+                : null,
             Title = raw.Title!.Trim(),
             Amount = raw.Amount!.Value,
             Direction = isIncome ? UpcomingEventDirection.Income : UpcomingEventDirection.Expense,

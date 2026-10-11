@@ -983,7 +983,7 @@ public class InterpreterTests : IDisposable
             Amount = 5_000_000m,
             Direction = "Income",
             Account = "Mandiri",
-            Date = "2026-10-01"
+            Date = BusinessDate.TodayWib.ToString("yyyy-MM-dd")
         }));
 
         var result = await InterpretEndpoint.HandleAsync(
@@ -1001,7 +1001,28 @@ public class InterpreterTests : IDisposable
         Assert.Equal(_scopeId, cmd.ScopeId);
         Assert.Equal(UpcomingEventDirection.Income, cmd.Direction);
         Assert.Equal(UpcomingEventScheduleKind.Scheduled, cmd.ScheduleKind);
-        Assert.Equal(new DateOnly(2026, 10, 1), cmd.DueDate);
+        Assert.Equal(BusinessDate.TodayWib, cmd.DueDate);
+    }
+
+    [Fact]
+    public async Task Interpret_UpcomingEvent_PastDateNeedsClarification()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateUpcomingEvent",
+            Title = "Gaji",
+            Amount = 5_000_000m,
+            Direction = "Income",
+            Date = BusinessDate.TodayWib.AddDays(-1).ToString("yyyy-MM-dd")
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "gaji bulan lalu" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains("Tanggal rencana harus hari ini atau setelahnya. Kapan rencana ini berlangsung?", response.Clarifications);
     }
 
     [Fact]
