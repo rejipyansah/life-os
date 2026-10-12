@@ -66,6 +66,25 @@
     display: none;
   }
 
+  .visible-scroll-container {
+    scrollbar-width: thin;
+    scrollbar-color: #8ea695 #e6eee5;
+  }
+
+  .visible-scroll-container::-webkit-scrollbar {
+    width: 8px;
+    display: block;
+  }
+
+  .visible-scroll-container::-webkit-scrollbar-track {
+    background: #e6eee5;
+  }
+
+  .visible-scroll-container::-webkit-scrollbar-thumb {
+    background: #8ea695;
+    border-radius: 9999px;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     background-color: #eae7df;

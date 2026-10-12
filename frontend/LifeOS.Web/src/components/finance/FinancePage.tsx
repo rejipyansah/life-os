@@ -22,6 +22,7 @@ interface FinancePageProps {
 
 export default function FinancePage({
   onBackToHome,
+  onRequestLogin,
   onNavigate,
   isGuest,
   onLogout,
@@ -44,6 +45,8 @@ export default function FinancePage({
         onNavigate={handleNavigate}
         showLogout={!isGuest}
         onLogout={onLogout}
+        showLogin={isGuest}
+        onLogin={onRequestLogin}
       />
 
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">

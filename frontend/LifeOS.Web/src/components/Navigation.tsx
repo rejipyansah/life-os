@@ -6,6 +6,8 @@ interface NavigationProps {
   brand?: string;
   showLogout?: boolean;
   onLogout?: () => void;
+  showLogin?: boolean;
+  onLogin?: () => void;
 }
 
 function BerandaIcon({ className }: { className?: string }) {
@@ -67,8 +69,11 @@ export default function Navigation({
   brand,
   showLogout,
   onLogout,
+  showLogin,
+  onLogin,
 }: NavigationProps) {
   const showLogoutButton = Boolean(showLogout && onLogout);
+  const showLoginButton = Boolean(showLogin && onLogin);
 
   return (
     <>
@@ -81,7 +86,11 @@ export default function Navigation({
               {brand ?? 'Life OS'}
             </span>
           </div>
-          {showLogoutButton && (
+          {showLoginButton ? (
+            <button type="button" onClick={onLogin} className={logoutButtonClass}>
+              Masuk
+            </button>
+          ) : showLogoutButton && (
             <button type="button" onClick={onLogout} className={logoutButtonClass}>
               Keluar
             </button>
@@ -148,7 +157,11 @@ export default function Navigation({
               })}
             </div>
           </div>
-          {showLogoutButton && (
+          {showLoginButton ? (
+            <button type="button" onClick={onLogin} className={`${logoutButtonClass} ml-auto`}>
+              Masuk
+            </button>
+          ) : showLogoutButton && (
             <button type="button" onClick={onLogout} className={`${logoutButtonClass} ml-auto`}>
               Keluar
             </button>

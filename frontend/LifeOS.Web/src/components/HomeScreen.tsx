@@ -18,9 +18,10 @@ interface HomeScreenProps {
   onNavigate: (dest: NavDestination) => void;
   isGuest?: boolean;
   onLogout?: () => void;
+  onRequestLogin?: () => void;
 }
 
-export default function HomeScreen({ onNavigate, isGuest, onLogout }: HomeScreenProps) {
+export default function HomeScreen({ onNavigate, isGuest, onLogout, onRequestLogin }: HomeScreenProps) {
   const [activeNav, setActiveNav] = useState<NavDestination>('beranda');
 
   const handleNavigate = (dest: NavDestination) => {
@@ -35,6 +36,8 @@ export default function HomeScreen({ onNavigate, isGuest, onLogout }: HomeScreen
         onNavigate={handleNavigate}
         showLogout={!isGuest}
         onLogout={onLogout}
+        showLogin={isGuest}
+        onLogin={onRequestLogin}
       />
 
       {/* Mobile: single column */}

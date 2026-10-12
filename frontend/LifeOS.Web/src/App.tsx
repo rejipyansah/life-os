@@ -26,7 +26,7 @@ function App() {
   const [state, setState] = useState<AppState>(getInitialState);
   const [isGuest, setIsGuest] = useState(false);
   const [guestSessionExpired, setGuestSessionExpired] = useState(false);
-  const [loginOrigin, setLoginOrigin] = useState<'entry' | 'finance'>(
+  const [loginOrigin, setLoginOrigin] = useState<'entry' | 'home' | 'finance'>(
     'entry'
   );
 
@@ -98,7 +98,7 @@ function App() {
     setState('entry');
   };
 
-  const handleRequestLogin = (origin: 'entry' | 'finance') => {
+  const handleRequestLogin = (origin: 'entry' | 'home' | 'finance') => {
     setLoginOrigin(origin);
     setState('login');
   };
@@ -147,6 +147,8 @@ function App() {
           onBack={() => {
             if (loginOrigin === 'entry') {
               setState('entry');
+            } else if (loginOrigin === 'home') {
+              setState('home');
             } else {
               setIsGuest(true);
               setState('finance');
@@ -159,18 +161,19 @@ function App() {
 
   if (state === 'home') {
     return (
-      <div className="h-dvh flex flex-col overflow-y-auto">
+      <div className="visible-scroll-container h-dvh flex flex-col overflow-y-auto">
         <HomeScreen
           onNavigate={handleHomeNavigate}
           isGuest={isGuest}
           onLogout={handleLogout}
+          onRequestLogin={() => handleRequestLogin('home')}
         />
       </div>
     );
   }
 
   return (
-    <div className="h-dvh flex flex-col overflow-y-auto">
+    <div className="visible-scroll-container h-dvh flex flex-col overflow-y-auto">
       <FinancePage
         isGuest={isGuest}
         onRequestLogin={() => handleRequestLogin('finance')}
