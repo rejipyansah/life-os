@@ -362,7 +362,7 @@ public class InterpreterTests : IDisposable
             _scopeId);
 
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("different"));
+        Assert.Contains(response.Clarifications, c => c.Contains("harus berbeda"));
     }
 
     // ───────────────────────── No accounts ─────────────────────────
@@ -391,7 +391,7 @@ public class InterpreterTests : IDisposable
         Assert.Equal(200, result.StatusCode);
         var response = Assert.IsType<InterpretResponse>(result.Body);
         Assert.Equal("NeedsClarification", response.State);
-        Assert.Contains(response.Clarifications, c => c.Contains("No accounts"));
+        Assert.Contains(response.Clarifications, c => c.Contains("Belum ada sumber dana"));
     }
 
     // ───────────────────────── Command: Transfer with fee ─────────────────────────

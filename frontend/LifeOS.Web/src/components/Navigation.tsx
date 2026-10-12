@@ -76,7 +76,7 @@ export default function Navigation({
       <nav className="md:hidden fixed top-0 left-0 right-0 z-50 h-12 bg-[#f5fbf4] border-b border-[#D5E0D3]/60">
         <div className="w-full h-full px-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/life-os-logo.png" alt="" className="w-5 h-5 rounded-full object-cover" />
+            <img src="/life-os-logo.webp" alt="" width={20} height={20} className="w-5 h-5 rounded-full object-cover" />
             <span className="font-headline text-sm tracking-tight text-lo-primary font-semibold">
               {brand ?? 'Life OS'}
             </span>
@@ -121,7 +121,7 @@ export default function Navigation({
         <div className="w-full max-w-6xl mx-auto px-6 lg:px-12 flex items-center">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
-              <img src="/life-os-logo.png" alt="" className="w-6 h-6 rounded-full object-cover" />
+              <img src="/life-os-logo.webp" alt="" width={24} height={24} className="w-6 h-6 rounded-full object-cover" />
               <span className="font-headline text-base tracking-tight text-lo-primary font-semibold">
                 {brand ?? 'Life OS'}
               </span>

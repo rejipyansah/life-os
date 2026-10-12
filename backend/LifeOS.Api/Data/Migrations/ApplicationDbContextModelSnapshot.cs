@@ -76,6 +76,8 @@ namespace LifeOS.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LastActivityAt");
+
                     b.HasIndex("ScopeId")
                         .IsUnique();
 
@@ -219,9 +221,9 @@ namespace LifeOS.Api.Data.Migrations
 
                     b.HasIndex("ScopeId");
 
-                    b.HasIndex("SetAsideId");
-
                     b.HasIndex("TransactionId");
+
+                    b.HasIndex("SetAsideId", "Type", "CreatedAt");
 
                     b.ToTable("SetAsideEntries");
                 });
@@ -267,7 +269,7 @@ namespace LifeOS.Api.Data.Migrations
 
                     b.HasIndex("RelatedTransactionId");
 
-                    b.HasIndex("ScopeId");
+                    b.HasIndex("ScopeId", "Type", "RelatedTransactionId");
 
                     b.ToTable("Transactions");
                 });
@@ -298,9 +300,6 @@ namespace LifeOS.Api.Data.Migrations
 
             modelBuilder.Entity("LifeOS.Api.Models.UpcomingEvent", b =>
                 {
-                    b.Property<Guid?>("DefaultSourceAccountId")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
@@ -317,6 +316,9 @@ namespace LifeOS.Api.Data.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DefaultSourceAccountId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Direction")
                         .IsRequired()
@@ -696,14 +698,14 @@ namespace LifeOS.Api.Data.Migrations
 
             modelBuilder.Entity("LifeOS.Api.Models.UpcomingEvent", b =>
                 {
-                    b.HasOne("LifeOS.Api.Models.Account", "DefaultSourceAccount")
-                        .WithMany()
-                        .HasForeignKey("DefaultSourceAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("LifeOS.Api.Models.Account", "Account")
                         .WithMany()
                         .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("LifeOS.Api.Models.Account", "DefaultSourceAccount")
+                        .WithMany()
+                        .HasForeignKey("DefaultSourceAccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("LifeOS.Api.Models.Transaction", "RealizedTransaction")

@@ -62,14 +62,35 @@ public sealed class FinanceEndpointTests
         builder.Services.AddScoped<FinanceStateService>();
 
         await using var app = builder.Build();
+        app.UseSafeExceptionHandler();
+        app.UseStatusCodePages(async statusCodeContext =>
+        {
+            var http = statusCodeContext.HttpContext;
+            if (http.Request.Path.StartsWithSegments("/api"))
+                await ApiErrorResponses.FromStatus(null, http.Response.StatusCode).ExecuteAsync(http);
+        });
         app.MapFinanceApi();
         await app.StartAsync();
         using var client = app.GetTestClient();
+        using (var anonymousClient = app.GetTestClient())
+        using (var anonymousResponse = await anonymousClient.GetAsync("/api/finance/accounts"))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+            using var anonymousPayload = System.Text.Json.JsonDocument.Parse(
+                await anonymousResponse.Content.ReadAsStringAsync());
+            Assert.Equal("NoGuestSession", anonymousPayload.RootElement.GetProperty("code").GetString());
+        }
+
         client.DefaultRequestHeaders.Add("Cookie", $"guest_session={guestToken}");
 
         var invalidEnum = await client.PostAsync("/api/finance/accounts",
             new StringContent("""{"name":"Bad enum","type":"NotAnAccountType"}""", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, invalidEnum.StatusCode);
+        using (var invalidEnumBody = System.Text.Json.JsonDocument.Parse(await invalidEnum.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("invalid_request", invalidEnumBody.RootElement.GetProperty("code").GetString());
+            Assert.Equal("Permintaan tidak valid.", invalidEnumBody.RootElement.GetProperty("error").GetString());
+        }
 
         var requestBody = $$"""{"scopeId":"{{ownerScopeId}}","name":"Guest account","type":"Bank"}""";
         var created = await client.PostAsync("/api/finance/accounts",
@@ -88,6 +109,13 @@ public sealed class FinanceEndpointTests
 
         var invalidExpense = await PostJsonAsync(client, "/api/finance/transactions", $$"""{"type":"Expense","amount":150000,"occurredOn":"{{BusinessDate.TodayWib:yyyy-MM-dd}}","entries":[{"accountId":"{{accountId}}","amount":-100000}]}""");
         Assert.Equal((HttpStatusCode)422, invalidExpense.StatusCode);
+        using (var invalidExpenseBody = System.Text.Json.JsonDocument.Parse(await invalidExpense.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("expense_entry_mismatch", invalidExpenseBody.RootElement.GetProperty("code").GetString());
+            Assert.Equal("Nominal rincian tidak sesuai dengan nominal pengeluaran.",
+                invalidExpenseBody.RootElement.GetProperty("error").GetString());
+            Assert.True(invalidExpenseBody.RootElement.TryGetProperty("traceId", out _));
+        }
 
         var expenseResponse = await PostJsonAsync(client, "/api/finance/transactions", $$"""{"type":"Expense","amount":150000,"occurredOn":"{{BusinessDate.TodayWib:yyyy-MM-dd}}","setAsideId":"{{setAsideId}}","entries":[{"accountId":"{{accountId}}","amount":-150000}]}""");
         Assert.Equal(HttpStatusCode.OK, expenseResponse.StatusCode);
@@ -140,6 +168,17 @@ public sealed class FinanceEndpointTests
         var storedAccount = await verifyDb.Accounts.SingleAsync(account => account.Name == "Guest account");
         Assert.Equal(guestScopeId, storedAccount.ScopeId);
         Assert.NotEqual(ownerScopeId, storedAccount.ScopeId);
+
+        var storedGuestSession = await verifyDb.GuestSessions.SingleAsync(session => session.ScopeId == guestScopeId);
+        storedGuestSession.LastActivityAt = DateTime.UtcNow - GuestTokenService.InactivityExpiry;
+        await verifyDb.SaveChangesAsync();
+        using var expiredSessionRequest = new HttpRequestMessage(HttpMethod.Get, "/api/finance/accounts");
+        expiredSessionRequest.Headers.Add("Cookie", $"guest_session={guestToken}");
+        using var expiredSessionResponse = await client.SendAsync(expiredSessionRequest);
+        Assert.Equal((HttpStatusCode)410, expiredSessionResponse.StatusCode);
+        using var expiredSessionPayload = System.Text.Json.JsonDocument.Parse(
+            await expiredSessionResponse.Content.ReadAsStringAsync());
+        Assert.Equal("GuestSessionExpired", expiredSessionPayload.RootElement.GetProperty("code").GetString());
     }
 
     private static Task<HttpResponseMessage> PostJsonAsync(HttpClient client, string path, string json)

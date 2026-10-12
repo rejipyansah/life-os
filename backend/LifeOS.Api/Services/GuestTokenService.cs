@@ -11,6 +11,8 @@ public class GuestTokenService
 
     private const string CookieName = "guest_session";
     private const int TokenSizeBytes = 32;
+    public static readonly TimeSpan InactivityExpiry = TimeSpan.FromDays(30);
+    public static readonly TimeSpan ActivityWriteInterval = TimeSpan.FromMinutes(15);
 
     public GuestTokenService(
         ApplicationDbContext db)
@@ -105,13 +107,20 @@ public class GuestTokenService
     }
 
     public async Task<GuestSession?> ResolveAsync(
-        HttpContext http)
+        HttpContext http,
+        CancellationToken ct = default)
+        => (await ResolveWithStatusAsync(http, ct)).Session;
+
+    public async Task<GuestSessionResolution> ResolveWithStatusAsync(
+        HttpContext http,
+        CancellationToken ct = default,
+        DateTime? utcNow = null)
     {
         var token =
             ReadToken(http);
 
         if (string.IsNullOrEmpty(token))
-            return null;
+            return new GuestSessionResolution(null, IsExpired: false);
 
         var tokenHash =
             HashToken(token);
@@ -122,18 +131,34 @@ public class GuestTokenService
                 .FirstOrDefaultAsync(
                     s =>
                         s.TokenHash == tokenHash &&
-                        s.Scope.Type == ScopeType.Guest
-                );
+                        s.Scope.Type == ScopeType.Guest,
+                    ct);
 
-        return session;
+        if (session is null)
+        {
+            ClearGuestCookie(http);
+            return new GuestSessionResolution(null, IsExpired: true);
+        }
+
+        var now = utcNow ?? DateTime.UtcNow;
+        if (session.LastActivityAt <= now - InactivityExpiry)
+        {
+            ClearGuestCookie(http);
+            return new GuestSessionResolution(null, IsExpired: true);
+        }
+
+        if (session.LastActivityAt <= now - ActivityWriteInterval
+            || session.LastActivityAt > now)
+        {
+            session.LastActivityAt = now;
+            await _db.SaveChangesAsync(ct);
+            // Keep active browser sessions alive; the server still enforces inactivity expiry.
+            SetGuestCookie(http, token);
+        }
+
+        return new GuestSessionResolution(session, IsExpired: false);
     }
 
-    public async Task UpdateActivityAsync(
-        GuestSession session)
-    {
-        session.LastActivityAt =
-            DateTime.UtcNow;
-
-        await _db.SaveChangesAsync();
-    }
 }
+
+public sealed record GuestSessionResolution(GuestSession? Session, bool IsExpired);

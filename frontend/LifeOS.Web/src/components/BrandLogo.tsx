@@ -11,8 +11,10 @@ export default function BrandLogo({ className = '', size = 'md', showEdition = f
   return (
     <div className={`flex items-center gap-3 ${className}`}>
       <img
-        src="/life-os-logo.png"
+        src="/life-os-logo.webp"
         alt="Life OS"
+        width={size === 'sm' ? 28 : 32}
+        height={size === 'sm' ? 28 : 32}
         className={`${iconSize} rounded-full object-cover`}
       />
       <span className={`font-headline ${textSize} tracking-tight text-lo-primary font-semibold`}>

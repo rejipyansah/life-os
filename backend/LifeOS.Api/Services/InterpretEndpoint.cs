@@ -12,6 +12,8 @@ namespace LifeOS.Api.Services;
 /// </summary>
 public static class InterpretEndpoint
 {
+    public const int MaximumInputLength = 2_000;
+
     public record HandlerResult(int StatusCode, object Body);
 
     private static readonly HashSet<string> ValidFields = new(StringComparer.OrdinalIgnoreCase)
@@ -42,6 +44,15 @@ public static class InterpretEndpoint
         ApplicationDbContext db,
         CancellationToken ct = default)
     {
+        if (body.Input.Length > MaximumInputLength)
+        {
+            return new HandlerResult(
+                StatusCodes.Status413PayloadTooLarge,
+                new ApiErrorResponse(
+                    "input_too_long",
+                    $"Input tidak boleh melebihi {MaximumInputLength} karakter."));
+        }
+
         var accounts = (await db.Accounts
             .Where(a => a.ScopeId == scopeId && !a.IsArchived)
             .Select(a => new AccountLookup(a.Id, a.Name))
@@ -56,7 +67,7 @@ public static class InterpretEndpoint
             {
                 Intent = IntentTransaction,
                 State = "NeedsClarification",
-                Clarifications = ["No accounts available. Please create an account first."]
+                Clarifications = ["Belum ada sumber dana. Tambahkan sumber dana terlebih dahulu."]
             });
         }
 
@@ -74,7 +85,9 @@ public static class InterpretEndpoint
         }
         catch (InterpreterProviderException)
         {
-            return new HandlerResult(503, new { error = "AI provider is temporarily unavailable. Please try again." });
+            return new HandlerResult(
+                StatusCodes.Status503ServiceUnavailable,
+                new ApiErrorResponse("ai_provider_unavailable", "Layanan interpretasi sementara tidak tersedia. Silakan coba lagi."));
         }
 
         return new HandlerResult(200, Validate(raw, accounts, scopeId, body.Input.Trim()));
@@ -92,7 +105,7 @@ public static class InterpretEndpoint
             {
                 Intent = raw.Intent,
                 State = "Unsupported",
-                Clarifications = ["This input doesn't match any supported financial action."]
+                Clarifications = ["Input belum cocok dengan tindakan keuangan yang didukung."]
             };
         }
 
@@ -352,7 +365,7 @@ public static class InterpretEndpoint
                 {
                     Intent = raw.Intent,
                     State = "NeedsClarification",
-                    Clarifications = ["Source and destination accounts must be different."]
+                    Clarifications = ["Sumber dan tujuan transfer harus berbeda."]
                 };
             }
         }
@@ -437,7 +450,7 @@ public static class InterpretEndpoint
             Intent = raw.Intent,
             State = "NeedsClarification",
             Clarifications =
-                [$"Account '{accountName}' not found. Available: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
+                [$"Sumber dana '{accountName}' tidak ditemukan. Pilihan tersedia: {string.Join(", ", eligibleAccounts.Select(a => a.Name))}"]
         };
 
     private static bool TryResolveAccount(

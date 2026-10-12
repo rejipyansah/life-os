@@ -232,6 +232,56 @@ public class GuestTokenServiceTests : IDisposable
         Assert.Equal(ScopeType.Guest, result.Scope.Type);
     }
 
+    [Fact]
+    public async Task ResolveWithStatusAsync_ExpiresSessionAtThirtyDaysOfInactivity()
+    {
+        var now = DateTime.UtcNow;
+        var token = GuestTokenService.GenerateToken();
+        var scope = new Scope { Type = ScopeType.Guest };
+        var session = new GuestSession
+        {
+            Scope = scope,
+            TokenHash = GuestTokenService.HashToken(token),
+            LastActivityAt = now - GuestTokenService.InactivityExpiry
+        };
+        _db.Scopes.Add(scope);
+        _db.GuestSessions.Add(session);
+        await _db.SaveChangesAsync();
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Cookie = $"guest_session={token}";
+        var result = await _sut.ResolveWithStatusAsync(context, utcNow: now);
+
+        Assert.Null(result.Session);
+        Assert.True(result.IsExpired);
+        Assert.Contains("guest_session=; expires=", context.Response.Headers.SetCookie.ToString().ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task ResolveWithStatusAsync_RefreshesActivityAndCookieAtMostEveryFifteenMinutes()
+    {
+        var now = DateTime.UtcNow;
+        var token = GuestTokenService.GenerateToken();
+        var scope = new Scope { Type = ScopeType.Guest };
+        var session = new GuestSession
+        {
+            Scope = scope,
+            TokenHash = GuestTokenService.HashToken(token),
+            LastActivityAt = now - GuestTokenService.ActivityWriteInterval
+        };
+        _db.Scopes.Add(scope);
+        _db.GuestSessions.Add(session);
+        await _db.SaveChangesAsync();
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Cookie = $"guest_session={token}";
+        var result = await _sut.ResolveWithStatusAsync(context, utcNow: now);
+
+        Assert.NotNull(result.Session);
+        Assert.Equal(now, result.Session!.LastActivityAt);
+        Assert.Contains("guest_session=", context.Response.Headers.SetCookie.ToString());
+    }
+
     // --- Full lifecycle: Set → Read → Resolve ---
 
     [Fact]

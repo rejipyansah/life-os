@@ -6,7 +6,7 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 
 ## Kondisi Saat Ini
 
-- Backend memiliki 385 test unit/service dan test HTTP/API di `backend/LifeOS.IntegrationTests`.
+- Backend memiliki 422 test unit/service dan test HTTP/API di `backend/LifeOS.IntegrationTests`.
 - Suite unit/service memakai SQLite in-memory untuk feedback cepat. Suite terpisah `backend/LifeOS.IntegrationTests` memakai PostgreSQL/Npgsql untuk migrasi dan concurrency.
 - Frontend menggunakan Vitest dan sudah memiliki test untuk kalkulasi/mapping finansial serta sebagian komponen.
 - Frontend memiliki skrip `test`, `build`, dan `lint`.
@@ -34,7 +34,7 @@ Setiap perubahan kode dapat diperiksa secara otomatis, sehingga pemilik aplikasi
 - **Terverifikasi:** Playwright menjalankan alur browser guest → catat pemasukan → verifikasi proyeksi backend dengan PostgreSQL E2E yang terisolasi.
 - **Diperkuat:** `SerializableCommandRunner` membersihkan tracked state setelah serialization failure agar retry membaca ulang nilai database terbaru.
 - **Selesai:** regresi pemasukan teralokasi di atas shortfall dan histori dengan timestamp identik lintas cursor.
-- **Selesai:** benchmark proyeksi PostgreSQL dengan generator data sintetis, SELECT counter, ukuran dataset/iterasi yang dapat diatur, cleanup schema otomatis, dan workflow mingguan/manual.
+- **Selesai:** benchmark proyeksi PostgreSQL dengan generator data sintetis, SELECT counter, ukuran dataset/iterasi yang dapat diatur, variasi cycle, spend tertaut transaksi/reversal, transaksi/agenda opsional, breakdown set-aside vs Finance penuh, cleanup schema otomatis, dan workflow mingguan/manual.
 - **Selesai oleh pengguna:** ruleset untuk `main` diimpor/diaktifkan dengan required check `Automated tests / test`.
 - **Berikutnya:** konfirmasi eksekusi CI pertama setelah perubahan terbaru dan kumpulkan hasil benchmark berkala untuk menetapkan baseline performa.
 
@@ -44,13 +44,21 @@ Jalankan semua pemeriksaan lokal dengan `npm test` dari root. Test endpoint HTTP
 
 Suite regresi kini juga menguji pemasukan teralokasi yang melebihi shortfall siklus dan histori dengan timestamp identik lintas halaman cursor. Tool benchmark menggunakan PostgreSQL, membuat schema sementara sendiri, lalu menghapus schema tersebut setelah pengukuran. Benchmark dapat dijalankan manual atau mingguan melalui `.github/workflows/projection-benchmark.yml`; hasilnya melaporkan waktu proyeksi, SELECT count, dan alokasi memori untuk dataset sintetis. Hasil benchmark diunggah sebagai artifact selama 30 hari.
 
-Verifikasi lokal lengkap dengan Docker berjalan: 385 test unit/service, 2 test integrasi (HTTP/API dan PostgreSQL/Npgsql), 72 test frontend (3 skipped), lint, build, dan 1 Playwright browser E2E lulus. Benchmark lokal pada 100 set-aside dan 50.000 ledger entry mencatat mean 91.8 ms, 11 SELECT, serta 4.14 MiB allocated. Angka ini dicatat sebagai baseline pengamatan dan belum menjadi batas gagal CI.
+Verifikasi terkini: 422 backend unit/service tests, 6 integration tests dengan PostgreSQL disposable, 108 frontend tests (3 skipped), frontend lint dan production build lulus. Pada dataset sama (500 set-aside, 250.000 entry, 50.000 transaksi dasar + 2.500 reversal, 10.000 agenda), baseline algoritme lama 10 iterasi: set-aside 710,3 ms/10 SELECT/53,23 MiB; Finance penuh 563,4 ms/18 SELECT/62,47 MiB. Sesudah agregasi spend database-side + indeks: set-aside 440,8 ms/8 SELECT/14,55 MiB; Finance penuh 451,4 ms/16 SELECT/24,11 MiB. Pada run tersebut waktu turun sekitar 38%/20% dan alokasi 73%/61%. Angka observasi lokal, bukan batas gagal CI; Playwright E2E finance penuh tidak dijalankan pada verifikasi ini.
 
-Untuk benchmark lokal, set `LIFEOS_TEST_POSTGRES_CONNECTION` ke database PostgreSQL khusus benchmark, lalu jalankan:
+Untuk baseline benchmark lokal, set `LIFEOS_TEST_POSTGRES_CONNECTION` ke database PostgreSQL khusus benchmark, lalu jalankan:
 
 ```sh
 dotnet run --project backend/FinanceProjectionBenchmark/FinanceProjectionBenchmark.csproj --configuration Release -- --set-asides 100 --entries 50000 --iterations 5
 ```
+
+Untuk skenario volume lebih besar yang juga mengisi transaksi dan agenda:
+
+```sh
+dotnet run --project backend/FinanceProjectionBenchmark/FinanceProjectionBenchmark.csproj --configuration Release -- --set-asides 500 --entries 250000 --transactions 50000 --upcoming-events 10000 --iterations 5
+```
+
+`--transactions` dan `--upcoming-events` opsional dan default ke `0`, sehingga command baseline tetap dapat dibandingkan dengan baseline historis. Jalankan hanya terhadap database PostgreSQL disposable; tool membuat dan menghapus schema benchmark sendiri.
 
 ## Tahapan
 

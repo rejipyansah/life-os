@@ -20,19 +20,20 @@ public class GroqInterpreter : IInterpreter
         Converters = { new JsonStringEnumConverter(null, allowIntegerValues: false) }
     };
 
-    public GroqInterpreter(IConfiguration configuration, HttpMessageHandler? handler = null)
+    public GroqInterpreter(IConfiguration configuration, HttpClient httpClient)
     {
         var apiKey = configuration["Groq:ApiKey"]
             ?? throw new InvalidOperationException("Groq:ApiKey is not configured.");
 
         _model = configuration["Groq:Model"] ?? "openai/gpt-oss-20b";
         _reasoningEffort = configuration["Groq:ReasoningEffort"] ?? "low";
+        var endpoint = configuration["Groq:Endpoint"] ?? "https://api.groq.com/openai/v1/";
+        if (!endpoint.EndsWith("/", StringComparison.Ordinal))
+            endpoint += "/";
 
-        _http = new HttpClient(handler ?? new HttpClientHandler())
-        {
-            BaseAddress = new Uri("https://api.groq.com/openai/v1/"),
-            Timeout = TimeSpan.FromSeconds(30)
-        };
+        _http = httpClient;
+        _http.BaseAddress = new Uri(endpoint, UriKind.Absolute);
+        _http.Timeout = TimeSpan.FromSeconds(30);
         _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", apiKey);
     }
@@ -40,7 +41,7 @@ public class GroqInterpreter : IInterpreter
     public async Task<InterpretResult> InterpretAsync(InterpretRequest request, CancellationToken ct = default)
     {
         var systemPrompt = BuildSystemPrompt(request.CurrentDate, request.EligibleAccounts);
-        var requestBody = BuildRequestBody(systemPrompt, request.Input);
+        var requestBody = BuildRequestBody(_model, _reasoningEffort, systemPrompt, request.Input);
 
         try
         {
@@ -70,18 +71,22 @@ public class GroqInterpreter : IInterpreter
         }
     }
 
-    private static object BuildRequestBody(string systemPrompt, string userMessage)
+    private static object BuildRequestBody(
+        string model,
+        string reasoningEffort,
+        string systemPrompt,
+        string userMessage)
     {
         return new
         {
-            model = "openai/gpt-oss-20b",
+            model,
             messages = new object[]
             {
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = userMessage }
             },
             temperature = 0.1,
-            reasoning_effort = "low",
+            reasoning_effort = reasoningEffort,
             response_format = new
             {
                 type = "json_schema",

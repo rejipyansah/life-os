@@ -15,6 +15,7 @@ public class SetAsideServiceTests : IDisposable
 {
     private readonly ApplicationDbContext _db;
     private readonly SqliteConnection _connection;
+    private readonly string _connectionString;
     private readonly SetAsideService _sut;
     private readonly AccountService _accounts;
     private readonly TransactionService _transactions;
@@ -23,7 +24,8 @@ public class SetAsideServiceTests : IDisposable
 
     public SetAsideServiceTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _connection = new SqliteConnection(_connectionString);
         _connection.Open();
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -1100,6 +1102,110 @@ public class SetAsideServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Projection_AggregatesCurrentCycleSpendAndExcludesReversedAndOutOfWindowEntries()
+    {
+        var account = await CreateAccountAsync("SeaBank");
+        var today = BusinessDate.TodayWib;
+        var setAside = await _sut.CreateSetAsideAsync(new CreateSetAsideCommand
+        {
+            ScopeId = _scopeId,
+            Name = "Routine projection",
+            Kind = SetAsideKind.RoutineBatch,
+            TargetAmount = 50_000m,
+            CycleKind = SetAsideCycleKind.Monthly,
+            Amount = 0m
+        });
+        var (cycleStart, _) = SetAsideCycle.UsageWindow(setAside, today);
+        Assert.True(cycleStart.HasValue);
+        var currentCycleTime = BusinessDate.StartOfDayUtc(cycleStart!.Value).AddHours(8);
+
+        var regularTransaction = new Transaction
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 1_000m,
+            OccurredOn = today,
+            CreatedAt = currentCycleTime
+        };
+        var reversedTransaction = new Transaction
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 2_000m,
+            OccurredOn = today,
+            CreatedAt = currentCycleTime.AddMinutes(1)
+        };
+        var reversal = new Transaction
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Reversal,
+            Amount = reversedTransaction.Amount,
+            OccurredOn = today,
+            CreatedAt = currentCycleTime.AddMinutes(2),
+            RelatedTransaction = reversedTransaction
+        };
+        var oldTransaction = new Transaction
+        {
+            ScopeId = _scopeId,
+            Type = TransactionType.Expense,
+            Amount = 5_000m,
+            OccurredOn = today,
+            CreatedAt = BusinessDate.StartOfDayUtc(cycleStart.Value).AddTicks(-1)
+        };
+
+        _db.Transactions.AddRange(regularTransaction, reversedTransaction, reversal, oldTransaction);
+        _db.TransactionEntries.AddRange(
+            new TransactionEntry { Transaction = regularTransaction, AccountId = account.Id, Amount = -1_000m },
+            new TransactionEntry { Transaction = reversedTransaction, AccountId = account.Id, Amount = -2_000m },
+            new TransactionEntry { Transaction = reversal, AccountId = account.Id, Amount = 2_000m },
+            new TransactionEntry { Transaction = oldTransaction, AccountId = account.Id, Amount = -5_000m });
+
+        _db.SetAsideEntries.AddRange(
+            new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = SetAsideEntryType.Spent,
+                Amount = -1_000m,
+                TransactionId = regularTransaction.Id,
+                CreatedAt = regularTransaction.CreatedAt
+            },
+            new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = SetAsideEntryType.Spent,
+                Amount = -2_000m,
+                TransactionId = reversedTransaction.Id,
+                CreatedAt = reversedTransaction.CreatedAt
+            },
+            new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = SetAsideEntryType.Spent,
+                Amount = -300m,
+                CreatedAt = currentCycleTime.AddMinutes(3)
+            },
+            new SetAsideEntry
+            {
+                SetAsideId = setAside.Id,
+                ScopeId = _scopeId,
+                Type = SetAsideEntryType.Spent,
+                Amount = -5_000m,
+                TransactionId = oldTransaction.Id,
+                CreatedAt = oldTransaction.CreatedAt
+            });
+        await _db.SaveChangesAsync();
+
+        var projection = await _sut.GetSetAsideAsync(setAside.Id, _scopeId);
+
+        Assert.NotNull(projection);
+        Assert.Equal(1_300m, projection!.UsedAmount);
+        Assert.True(projection.IsCycleExecuted);
+    }
+
+    [Fact]
     public async Task RoutineBatch_ExpenseFromGeneralTransactionAlsoCompletesCycleAndReleasesRemainder()
     {
         var account = await CreateAccountAsync("SeaBank");
@@ -1704,10 +1810,12 @@ public class SetAsideServiceTests : IDisposable
     /// </summary>
     private ServiceSet CreateServices()
     {
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connection)
+            .UseSqlite(connection)
             .Options;
-        return new ServiceSet(new ApplicationDbContext(options));
+        return new ServiceSet(new ApplicationDbContext(options), connection);
     }
 
     private async Task<int> RunConcurrentlyAsync(int count, Func<ServiceSet, Task> action)
@@ -1733,9 +1841,12 @@ public class SetAsideServiceTests : IDisposable
 
     private sealed class ServiceSet : IDisposable
     {
-        public ServiceSet(ApplicationDbContext db)
+        private readonly SqliteConnection _connection;
+
+        public ServiceSet(ApplicationDbContext db, SqliteConnection connection)
         {
             Db = db;
+            _connection = connection;
             var balances = new BalanceCalculator(db);
             SetAsides = new SetAsideService(db, balances);
         }
@@ -1743,7 +1854,11 @@ public class SetAsideServiceTests : IDisposable
         public ApplicationDbContext Db { get; }
         public SetAsideService SetAsides { get; }
 
-        public void Dispose() => Db.Dispose();
+        public void Dispose()
+        {
+            Db.Dispose();
+            _connection.Dispose();
+        }
     }
 
     private async Task<Account> CreateAccountAsync(string name)

@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using LifeOS.Api.Data;
 using LifeOS.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -34,11 +33,21 @@ public class SetAsideService
 {
     private readonly ApplicationDbContext _db;
     private readonly BalanceCalculator _balances;
+    private readonly SetAsideProjectionService _projections;
 
     public SetAsideService(ApplicationDbContext db, BalanceCalculator balances)
+        : this(db, balances, new SetAsideProjectionService(db, balances))
+    {
+    }
+
+    public SetAsideService(
+        ApplicationDbContext db,
+        BalanceCalculator balances,
+        SetAsideProjectionService projections)
     {
         _db = db;
         _balances = balances;
+        _projections = projections;
     }
 
     // ───────────────────────── Create / Update ─────────────────────────
@@ -726,363 +735,17 @@ public class SetAsideService
     // ───────────────────────── Queries ─────────────────────────
 
     public Task<List<SetAsideProjection>> GetSetAsidesAsync(Guid scopeId, CancellationToken ct = default)
-        => ProjectForScopeAsync(scopeId, filter: null, includeRecentEntries: false, ct);
+        => _projections.GetSetAsidesAsync(scopeId, ct);
 
-    public async Task<SetAsideProjection?> GetSetAsideAsync(Guid setAsideId, Guid scopeId, CancellationToken ct = default)
-    {
-        var exists = await _db.SetAsides.AnyAsync(sa => sa.Id == setAsideId && sa.ScopeId == scopeId, ct);
-        if (!exists) return null;
-
-        var result = await ProjectForScopeAsync(scopeId, sa => sa.Id == setAsideId, includeRecentEntries: true, ct);
-        return result.SingleOrDefault();
-    }
-
-    public async Task<SetAsideHistoryPage> GetHistoryAsync(
-        Guid setAsideId, Guid scopeId, string? cursor = null, int pageSize = 30, CancellationToken ct = default)
-    {
-        var exists = await _db.SetAsides.AnyAsync(sa => sa.Id == setAsideId && sa.ScopeId == scopeId, ct);
-        if (!exists)
-            throw new ValidationException("Set-aside not found in current Scope.");
-
-        pageSize = Math.Clamp(pageSize, 1, 100);
-        DateTime? beforeCreatedAt = null;
-        Guid? beforeId = null;
-        if (!string.IsNullOrWhiteSpace(cursor))
-        {
-            var parts = cursor.Split('|', 2);
-            if (parts.Length != 2
-                || !DateTime.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.RoundtripKind, out var parsedDate)
-                || !Guid.TryParse(parts[1], out var parsedId))
-                throw new ValidationException("Cursor riwayat tidak valid.");
-            beforeCreatedAt = parsedDate;
-            beforeId = parsedId;
-        }
-
-        var query = _db.SetAsideEntries.Where(se => se.SetAsideId == setAsideId);
-        if (beforeCreatedAt.HasValue && beforeId.HasValue)
-            query = query.Where(se => se.CreatedAt < beforeCreatedAt.Value
-                || (se.CreatedAt == beforeCreatedAt.Value && se.Id.CompareTo(beforeId.Value) < 0));
-
-        var rows = await query
-            .OrderByDescending(se => se.CreatedAt)
-            .ThenByDescending(se => se.Id)
-            .Take(pageSize + 1)
-            .Select(se => new SetAsideEntryProjection
-            {
-                Id = se.Id,
-                Type = se.Type,
-                Amount = se.Amount,
-                TransactionId = se.TransactionId,
-                Note = se.Note,
-                CreatedAt = se.CreatedAt,
-                Transaction = se.Transaction == null ? null : new SetAsideTransactionSummary
-                {
-                    Id = se.Transaction.Id,
-                    Type = se.Transaction.Type,
-                    Amount = se.Transaction.Amount,
-                    Description = se.Transaction.Description,
-                    CategoryName = se.Transaction.CategoryName,
-                    OccurredOn = se.Transaction.OccurredOn,
-                    RelatedDescription = se.Transaction.RelatedTransaction != null
-                        ? se.Transaction.RelatedTransaction.Description
-                        : null
-                }
-            })
-            .ToListAsync(ct);
-
-        // Include newer deltas omitted by the cursor so historical balances are
-        // correct even when the requested page is older than the first page.
-        var first = rows.FirstOrDefault();
-        var newerBalanceDeltas = first is null
-            ? 0m
-            : await _db.SetAsideEntries
-                .Where(se => se.SetAsideId == setAsideId
-                    && (se.CreatedAt > first.CreatedAt
-                        || (se.CreatedAt == first.CreatedAt && se.Id.CompareTo(first.Id) > 0)))
-                .SumAsync(se => (decimal?)se.Amount, ct) ?? 0m;
-        var runningBalance = await _balances.GetSetAsideAmountAsync(setAsideId, ct) - newerBalanceDeltas;
-        foreach (var row in rows)
-        {
-            row.BalanceAfter = runningBalance;
-            runningBalance -= row.Amount;
-        }
-
-        var hasMore = rows.Count > pageSize;
-        if (hasMore) rows.RemoveAt(rows.Count - 1);
-        var last = rows.LastOrDefault();
-        return new SetAsideHistoryPage
-        {
-            Items = rows,
-            HasMore = hasMore,
-            NextCursor = hasMore && last is not null
-                ? $"{last.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)}|{last.Id:D}"
-                : null
-        };
-    }
-
-    // ───────────────────────── Projection ─────────────────────────
-
-    /// <summary>
-    /// Builds projections for a scope. Pending cycle funding is resolved against the
-    /// whole scope-wide available pool (TotalActual − TotalSetAside) so that several
-    /// set-asides cannot each claim the same available money. Claim order = creation order.
-    ///
-    /// LEGACY SetAside.AccountId TIDAK dipakai di sini untuk perhitungan apa pun.
-    /// Nilainya hanya diproyeksikan untuk kompatibilitas tampilan data lama.
-    /// </summary>
-    internal async Task<List<SetAsideProjection>> ProjectForScopeAsync(
+    public Task<SetAsideProjection?> GetSetAsideAsync(
+        Guid setAsideId,
         Guid scopeId,
-        Expression<Func<SetAside, bool>>? filter,
-        bool includeRecentEntries,
-        CancellationToken ct)
-    {
-        var scopeSetAsides = await _db.SetAsides.Where(sa => sa.ScopeId == scopeId).ToListAsync(ct);
-        if (scopeSetAsides.Count == 0) return [];
+        CancellationToken ct = default)
+        => _projections.GetSetAsideAsync(setAsideId, scopeId, ct);
 
-        var selected = filter is null
-            ? scopeSetAsides
-            : scopeSetAsides.AsQueryable().Where(filter).ToList();
-
-        if (selected.Count == 0) return [];
-
-        var today = BusinessDate.TodayWib;
-        var allIds = scopeSetAsides.Select(sa => sa.Id).ToList();
-
-        var amounts = await _balances.GetSetAsideAmountsAsync(allIds, ct);
-
-        // Legacy account names — hanya untuk tampilan data lama, bukan perhitungan.
-        var legacyAccountIds = scopeSetAsides
-            .Where(sa => sa.AccountId.HasValue)
-            .Select(sa => sa.AccountId!.Value)
-            .Distinct()
-            .ToList();
-        // Default source names — hanya untuk pre-select/hint UI pada proses manual.
-        var defaultSourceIds = scopeSetAsides
-            .Where(sa => sa.DefaultSourceAccountId.HasValue)
-            .Select(sa => sa.DefaultSourceAccountId!.Value)
-            .Distinct()
-            .ToList();
-        var lookupIds = legacyAccountIds.Concat(defaultSourceIds).Distinct().ToList();
-        var accountNames = lookupIds.Count == 0
-            ? new Dictionary<Guid, string>()
-            : await _db.Accounts
-                .Where(a => lookupIds.Contains(a.Id))
-                .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
-
-        // "Terpakai" dihitung dari history Spend pada cycle berjalan,
-        // atau sepanjang waktu bila set-aside tidak memiliki cycle.
-        //
-        // Entry Spent hanya menyimpan porsi yang keluar dari saldo pos
-        // (min(amount, reserved)); porsi uang bebas tidak masuk ke sana.
-        // Supaya pemakaian yang melewati plafon tetap terlihat, nominalnya
-        // diambil dari TransactionEntries transaksi yang terkait.
-        var selectedIdsForUsage = selected.Select(sa => sa.Id).ToList();
-        var spentEntries = await _db.SetAsideEntries
-            .Where(se => selectedIdsForUsage.Contains(se.SetAsideId) && se.Type == SetAsideEntryType.Spent)
-            .Select(se => new { se.SetAsideId, se.Amount, se.CreatedAt, se.TransactionId })
-            .ToListAsync(ct);
-
-        var spentTransactionIds = spentEntries
-            .Where(e => e.TransactionId != null)
-            .Select(e => e.TransactionId!.Value)
-            .Distinct()
-            .ToList();
-
-        var reversedSpendTransactionIds = spentTransactionIds.Count == 0
-            ? new HashSet<Guid>()
-            : (await _db.Transactions
-                .Where(t => t.ScopeId == scopeId
-                    && t.Type == TransactionType.Reversal
-                    && t.RelatedTransactionId.HasValue
-                    && spentTransactionIds.Contains(t.RelatedTransactionId.Value))
-                .Select(t => t.RelatedTransactionId!.Value)
-                .ToListAsync(ct))
-                .ToHashSet();
-
-        var spendByTransaction = spentTransactionIds.Count == 0
-            ? new Dictionary<Guid, decimal>()
-            : await _db.TransactionEntries
-                .Where(te => spentTransactionIds.Contains(te.TransactionId))
-                .GroupBy(te => te.TransactionId)
-                .Select(g => new { g.Key, Spent = -g.Sum(te => te.Amount) })
-                .ToDictionaryAsync(x => x.Key, x => x.Spent, ct);
-
-        var spendsBySetAside = spentEntries.GroupBy(e => e.SetAsideId)
-            .ToDictionary(g => g.Key, g => g.ToList());
-        var usedBySetAside = new Dictionary<Guid, decimal>();
-        foreach (var sa in selected)
-        {
-            var (from, to) = SetAsideCycle.UsageWindow(sa, today);
-            var used = spendsBySetAside.GetValueOrDefault(sa.Id, [])
-                .Where(e => from is null || e.CreatedAt >= BusinessDate.StartOfDayUtc(from.Value))
-                .Where(e => to is null || e.CreatedAt < BusinessDate.StartOfDayUtc(to.Value.AddDays(1)))
-                .Where(e => e.TransactionId is null
-                    || !reversedSpendTransactionIds.Contains(e.TransactionId.Value))
-                .Sum(e => e.TransactionId != null
-                    && spendByTransaction.TryGetValue(e.TransactionId.Value, out var spend)
-                        ? spend
-                        : -e.Amount);
-            usedBySetAside[sa.Id] = used;
-        }
-
-        var executedBySetAside = new Dictionary<Guid, bool>();
-        foreach (var sa in selected)
-        {
-            var (from, to) = SetAsideCycle.UsageWindow(sa, today);
-            executedBySetAside[sa.Id] = sa.Kind == SetAsideKind.RoutineBatch
-                && from.HasValue
-                && to.HasValue
-                && spendsBySetAside.GetValueOrDefault(sa.Id, []).Any(e =>
-                    e.TransactionId.HasValue
-                    && !reversedSpendTransactionIds.Contains(e.TransactionId.Value)
-                    && e.CreatedAt >= BusinessDate.StartOfDayUtc(from.Value)
-                    && e.CreatedAt < BusinessDate.StartOfDayUtc(to.Value.AddDays(1)));
-        }
-
-        // Simulasikan pendanaan rollover dari Uang Bebas dengan urutan pos tertua.
-        // Kekurangan yang belum didanai ditampilkan, tetapi tidak mengurangi Uang Bebas.
-        var pendingFunding = new Dictionary<Guid, decimal>();
-        var pendingSurplus = new Dictionary<Guid, decimal>();
-        var pendingShortfall = new Dictionary<Guid, decimal>();
-
-        var scopeAvailable = Math.Max(0m, await _balances.GetScopeFreeCashAsync(scopeId, ct));
-
-        foreach (var sa in scopeSetAsides
-                     .Where(x => x.Status == SetAsideStatus.Active)
-                     .OrderBy(x => x.CreatedAt))
-        {
-            if (!sa.TargetAmount.HasValue || !SetAsideCycle.HasCycle(sa.CycleKind))
-            {
-                pendingFunding[sa.Id] = 0m;
-                pendingSurplus[sa.Id] = 0m;
-                pendingShortfall[sa.Id] = 0m;
-                continue;
-            }
-
-            if (!SetAsideCycle.IsRolloverPending(sa, today))
-            {
-                pendingFunding[sa.Id] = sa.CycleFundingShortfall;
-                pendingSurplus[sa.Id] = 0m;
-                pendingShortfall[sa.Id] = sa.CycleFundingShortfall;
-                continue;
-            }
-
-            var current = amounts.GetValueOrDefault(sa.Id, 0m);
-            var target = sa.TargetAmount.Value;
-
-            if (current > target)
-            {
-                var surplus = current - target;
-                pendingSurplus[sa.Id] = surplus;
-                pendingFunding[sa.Id] = 0m;
-                pendingShortfall[sa.Id] = 0m;
-                scopeAvailable += surplus;
-            }
-            else if (current < target)
-            {
-                var required = target - current;
-                var applied = Math.Min(required, scopeAvailable);
-                pendingFunding[sa.Id] = required;
-                pendingSurplus[sa.Id] = 0m;
-                pendingShortfall[sa.Id] = required - applied;
-                scopeAvailable -= applied;
-            }
-            else
-            {
-                pendingFunding[sa.Id] = 0m;
-                pendingSurplus[sa.Id] = 0m;
-                pendingShortfall[sa.Id] = 0m;
-            }
-        }
-
-        Dictionary<Guid, List<SetAsideEntryProjection>>? recentBySetAside = null;
-        if (includeRecentEntries)
-        {
-            var selectedIds = selected.Select(sa => sa.Id).ToList();
-            var entries = await _db.SetAsideEntries
-                .Where(se => selectedIds.Contains(se.SetAsideId))
-                .OrderByDescending(se => se.CreatedAt)
-                .ThenByDescending(se => se.Id)
-                .Take(20)
-                .Select(se => new SetAsideEntryProjection
-                {
-                    Id = se.Id,
-                    Type = se.Type,
-                    Amount = se.Amount,
-                    TransactionId = se.TransactionId,
-                    Note = se.Note,
-                    CreatedAt = se.CreatedAt,
-                    Transaction = se.Transaction == null ? null : new SetAsideTransactionSummary
-                    {
-                        Id = se.Transaction.Id,
-                        Type = se.Transaction.Type,
-                        Amount = se.Transaction.Amount,
-                        Description = se.Transaction.Description,
-                        CategoryName = se.Transaction.CategoryName,
-                        OccurredOn = se.Transaction.OccurredOn,
-                        RelatedDescription = se.Transaction.RelatedTransaction != null
-                            ? se.Transaction.RelatedTransaction.Description
-                            : null
-                    }
-                })
-                .ToListAsync(ct);
-
-            recentBySetAside = entries.GroupBy(entry => selected[0].Id)
-                .ToDictionary(g => g.Key, g => g.ToList());
-        }
-
-        return selected
-            .OrderByDescending(sa => sa.CreatedAt)
-            .Select(sa =>
-            {
-                var current = amounts.GetValueOrDefault(sa.Id, 0m);
-                var rolloverPending = SetAsideCycle.IsRolloverPending(sa, today);
-                var (cycleStart, cycleEnd) = SetAsideCycle.UsageWindow(sa, today);
-                var shortfall = pendingShortfall.GetValueOrDefault(sa.Id, 0m);
-
-                return new SetAsideProjection
-                {
-                    Id = sa.Id,
-                    // Legacy only — bukan lokasi permanen alokasi.
-                    AccountId = sa.AccountId,
-                    AccountName = sa.AccountId.HasValue
-                        ? accountNames.GetValueOrDefault(sa.AccountId.Value, "")
-                        : null,
-                    // Hint non-binding untuk pre-select UI proses manual.
-                    DefaultSourceAccountId = sa.DefaultSourceAccountId,
-                    DefaultSourceAccountName = sa.DefaultSourceAccountId.HasValue
-                        ? accountNames.GetValueOrDefault(sa.DefaultSourceAccountId.Value, "")
-                        : null,
-                    Name = sa.Name,
-                    Kind = sa.Kind,
-                    Note = sa.Note,
-                    TransactionCategory = sa.TransactionCategory,
-                    Amount = current,
-                    TargetAmount = sa.TargetAmount,
-                    TargetShortfall = sa.TargetAmount.HasValue
-                        ? Math.Max(0m, sa.TargetAmount.Value - current)
-                        : 0m,
-                    CycleKind = sa.CycleKind,
-                    CycleAnchorDate = sa.CycleAnchorDate,
-                    CurrentCycleStart = SetAsideCycle.HasCycle(sa.CycleKind) ? cycleStart : null,
-                    CurrentCycleEnd = SetAsideCycle.HasCycle(sa.CycleKind) ? cycleEnd : null,
-                    IsCycleRolloverPending = rolloverPending,
-                    CycleFundingRequired = pendingFunding.GetValueOrDefault(sa.Id, 0m),
-                    CycleSurplus = pendingSurplus.GetValueOrDefault(sa.Id, 0m),
-                    CycleFundingShortfall = shortfall,
-                    IsUnderfunded = shortfall > 0,
-                    UsedAmount = usedBySetAside.GetValueOrDefault(sa.Id, 0m),
-                    IsCycleExecuted = executedBySetAside.GetValueOrDefault(sa.Id),
-                    Status = sa.Status,
-                    CloseReason = sa.CloseReason,
-                    CreatedAt = sa.CreatedAt,
-                    UpdatedAt = sa.UpdatedAt,
-                    RecentEntries = recentBySetAside?.GetValueOrDefault(sa.Id, []) ?? []
-                };
-            })
-            .ToList();
-    }
+    public Task<SetAsideHistoryPage> GetHistoryAsync(
+        Guid setAsideId, Guid scopeId, string? cursor = null, int pageSize = 30, CancellationToken ct = default)
+        => _projections.GetHistoryAsync(setAsideId, scopeId, cursor, pageSize, ct);
 
     private async Task<SetAsideOperationResult> BuildResultAsync(
         SetAside setAside,
@@ -1091,8 +754,11 @@ public class SetAsideService
         CycleNormalization normalization,
         CancellationToken ct)
     {
-        var projected = await ProjectForScopeAsync(setAside.ScopeId, sa => sa.Id == setAside.Id,
-            includeRecentEntries: false, ct);
+        var projected = await _projections.ProjectForScopeAsync(
+            setAside.ScopeId,
+            sa => sa.Id == setAside.Id,
+            includeRecentEntries: false,
+            ct);
 
         return new SetAsideOperationResult
         {

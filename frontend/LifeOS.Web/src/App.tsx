@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-import { getAuthMe, logout, resumeGuestSession } from './api';
+import { getAuthMe, GuestSessionExpiredError, logout, resumeGuestSession } from './api';
 
 import EntryScreen from './components/EntryScreen';
 import LoginScreen from './components/LoginScreen';
@@ -25,9 +25,20 @@ function getInitialState(): AppState {
 function App() {
   const [state, setState] = useState<AppState>(getInitialState);
   const [isGuest, setIsGuest] = useState(false);
+  const [guestSessionExpired, setGuestSessionExpired] = useState(false);
   const [loginOrigin, setLoginOrigin] = useState<'entry' | 'finance'>(
     'entry'
   );
+
+  useEffect(() => {
+    const handleGuestExpiry = () => {
+      setGuestSessionExpired(true);
+      setIsGuest(false);
+      setState('entry');
+    };
+    window.addEventListener('lifeos:guest-session-expired', handleGuestExpiry);
+    return () => window.removeEventListener('lifeos:guest-session-expired', handleGuestExpiry);
+  }, []);
 
   useEffect(() => {
     if (state !== 'checking') return;
@@ -57,8 +68,9 @@ function App() {
           setState('finance');
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
+          setGuestSessionExpired(error instanceof GuestSessionExpiredError);
           setState('entry');
         }
       });
@@ -69,6 +81,7 @@ function App() {
   }, [state]);
 
   const handleEnter = (guest: boolean) => {
+    setGuestSessionExpired(false);
     setIsGuest(guest);
     setState('finance');
   };
@@ -80,6 +93,7 @@ function App() {
       // Cookie mungkin sudah expired; tetap anggap logout sukses.
     }
     sessionStorage.setItem('just_logged_out', '1');
+    setGuestSessionExpired(false);
     setIsGuest(false);
     setState('entry');
   };
@@ -119,6 +133,7 @@ function App() {
         <EntryScreen
           onEnter={(guest) => handleEnter(guest)}
           onRequestLogin={() => handleRequestLogin('entry')}
+          guestSessionExpired={guestSessionExpired}
         />
       </div>
     );

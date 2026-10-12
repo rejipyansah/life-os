@@ -15,6 +15,8 @@ Dokumen project utama:
 
 - [Visi](docs/vision.md), [principles](docs/principles.md), dan [arah desain](docs/design.md).
 - [Arsitektur](docs/architecture.md), [domain Finance](docs/finance.md), dan [referensi API](docs/api-reference.md).
+- [Review clean code](docs/review-clean-code.md) serta [review security, konsistensi, dan performa](docs/review-security-consistency-performance.md).
+- [Hasil dan cara menjalankan simulasi performa mobile](docs/mobile-performance.md) (`npm run test:mobile-perf` dengan PostgreSQL disposable).
 - [Runbook operasi](docs/operations-runbook.md) dan [rencana automated testing](docs/automated-testing-plan.md).
 - [Indeks dokumentasi dan aturan pembaruan](docs/documentation-index.md).
 
@@ -51,7 +53,7 @@ npm test
 
 Perintah tersebut menjalankan:
 
-- 385 backend unit/service tests.
+- 422 backend unit/service tests.
 - HTTP/API integration tests dengan TestServer dan SQLite in-memory.
 - Frontend Vitest tests, lint, build tool benchmark, dan production build.
 
@@ -110,7 +112,7 @@ npm run test:e2e
 
 ### Benchmark proyeksi keuangan
 
-Benchmark menghasilkan set-aside dan entry ledger sintetis pada schema PostgreSQL sementara, mencatat waktu, jumlah query `SELECT`, serta alokasi memori, lalu menghapus schema tersebut.
+Benchmark menghasilkan set-aside/entry ledger sintetis dan secara opsional transaksi/agenda pada schema PostgreSQL sementara, mengukur waktu, jumlah query `SELECT`, serta alokasi memori, lalu menghapus schema tersebut.
 
 ```powershell
 $env:LIFEOS_TEST_POSTGRES_CONNECTION = "Host=127.0.0.1;Port=54328;Database=lifeos_test;Username=lifeos;Password=lifeos_test_password"
@@ -118,7 +120,14 @@ dotnet run --project backend/FinanceProjectionBenchmark/FinanceProjectionBenchma
   --configuration Release -- --set-asides 100 --entries 50000 --iterations 5
 ```
 
-Benchmark awal pada lingkungan development lokal menghasilkan rata-rata sekitar **92 ms**, **11 SELECT**, dan **4.14 MiB** alokasi untuk 100 set-aside dan 50.000 entry. Angka ini baseline pengamatan, bukan ambang CI; hasil dapat berbeda antar mesin. Workflow benchmark terjadwal/manual mengunggah hasil sebagai artifact.
+Skenario volume lebih besar, termasuk transaksi dan agenda:
+
+```powershell
+dotnet run --project backend/FinanceProjectionBenchmark/FinanceProjectionBenchmark.csproj `
+  --configuration Release -- --set-asides 500 --entries 250000 --transactions 50000 --upcoming-events 10000 --iterations 5
+```
+
+Benchmark melaporkan waktu, `SELECT`, dan alokasi untuk proyeksi set-aside dan Finance penuh secara terpisah. Dataset skala besar berisi 500 set-aside, 250.000 entry, 50.000 transaksi dasar, 2.500 reversal, 10.000 agenda, dan 60 akun. Pada PostgreSQL disposable lokal dengan 10 iterasi, algoritme lama menghasilkan proyeksi set-aside **710,3 ms / 10 SELECT / 53,23 MiB** dan Finance penuh **563,4 ms / 18 SELECT / 62,47 MiB**. Setelah agregasi spend database-side dan indeks lookup, proyeksi set-aside **440,8 ms / 8 SELECT / 14,55 MiB** dan Finance penuh **451,4 ms / 16 SELECT / 24,11 MiB**. Pada run ini waktu turun sekitar 38%/20% dan alokasi sekitar 73%/61%. Ini observasi satu environment, bukan ambang CI; hasil dapat berbeda antar mesin. Workflow benchmark terjadwal/manual mengunggah hasil sebagai artifact.
 
 ## CI dan branch ruleset
 

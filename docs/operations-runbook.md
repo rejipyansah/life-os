@@ -21,10 +21,14 @@ ASP.NET Core dapat menerima key konfigurasi melalui environment variable dengan 
 | `Gemini__ApiKey` | Saat `AI__Provider=Gemini` dan interpreter digunakan | Secret API Gemini. |
 | `Gemini__Model` | Opsional | Model Gemini; default kode `gemini-3.5-flash-lite`. |
 | `Groq__ApiKey` | Saat `AI__Provider=Groq` dan interpreter digunakan | Secret API Groq. |
-| `Groq__Model` | Opsional | Model Groq; default kode `openai/gpt-oss-20b`. |
-| `Groq__Endpoint` | Opsional | Endpoint Groq-compatible; memiliki default di kode. |
-| `Groq__ReasoningEffort` | Opsional | Default kode `low`. |
+| `Groq__Model` | Opsional | Model Groq; default kode `openai/gpt-oss-20b`, dipakai oleh request provider. |
+| `Groq__Endpoint` | Opsional | Endpoint Groq-compatible; default `https://api.groq.com/openai/v1/`, dipakai sebagai base URL request. |
+| `Groq__ReasoningEffort` | Opsional | Default kode `low`, dipakai oleh request provider. |
 | `ASPNETCORE_URLS` | Saat bind container/host secara eksplisit | Dockerfile mengatur `http://+:8080`. Pastikan HTTPS diterminasi di reverse proxy/load balancer produksi. |
+
+Origin frontend yang dipercaya untuk CORS dan request mutasi cookie didefinisikan di `backend/LifeOS.Api/Services/ApiSecurityPolicies.cs`. Production mengizinkan origin `https://life-os.rejipyansah.workers.dev`, `https://life-os.rejip.my.id`, dan `https://rejip.my.id`; localhost hanya diizinkan pada Development. Jika domain frontend berubah, perbarui daftar tersebut dan verifikasi request browser serta test CSRF. Mutasi API memerlukan header `Origin` atau `Referer` yang tepercaya.
+
+Endpoint `POST /api/interpret` membatasi input hingga 2.000 karakter dan rate limit 10 request per menit per pengguna/sesi guest, dengan IP sebagai fallback. Rate limiter memakai `RemoteIpAddress`; bila API berada di belakang reverse proxy, forwarded headers hanya boleh diaktifkan dengan daftar proxy/network tepercaya agar alamat client tidak dapat dipalsukan. Sampai konfigurasi proxy tepercaya ditetapkan, fallback IP dapat merepresentasikan alamat proxy bersama, bukan alamat client.
 
 Nilai default kode berada di `backend/LifeOS.Api/appsettings.json`; file tersebut tidak boleh berisi secret produksi. `appsettings.Development.json` adalah konfigurasi lokal dan harus tetap menggunakan credential placeholder/non-produksi.
 
@@ -49,9 +53,11 @@ Jalankan prosedur ini hanya oleh operator yang berwenang. Database test/E2E waji
 
 - `GET /api/health` mengembalikan `{ "status": "ok" }` ketika proses API merespons.
 - Health endpoint saat ini **liveness sederhana**, bukan readiness check database. Response `200` tidak membuktikan PostgreSQL dapat menerima query.
-- Log aplikasi menggunakan ASP.NET Core logging defaults dari `appsettings.json`; jangan menaruh password, token guest, isi transaksi atau data pribadi di log.
+- Log aplikasi menggunakan ASP.NET Core logging defaults dari `appsettings.json`; jangan menaruh password, token guest, isi transaksi atau data pribadi di log. Error API menyertakan `traceId`; gunakan nilai itu untuk mencocokkan respons client dengan log exception backend.
 - Jika API tidak mulai: periksa log container, `ConnectionStrings__DefaultConnection`, reachability PostgreSQL, migrasi yang belum diterapkan, port/listener dan konfigurasi provider AI bila service interpret dipakai.
-- Jika UI gagal berbicara dengan API: periksa `VITE_API_BASE_URL` untuk deployment frontend terpisah, konfigurasi proxy lokal, CORS origins pada `Program.cs`, cookie HTTPS/SameSite dan status endpoint API.
+- Jika UI gagal berbicara dengan API: periksa `VITE_API_BASE_URL` untuk deployment frontend terpisah, konfigurasi proxy lokal, CORS/trusted origins pada `ApiSecurityPolicies.cs`, cookie HTTPS/SameSite dan status endpoint API.
+- Jika mutasi API menerima `403`, periksa `Origin`/`Referer` browser dan sinkronisasi origin frontend pada `ApiSecurityPolicies.cs`; jika interpretasi menerima `429`, periksa frekuensi request per pengguna/sesi atau IP.
+- Jika client melaporkan `traceId`, cari nilai tersebut di log API untuk menemukan detail exception server; respons `500` client sengaja tidak memuat stack trace atau pesan exception.
 
 ## Release dan rollback
 
@@ -68,11 +74,13 @@ Rollback aplikasi harus mengikuti kompatibilitas schema migration. **Belum ada p
 
 ## Guest data dan retensi
 
-Guest sandbox dibuat setelah user memilih demo/testing. Session yang kedaluwarsa tidak boleh diaktifkan kembali dari cookie lama; data guest ditahan sementara. Cleanup/deletion worker sengaja belum diimplementasikan menurut `architecture.md`. Jangan mengasumsikan data guest otomatis dihapus sampai kebijakan dan mekanisme cleanup ditetapkan.
+Guest sandbox dibuat setelah user memilih demo/testing. Aktivitas valid pada API guest memperbarui `LastActivityAt` paling sering sekali per 15 menit. Session kedaluwarsa setelah 30 hari tidak aktif; cookie lama ditolak dan tidak dapat mengaktifkan scope kembali. Data sandbox yang kedaluwarsa ditahan 30 hari tambahan lalu dihapus oleh worker harian. Cleanup menggunakan PostgreSQL advisory lock agar hanya satu instance API menjalankan purge pada satu waktu. Worker mencatat kegagalan ke log dan mencoba lagi pada jadwal berikutnya.
+
+Penghapusan mencakup data finansial turunan milik scope Guest dalam urutan yang mematuhi foreign key. Jangan menjalankan benchmark/test ke database produksi; sebelum mengubah urutan atau relasi cleanup, verifikasi dengan test SQLite dan PostgreSQL disposable. Jika cleanup gagal berulang, periksa error worker dan konektivitas database; tidak ada endpoint manual untuk menghapus Owner atau Guest scope.
 
 ## Perubahan yang mewajibkan runbook diperbarui
 
-- Perubahan env var, port, CORS, cookie atau konfigurasi provider → update tabel konfigurasi/diagnosis.
+- Perubahan env var, port, CORS, cookie, trusted origins, rate limit atau konfigurasi provider → update tabel konfigurasi/diagnosis.
 - Perubahan migration/deployment/backup/restore/rollback → update prosedur release sebelum merge.
 - Perubahan health endpoint, telemetry/logging atau alert → update diagnosis dan monitoring.
 - Perubahan guest expiration, retensi atau cleanup → update bagian lifecycle dan `architecture.md`.

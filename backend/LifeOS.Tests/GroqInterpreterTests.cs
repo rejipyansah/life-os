@@ -8,6 +8,7 @@ namespace LifeOS.Tests;
 public class GroqInterpreterTests : IDisposable
 {
     private readonly MockHttpMessageHandler _handler;
+    private readonly HttpClient _http;
     private readonly GroqInterpreter _interpreter;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -17,6 +18,7 @@ public class GroqInterpreterTests : IDisposable
     public GroqInterpreterTests()
     {
         _handler = new MockHttpMessageHandler();
+        _http = new HttpClient(_handler, disposeHandler: false);
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -27,10 +29,14 @@ public class GroqInterpreterTests : IDisposable
             })
             .Build();
 
-        _interpreter = new GroqInterpreter(config, _handler);
+        _interpreter = new GroqInterpreter(config, _http);
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        _http.Dispose();
+        _handler.Dispose();
+    }
 
     private InterpretRequest MakeRequest(string input) => new()
     {
@@ -363,6 +369,57 @@ public class GroqInterpreterTests : IDisposable
         var ex = await Assert.ThrowsAsync<InterpreterProviderException>(
             () => _interpreter.InterpretAsync(MakeRequest("jajan 18rb cash")));
         Assert.Contains("429", ex.Message);
+    }
+
+    [Fact]
+    public async Task Interpret_UsesConfiguredModelAndReasoningEffort()
+    {
+        SetResponse("""
+        {
+            "intent": "Unsupported",
+            "clarificationFields": []
+        }
+        """);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Groq:ApiKey"] = "test-key",
+                ["Groq:Model"] = "custom/test-model",
+                ["Groq:ReasoningEffort"] = "high"
+            })
+            .Build();
+        using var http = new HttpClient(_handler, disposeHandler: false);
+        var interpreter = new GroqInterpreter(config, http);
+
+        await interpreter.InterpretAsync(MakeRequest("test"));
+
+        using var request = JsonDocument.Parse(await _handler.LastRequest!.Content!.ReadAsStringAsync());
+        Assert.Equal("custom/test-model", request.RootElement.GetProperty("model").GetString());
+        Assert.Equal("high", request.RootElement.GetProperty("reasoning_effort").GetString());
+    }
+
+    [Fact]
+    public async Task Interpret_UsesConfiguredEndpoint()
+    {
+        SetResponse("""
+        {
+            "intent": "Unsupported",
+            "clarificationFields": []
+        }
+        """);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Groq:ApiKey"] = "test-key",
+                ["Groq:Endpoint"] = "https://groq.example.test/v2"
+            })
+            .Build();
+        using var http = new HttpClient(_handler, disposeHandler: false);
+        var interpreter = new GroqInterpreter(config, http);
+
+        await interpreter.InterpretAsync(MakeRequest("test"));
+
+        Assert.Equal("https://groq.example.test/v2/chat/completions", _handler.LastRequest!.RequestUri!.ToString());
     }
 
     [Fact]

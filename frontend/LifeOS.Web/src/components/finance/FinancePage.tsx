@@ -47,6 +47,25 @@ export default function FinancePage({
       />
 
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+        {state.loadError ? (
+          <div
+            className="mb-5 flex flex-col gap-3 rounded-xl border border-lo-error/30 bg-lo-error-container px-4 py-3 text-sm text-lo-error sm:flex-row sm:items-center sm:justify-between"
+            role="alert"
+          >
+            <span>{state.loadError}</span>
+            <button
+              type="button"
+              onClick={state.retry}
+              disabled={state.isLoading}
+              className="self-start rounded-full border border-lo-error/30 px-4 py-2 font-medium transition-colors hover:bg-white disabled:cursor-wait disabled:opacity-60 sm:self-auto"
+            >
+              {state.isLoading ? 'Mencoba kembali…' : 'Coba lagi'}
+            </button>
+          </div>
+        ) : state.isLoading ? (
+          <p className="mb-5 text-sm text-lo-text-subtle" role="status">Memuat data keuangan…</p>
+        ) : null}
+
         <div className="flex flex-col gap-6">
           {/* Row 1: Uang Bebas + Jatuh Tempo */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">

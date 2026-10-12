@@ -48,4 +48,4 @@ run('Apply API migrations to the isolated E2E database', 'dotnet', [
   '--startup-project', 'LifeOS.Api/LifeOS.Api.csproj',
   '--configuration', 'Release',
 ], backend);
-run('Run Playwright browser tests', 'npx', ['playwright', 'test'], frontend);
+run('Run Playwright browser tests', 'npx', ['playwright', 'test', '--grep-invert', '@mobile-perf'], frontend);

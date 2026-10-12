@@ -5,9 +5,9 @@ test('guest records income in the browser and the finance projection reflects it
   await page.getByRole('button', { name: 'Coba Life OS' }).click();
   await expect(page.getByRole('heading', { name: 'Catat Transaksi' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Tunai' }).click();
+  await page.getByRole('button', { name: 'Tunai', exact: true }).click();
   await page.getByRole('button', { name: 'terima freelance desain 750rb' }).click();
-  await expect(page.getByText('Pemasukan', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Tinjau transaksi' })).toContainText('Pemasukan');
   await page.getByRole('button', { name: 'Simpan Transaksi' }).click();
   await expect(page.getByText(/Transaksi berhasil dicatat:.*Rp 750\.000/)).toBeVisible();
 

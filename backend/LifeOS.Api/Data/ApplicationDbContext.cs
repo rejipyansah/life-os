@@ -59,6 +59,9 @@ public class ApplicationDbContext : IdentityDbContext
             e.HasIndex(gs => gs.ScopeId)
                 .IsUnique();
 
+            // Used to locate inactivity-expired sessions for scheduled cleanup.
+            e.HasIndex(gs => gs.LastActivityAt);
+
             e.HasOne(gs => gs.Scope)
                 .WithMany()
                 .HasForeignKey(gs => gs.ScopeId)
@@ -120,8 +123,8 @@ public class ApplicationDbContext : IdentityDbContext
                 .HasForeignKey(t => t.RelatedTransactionId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Indexes
-            e.HasIndex(t => t.ScopeId);
+            // Scope-filtered and reversal lookups used by projections.
+            e.HasIndex(t => new { t.ScopeId, t.Type, t.RelatedTransactionId });
         });
 
         // TransactionEntry configuration
@@ -235,7 +238,8 @@ public class ApplicationDbContext : IdentityDbContext
                 .HasForeignKey(se => se.TransactionId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            e.HasIndex(se => se.SetAsideId);
+            // Scope/type/window usage projections and per-set-aside balance history.
+            e.HasIndex(se => new { se.SetAsideId, se.Type, se.CreatedAt });
             e.HasIndex(se => se.ScopeId);
             e.HasIndex(se => se.TransactionId);
         });

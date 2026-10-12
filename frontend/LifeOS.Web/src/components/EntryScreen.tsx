@@ -7,9 +7,10 @@ import AppFooter from './AppFooter';
 interface EntryScreenProps {
   onEnter: (isGuest: boolean) => void;
   onRequestLogin: () => void;
+  guestSessionExpired?: boolean;
 }
 
-export default function EntryScreen({ onEnter, onRequestLogin }: EntryScreenProps) {
+export default function EntryScreen({ onEnter, onRequestLogin, guestSessionExpired = false }: EntryScreenProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -51,6 +52,12 @@ export default function EntryScreen({ onEnter, onRequestLogin }: EntryScreenProp
             </div>
 
             <div className="space-y-4 pt-1">
+              {guestSessionExpired && (
+                <div className="bg-lo-surface-container text-lo-text-ink px-4 py-3 rounded-xl text-sm" role="status">
+                  Sesi demo sebelumnya tidak tersedia lagi. Sesi guest berakhir setelah 30 hari tidak aktif dan datanya dihapus setelah masa retensi 30 hari. Mulai sesi demo baru untuk melanjutkan.
+                </div>
+              )}
+
               {error && (
                 <div className="bg-lo-error-container text-lo-error px-4 py-3 rounded-xl text-sm text-center">
                   {error}
