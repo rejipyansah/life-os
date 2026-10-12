@@ -65,7 +65,7 @@ export default function AktivitasTerkiniSection({
   const pageItems = filtered.slice(startIndex, startIndex + ACTIVITY_PER_PAGE);
 
   return (
-    <div className={`${cardBase} p-6 sm:p-7`}>
+    <div className={`${cardBase} min-w-0 p-4 sm:p-6 lg:p-7`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-lo-border-hairline gap-2">
         <div className="flex items-center gap-2.5">
           <span className="w-2.5 h-2.5 rounded-full bg-lo-secondary ring-4 ring-lo-secondary/15" />
@@ -79,7 +79,7 @@ export default function AktivitasTerkiniSection({
         </span>
       </div>
 
-      <div className="mt-5 p-1 bg-lo-surface-recessed/80 rounded-2xl flex items-center gap-1 text-xs">
+      <div className="mt-5 p-1 bg-lo-surface-recessed/80 rounded-2xl flex items-center gap-1 text-[11px] sm:text-xs">
         {FILTER_TABS.map((tab) => {
           const isActive = filter === tab.key;
           return (
@@ -87,7 +87,7 @@ export default function AktivitasTerkiniSection({
               key={tab.key}
               type="button"
               onClick={() => onFilterChange(tab.key)}
-              className={`flex-1 py-1.5 px-3 rounded-xl font-medium transition-all cursor-pointer text-center ${
+              className={`flex-1 min-w-0 py-2 px-1 sm:px-3 rounded-xl font-medium transition-all cursor-pointer text-center whitespace-nowrap ${
                 isActive
                   ? 'bg-white text-lo-text-ink shadow-xs'
                   : 'text-lo-text-subtle hover:text-lo-text-ink'
@@ -129,15 +129,15 @@ export default function AktivitasTerkiniSection({
         )}
       />
 
-      <div className="mt-5 pt-4 border-t border-dashed border-lo-border-hairline flex items-center justify-between">
-        <span className="text-[11px] text-lo-text-subtle flex items-center gap-1">
+      <div className="mt-5 pt-4 border-t border-dashed border-lo-border-hairline flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="hidden sm:flex text-[11px] text-lo-text-subtle items-center gap-1 min-w-0">
           <Icon name="auto_stories" className="text-[14px]" />
-          Arsip lengkap tersimpan rapi
+          <span>Arsip lengkap tersimpan rapi</span>
         </span>
         <button
           type="button"
           onClick={() => setModal({ kind: 'history' })}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-lo-secondary hover:text-lo-primary transition-colors cursor-pointer group"
+          className="inline-flex items-center gap-1 text-xs font-semibold text-lo-secondary hover:text-lo-primary transition-colors cursor-pointer group whitespace-nowrap"
         >
           <span>Buka Riwayat Lengkap ({transactions.length})</span>
           <Icon
@@ -206,7 +206,7 @@ function TxRow({
     <div
       className={`${
         compact ? 'p-3 sm:px-4' : 'group p-3 sm:py-3 sm:px-4 rounded-2xl border border-lo-border-hairline/80'
-      } ${cardBg} flex items-center justify-between text-xs transition-all duration-150`}
+      } ${cardBg} flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between text-xs transition-all duration-150 min-w-0`}
     >
       <div className="flex items-center gap-2.5 min-w-0 pr-2">
         <div
@@ -225,13 +225,13 @@ function TxRow({
           </div>
         </div>
       </div>
-      <div className="text-right shrink-0 flex flex-col items-end gap-1">
+      <div className="text-right w-full sm:w-auto min-w-0 flex flex-col items-end gap-1">
         <p
           className={`font-headline ${compact ? 'text-xs sm:text-sm' : 'text-sm'} tabular-nums tracking-tight ${amountColor}`}
         >
           {formatSignedCurrency(tx.amount)}
         </p>
-        <div className="flex items-center gap-1.5">
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
           <span className="inline-block px-2 py-0.5 rounded-full bg-lo-surface-recessed text-lo-text-subtle text-[10px] font-medium">
             {tx.category}
           </span>
@@ -515,7 +515,7 @@ function VoidModal({
           <button
             type="button"
             onClick={() => onConfirm(reason)}
-            className="px-5 py-2 rounded-xl text-xs font-semibold bg-lo-warning text-white hover:bg-lo-warning/90 transition-colors shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+            className="px-5 py-2 rounded-xl text-xs font-semibold bg-lo-warning text-white hover:bg-lo-warning/90 transition-colors shadow-xs inline-flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Icon name="check_circle" className="text-[16px]" />
             Konfirmasi Pembatalan

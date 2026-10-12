@@ -49,7 +49,7 @@ export default function FinancePage({
         onLogin={onRequestLogin}
       />
 
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+      <main className="min-w-0 flex-1 w-full max-w-7xl mx-auto px-3 min-[360px]:px-4 sm:px-6 lg:px-8 pt-16 md:pt-20 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-16">
         {state.loadError ? (
           <div
             className="mb-5 flex flex-col gap-3 rounded-xl border border-lo-error/30 bg-lo-error-container px-4 py-3 text-sm text-lo-error sm:flex-row sm:items-center sm:justify-between"
@@ -78,7 +78,7 @@ export default function FinancePage({
                 onOpenFormula={() => setFormulaOpen(true)}
               />
             </div>
-            <div className="lg:col-span-7">
+            <div className={`${state.billsDue.length === 0 ? 'hidden md:block' : ''} lg:col-span-7`}>
               <JatuhTempoCard
                 derived={state.derived}
                 billsDue={state.billsDue}
@@ -98,8 +98,8 @@ export default function FinancePage({
           />
 
           {/* Row 3: Yang Disisihkan + Agenda | Sumber Dana + Aktivitas Terkini */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <div className="lg:col-span-7 flex flex-col gap-6">
+          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
+            <div className="order-2 min-w-0 lg:order-1 lg:col-span-7 flex flex-col gap-4 sm:gap-6">
               <YangDisisihkanSection
                 posItems={state.posItems}
                 accounts={state.accounts}
@@ -135,7 +135,7 @@ export default function FinancePage({
                 onUpdate={state.updateAgenda}
               />
             </div>
-            <div className="lg:col-span-5 flex flex-col gap-6">
+            <div className="order-1 min-w-0 lg:order-2 lg:col-span-5 flex flex-col gap-4 sm:gap-6">
               <SumberDanaSection
                 accounts={state.accounts}
                 onAdd={state.addAccount}

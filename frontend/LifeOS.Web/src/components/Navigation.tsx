@@ -99,8 +99,8 @@ export default function Navigation({
       </nav>
 
       {/* Mobile: bottom tab bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#f5fbf4] border-t border-[#D5E0D3]/60">
-        <div className="flex items-center justify-around h-16 px-1">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#f5fbf4] border-t border-[#D5E0D3]/60 pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center justify-around min-h-16 px-1">
           {navItems.map((item) => {
             const Icon = iconMap[item.id];
             const isActive = active === item.id;
@@ -109,7 +109,7 @@ export default function Navigation({
                 key={item.id}
                 onClick={() => item.available && onNavigate(item.id)}
                 disabled={!item.available}
-                className={`flex flex-col items-center justify-center gap-1 min-w-[56px] min-h-[44px] transition-colors ${
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 min-h-[44px] transition-colors ${
                   isActive
                     ? 'text-lo-primary font-semibold'
                     : item.available

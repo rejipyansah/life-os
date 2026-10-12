@@ -51,7 +51,10 @@ public static class GuestSessionEndpoints
 
             var existingSession = await guestTokens.ResolveAsync(http, http.RequestAborted);
             if (existingSession is not null)
+            {
+                await ScopeInitializer.EnsureDefaultAccountAsync(db, existingSession.ScopeId, http.RequestAborted);
                 return Results.Ok(new { isGuest = true });
+            }
 
             // Invalid/expired cookies are cleared during resolution.
             var guestScope = new Scope { Type = ScopeType.Guest };

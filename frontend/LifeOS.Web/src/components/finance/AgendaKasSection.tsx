@@ -89,12 +89,12 @@ export default function AgendaKasSection({
   const confirmConfig = confirm ? buildConfirm(confirm.kind, confirm.agenda) : null;
 
   return (
-    <div className={`${cardBase} p-6 sm:p-8`}>
+    <div className={`${cardBase} min-w-0 p-4 sm:p-6 lg:p-8`}>
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-lo-border-hairline/80">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-lo-secondary" />
-            <h2 className="font-headline text-xl sm:text-2xl font-medium text-lo-text-ink tracking-tight">
+            <h2 className="font-headline text-lg min-[360px]:text-xl sm:text-2xl font-medium text-lo-text-ink tracking-tight">
               Rencana Pengeluaran/Pemasukan
             </h2>
           </div>
@@ -104,7 +104,7 @@ export default function AgendaKasSection({
           <button
             type="button"
             onClick={() => setEditorTarget('new')}
-            className="ml-auto sm:ml-2 px-3.5 py-1.5 rounded-full bg-lo-primary hover:bg-lo-secondary text-white text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+            className="ml-auto sm:ml-2 px-3.5 py-1.5 rounded-full bg-lo-primary hover:bg-lo-secondary text-white text-xs font-medium transition-all duration-150 flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
           >
             <Icon name="add" className="text-[16px]" />
             <span>Buat Rencana</span>
@@ -120,7 +120,7 @@ export default function AgendaKasSection({
         </button>
       </header>
 
-      <nav aria-label="Filter Agenda" className="flex items-center gap-1.5 p-1 bg-lo-surface-recessed rounded-full w-fit mt-4">
+      <nav aria-label="Filter Agenda" className="flex max-w-full items-center gap-1.5 overflow-x-auto p-1 bg-lo-surface-recessed rounded-full w-fit mt-4">
         {(
           [
             { key: 'all' as const, label: `Semua (${agendas.length})` },
@@ -134,7 +134,7 @@ export default function AgendaKasSection({
               key={tab.key}
               type="button"
               onClick={() => onFilterChange(tab.key)}
-              className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+              className={`shrink-0 px-3 py-1.5 sm:px-3.5 sm:py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
                 isActive
                   ? 'bg-white text-lo-text-ink shadow-xs'
                   : 'text-lo-text-subtle hover:text-lo-text-ink'
@@ -354,7 +354,7 @@ function AgendaCard({
             <button
               type="button"
               onClick={onScheduleFlexible}
-              className="px-3.5 py-1.5 rounded-full border border-lo-border-hairline bg-lo-surface-recessed hover:bg-lo-accent-wash text-lo-text-ink text-xs font-medium transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-1.5 rounded-full border border-lo-border-hairline bg-lo-surface-recessed hover:bg-lo-accent-wash text-lo-text-ink text-xs font-medium transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Icon name="event_upcoming" className="text-[14px] text-lo-text-subtle" />
               <span>Atur Tanggal</span>

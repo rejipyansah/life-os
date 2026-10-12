@@ -51,7 +51,7 @@ describe('SumberDanaSection interactions', () => {
     renderSection({ onAdd });
 
     await user.click(screen.getByRole('button', { name: 'Tambah Akun' }));
-    await user.type(screen.getByLabelText('Nama Sumber Dana'), '  Rekening Baru  ');
+    await user.type(screen.getByLabelText(/^Nama Sumber Dana/), '  Rekening Baru  ');
     await user.click(screen.getByRole('button', { name: 'Simpan' }));
 
     expect(await screen.findByRole('alert')).toBeTruthy();
@@ -60,6 +60,22 @@ describe('SumberDanaSection interactions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Simpan' }));
     expect(screen.queryByRole('dialog', { name: 'Tambah Sumber Dana' })).toBeNull();
+  });
+
+  it('shows the required-name error only after the field is touched', async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole('button', { name: 'Tambah Akun' }));
+    const nameInput = screen.getByLabelText(/^Nama Sumber Dana/);
+    expect(nameInput.hasAttribute('required')).toBe(true);
+    expect(screen.queryByText('Nama sumber dana wajib diisi.')).toBeNull();
+    expect(screen.getByText('0/50')).toBeTruthy();
+
+    await user.click(nameInput);
+    await user.tab();
+    expect(await screen.findByText('Nama sumber dana wajib diisi.')).toBeTruthy();
+    expect(nameInput.getAttribute('aria-invalid')).toBe('true');
   });
 
   it('persists a transfer using the selected distinct accounts and formatted amount', async () => {

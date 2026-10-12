@@ -305,6 +305,24 @@ describe('parseTransactionText', () => {
     expect(r.account).toBe('BCA Operasional');
   });
 
+  it('recognizes income nouns, Indonesian variants, and small typos', () => {
+    for (const input of ['gajian 5jt', 'gaji 5jt', 'gajiaan 5jt', 'gajia 5jt', 'honor 500rb', 'cashback 25rb']) {
+      expect(parseTransactionText(input)).toMatchObject({
+        status: 'SUCCESS',
+        type: 'Pemasukan',
+        category: 'Pendapatan',
+      });
+    }
+  });
+
+  it('uses explicit action words to classify mixed phrases and tolerates a typo', () => {
+    expect(parseTransactionText('gajian bayar kos 2jt').type).toBe('Pengeluaran');
+    expect(parseTransactionText('terima gaji 5jt').type).toBe('Pemasukan');
+    expect(parseTransactionText('pembayarn listrik 100rb').type).toBe('Pengeluaran');
+    // Similar everyday words must not become accidental income keywords.
+    expect(parseTransactionText('masak 25rb').type).toBe('Pengeluaran');
+  });
+
   it('detects account keywords', () => {
     expect(detectAccountFromText('bayar wifi di SeaBank')).toBe('SeaBank');
     expect(detectAccountFromText('jajan tunai')).toBe('Dompet Fisik / Tunai');

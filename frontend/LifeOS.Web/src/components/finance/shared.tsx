@@ -6,19 +6,19 @@ import type { FinanceToast, ProgressTone } from '../../finance';
 /* ── Shared class tokens (from DESIGN.md + module sources) ── */
 
 export const btnPrimary =
-  'px-4 py-2 rounded-full bg-lo-primary hover:bg-lo-primary-hover text-white text-xs font-semibold shadow-xs transition-all cursor-pointer active:scale-95 inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shrink-0';
+  'px-4 py-2 rounded-full bg-lo-primary hover:bg-lo-primary-hover text-white text-xs font-semibold shadow-xs transition-all cursor-pointer active:scale-95 inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shrink-0';
 
 export const btnSecondary =
-  'px-3.5 py-2 rounded-full bg-lo-surface-recessed hover:bg-lo-border-hairline/60 text-lo-text-ink text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer border border-lo-border-hairline active:scale-95 shrink-0';
+  'px-3.5 py-2 rounded-full bg-lo-surface-recessed hover:bg-lo-border-hairline/60 text-lo-text-ink text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-lo-border-hairline active:scale-95 shrink-0';
 
 export const btnGhost =
-  'px-3 py-1.5 rounded-full hover:bg-white border border-lo-border-hairline text-lo-text-subtle hover:text-lo-text-ink text-xs font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 shrink-0';
+  'px-3 py-1.5 rounded-full hover:bg-white border border-lo-border-hairline text-lo-text-subtle hover:text-lo-text-ink text-xs font-medium transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0';
 
 export const btnDanger =
-  'px-3 py-1.5 rounded-full border border-red-200/80 bg-red-50/60 hover:bg-red-100/70 text-lo-error hover:text-red-700 text-xs font-medium transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0';
+  'px-3 py-1.5 rounded-full border border-red-200/80 bg-red-50/60 hover:bg-red-100/70 text-lo-error hover:text-red-700 text-xs font-medium transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0';
 
 export const btnDangerSolid =
-  'px-5 py-2 rounded-full bg-lo-error hover:bg-red-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5 active:scale-95 shrink-0';
+  'px-5 py-2 rounded-full bg-lo-error hover:bg-red-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 active:scale-95 shrink-0';
 
 export const cardBase =
   'bg-white rounded-2xl border border-lo-border-hairline shadow-xs';
@@ -196,11 +196,11 @@ export function ToastViewport({
 }) {
   if (toasts.length === 0) return null;
   return (
-    <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2 pointer-events-none">
+    <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] md:bottom-6 left-3 right-3 md:left-auto md:right-6 z-[60] flex flex-col gap-2 pointer-events-none">
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="px-4 py-2.5 rounded-xl bg-white text-lo-text-ink border border-lo-border-hairline shadow-lg text-xs font-medium flex items-center gap-2 pointer-events-auto animate-[fadeIn_0.25s_cubic-bezier(0.16,1,0.3,1)] max-w-xs"
+          className="px-4 py-2.5 rounded-xl bg-white text-lo-text-ink border border-lo-border-hairline shadow-lg text-xs font-medium flex items-center gap-2 pointer-events-auto animate-[fadeIn_0.25s_cubic-bezier(0.16,1,0.3,1)] w-full md:max-w-xs md:w-auto"
         >
           <Icon name={t.icon || 'check_circle'} className="text-lo-secondary text-[18px]" />
           <span>{t.message}</span>

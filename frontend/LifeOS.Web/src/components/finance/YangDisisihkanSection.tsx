@@ -162,7 +162,7 @@ export default function YangDisisihkanSection({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-4 border-b border-lo-border-hairline/60">
         <div className="min-w-0">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h2 className="font-headline text-2xl font-medium text-lo-text-ink tracking-tight">
+            <h2 className="font-headline text-xl sm:text-2xl font-medium text-lo-text-ink tracking-tight">
               Dana yang Disisihkan
             </h2>
             <span className="text-[12px] bg-lo-accent-wash/80 text-lo-secondary px-3 py-1 rounded-full font-medium border border-lo-secondary/20">
@@ -176,7 +176,7 @@ export default function YangDisisihkanSection({
         <button
           type="button"
           onClick={() => setModal({ kind: 'create' })}
-          className="inline-flex items-center gap-2 bg-lo-primary text-lo-surface-cream hover:bg-lo-primary-hover px-4 py-2.5 rounded-full text-xs font-medium transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+          className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-lo-primary text-lo-surface-cream hover:bg-lo-primary-hover px-4 py-2.5 rounded-full text-xs font-medium transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
         >
           <Icon name="add" className="text-base" />
           <span>Tambah Dana</span>
@@ -876,7 +876,7 @@ function CreatePosModal({
                 cycle: category === 'routine_batch' ? cycle : undefined,
                 cycleKind: category === 'routine_incremental' ? cycleKind : undefined,
               }))}
-            className={`${btnPrimary} disabled:opacity-40 disabled:hover:bg-lo-primary`}
+            className={`${btnPrimary} justify-center disabled:opacity-40 disabled:hover:bg-lo-primary`}
           >
             <Icon name="check" className="text-base" />
             <span>{saving ? 'Menyimpan…' : 'Simpan Dana'}</span>

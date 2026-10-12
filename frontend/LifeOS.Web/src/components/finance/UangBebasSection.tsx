@@ -420,7 +420,7 @@ function BillRow({
             <button
               type="button"
               onClick={onPay}
-              className="px-3 py-1.5 rounded-full bg-lo-primary hover:bg-lo-secondary text-white text-xs font-medium transition-colors cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1 shrink-0"
+              className="px-3 py-1.5 rounded-full bg-lo-primary hover:bg-lo-secondary text-white text-xs font-medium transition-colors cursor-pointer active:scale-95 shadow-2xs flex items-center justify-center gap-1 shrink-0"
             >
               <Icon name="check" className="text-[15px]" />
               <span>Bayar</span>

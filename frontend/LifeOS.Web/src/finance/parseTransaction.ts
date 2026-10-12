@@ -36,8 +36,75 @@ const CATEGORY_KEYWORDS: Array<{ category: (typeof TRANSACTION_CATEGORIES)[numbe
   { category: 'Pendidikan', keywords: ['kursus', 'buku', 'sekolah', 'kuliah', 'pendidikan'] },
 ];
 
+const INCOME_KEYWORDS = [
+  'gaji', 'gajian', 'gajia', 'gajih', 'terima', 'menerima', 'dapat', 'dapet', 'pemasukan',
+  'pendapatan', 'bonus', 'freelance', 'honor', 'komisi', 'upah', 'income',
+  'salary', 'cair', 'pencairan', 'masuk', 'kiriman', 'refund', 'cashback', 'reimburse',
+];
+
+const EXPENSE_KEYWORDS = [
+  'bayar', 'membayar', 'pembayaran', 'beli', 'belanja', 'jajan', 'pengeluaran',
+  'keluar', 'expense', 'spending',
+];
+
+const INCOME_ACTIONS = ['terima', 'menerima', 'dapat', 'dapet', 'masuk', 'cair', 'pencairan'];
+const EXPENSE_ACTIONS = ['bayar', 'membayar', 'pembayaran', 'beli', 'belanja', 'jajan', 'keluar'];
+
 const hasPhrase = (text: string, phrase: string) =>
   new RegExp(`(^|[^\\p{L}\\p{N}])${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}\\p{N}]|$)`, 'iu').test(text);
+
+function editDistanceAtMostOne(left: string, right: string): boolean {
+  if (Math.abs(left.length - right.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < left.length && j < right.length) {
+    if (left[i] === right[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (left.length > right.length) i++;
+    else if (right.length > left.length) j++;
+    else {
+      i++;
+      j++;
+    }
+  }
+  if (i < left.length || j < right.length) edits++;
+  return edits <= 1;
+}
+
+function findIntentKeyword(text: string, keywords: string[]): number {
+  const tokens = [...text.matchAll(/[\p{L}]+/gu)];
+  let firstMatch = Number.POSITIVE_INFINITY;
+  for (const token of tokens) {
+    const word = token[0].toLowerCase();
+    if (keywords.some((keyword) =>
+      word === keyword || (word.length >= 6 && keyword.length >= 6 && editDistanceAtMostOne(word, keyword))
+    )) {
+      firstMatch = Math.min(firstMatch, token.index ?? firstMatch);
+    }
+  }
+  return firstMatch;
+}
+
+function inferTransactionType(text: string): 'Pemasukan' | 'Pengeluaran' {
+  const incomeAt = findIntentKeyword(text, INCOME_KEYWORDS);
+  const expenseAt = findIntentKeyword(text, EXPENSE_KEYWORDS);
+  if (incomeAt === Number.POSITIVE_INFINITY) return 'Pengeluaran';
+  if (expenseAt === Number.POSITIVE_INFINITY) return 'Pemasukan';
+
+  const incomeActionAt = findIntentKeyword(text, INCOME_ACTIONS);
+  const expenseActionAt = findIntentKeyword(text, EXPENSE_ACTIONS);
+  if (incomeActionAt !== Number.POSITIVE_INFINITY && expenseActionAt === Number.POSITIVE_INFINITY) return 'Pemasukan';
+  if (expenseActionAt !== Number.POSITIVE_INFINITY && incomeActionAt === Number.POSITIVE_INFINITY) return 'Pengeluaran';
+  if (incomeActionAt !== Number.POSITIVE_INFINITY && expenseActionAt !== Number.POSITIVE_INFINITY) {
+    return incomeActionAt < expenseActionAt ? 'Pemasukan' : 'Pengeluaran';
+  }
+  return incomeAt < expenseAt ? 'Pemasukan' : 'Pengeluaran';
+}
 
 export function detectAccountFromText(text: string): string | null {
   for (const kw of ACCOUNT_KEYWORDS) {
@@ -92,12 +159,14 @@ export function parseTransactionText(raw: string): ParsedTransaction {
     type = 'Transfer Kas';
   } else if (/\b(?:sisihkan|tabung|investasi|darurat)\b/i.test(text)) {
     type = 'Alokasi Pos';
-  } else if (/\b(?:terima|gaji|dapat|masuk|freelance|bonus)\b/i.test(text)) {
-    type = 'Pemasukan';
-    category = 'Pendapatan';
   } else {
-    const match = CATEGORY_KEYWORDS.find(({ keywords }) => keywords.some((keyword) => hasPhrase(text, keyword)));
-    if (match) category = match.category;
+    type = inferTransactionType(text);
+    if (type === 'Pemasukan') {
+      category = 'Pendapatan';
+    } else {
+      const match = CATEGORY_KEYWORDS.find(({ keywords }) => keywords.some((keyword) => hasPhrase(text, keyword)));
+      if (match) category = match.category;
+    }
   }
 
   const description = cleanDescription(raw);
