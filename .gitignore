@@ -7,7 +7,6 @@ node_modules/
 dist/
 AGENTS.md
 
-backend/GeminiBenchmark/
 backend/ProviderBenchmark/
 
 # Environment / secrets

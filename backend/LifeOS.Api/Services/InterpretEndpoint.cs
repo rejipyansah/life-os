@@ -18,7 +18,7 @@ public static class InterpretEndpoint
 
     private static readonly HashSet<string> ValidFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "amount", "account", "toAccount", "setAsideName", "title", "direction", "date", "eventDate"
+        "amount", "account", "toAccount", "transactionType", "setAsideName", "title", "direction", "date", "eventDate"
     };
 
     private static readonly Dictionary<string, string> FieldMessages = new(StringComparer.OrdinalIgnoreCase)
@@ -26,6 +26,7 @@ public static class InterpretEndpoint
         ["amount"] = "Nominalnya berapa?",
         ["account"] = "Dari akun mana?",
         ["toAccount"] = "Ke akun mana?",
+        ["transactionType"] = "Jenis transaksinya belum terbaca. Ini uang masuk, uang keluar, atau transfer?",
         ["setAsideName"] = "Untuk keperluan apa?",
         ["title"] = "Agendanya untuk apa?",
         ["direction"] = "Apakah ini pemasukan atau pengeluaran?",
@@ -36,6 +37,11 @@ public static class InterpretEndpoint
     private const string IntentTransaction = "CreateTransaction";
     private const string IntentSetAside = "CreateSetAside";
     private const string IntentEvent = "CreateUpcomingEvent";
+    private static readonly HashSet<string> ExpenseCategories = new(StringComparer.Ordinal)
+    {
+        "Makan & Minum", "Transportasi", "Tagihan & Utilitas", "Belanja",
+        "Kesehatan", "Hiburan", "Pendidikan", "Lainnya"
+    };
 
     public static async Task<HandlerResult> HandleAsync(
         InterpretInputRequest body,
@@ -83,6 +89,12 @@ public static class InterpretEndpoint
                 EligibleAccounts = accountNames
             }, ct);
         }
+        catch (InterpreterQuotaExceededException)
+        {
+            return new HandlerResult(
+                StatusCodes.Status429TooManyRequests,
+                new ApiErrorResponse("ai_quota_exceeded", "Batas pemakaian Groq tercapai."));
+        }
         catch (InterpreterProviderException)
         {
             return new HandlerResult(
@@ -90,14 +102,15 @@ public static class InterpretEndpoint
                 new ApiErrorResponse("ai_provider_unavailable", "Layanan interpretasi sementara tidak tersedia. Silakan coba lagi."));
         }
 
-        return new HandlerResult(200, Validate(raw, accounts, scopeId, body.Input.Trim()));
+        return new HandlerResult(200, Validate(raw, accounts, scopeId, body.Input.Trim(), body.AccountHint));
     }
 
     public static InterpretResponse Validate(
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
         Guid scopeId,
-        string userInput = "")
+        string userInput = "",
+        string? accountHint = null)
     {
         if (raw.Intent == "Unsupported" || raw.Intent is not (IntentTransaction or IntentSetAside or IntentEvent))
         {
@@ -114,6 +127,16 @@ public static class InterpretEndpoint
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var accountHintApplied = false;
+        if (raw.Intent == IntentTransaction
+            && string.IsNullOrWhiteSpace(raw.Account)
+            && TryResolveAccount(accountHint, eligibleAccounts, out var hintedAccountId))
+        {
+            raw.Account = eligibleAccounts.First(account => account.Id == hintedAccountId).Name;
+            fields.RemoveAll(field => field.Equals("account", StringComparison.OrdinalIgnoreCase));
+            accountHintApplied = true;
+        }
+
         switch (raw.Intent)
         {
             case IntentSetAside:
@@ -123,7 +146,7 @@ public static class InterpretEndpoint
                 CollectEventFields(raw, eligibleAccounts, fields);
                 break;
             default:
-                CollectTransactionFields(raw, eligibleAccounts, userInput, fields);
+                CollectTransactionFields(raw, eligibleAccounts, userInput, fields, accountHintApplied);
                 break;
         }
 
@@ -184,21 +207,22 @@ public static class InterpretEndpoint
         InterpretResult raw,
         IReadOnlyList<AccountLookup> eligibleAccounts,
         string userInput,
-        List<string> fields)
+        List<string> fields,
+        bool accountHintApplied)
     {
-        if (string.IsNullOrEmpty(raw.TransactionType) || !raw.Amount.HasValue || raw.Amount <= 0)
+        if (string.IsNullOrEmpty(raw.TransactionType)
+            || raw.TransactionType is not ("Expense" or "Income" or "Transfer")
+            || !raw.Amount.HasValue || raw.Amount <= 0)
         {
-            if (string.IsNullOrEmpty(raw.TransactionType))
-                AddField(fields, "account");
+            if (string.IsNullOrEmpty(raw.TransactionType)
+                || raw.TransactionType is not ("Expense" or "Income" or "Transfer"))
+                AddField(fields, "transactionType");
 
             if (!raw.Amount.HasValue || raw.Amount <= 0)
                 AddField(fields, "amount");
 
             return;
         }
-
-        if (raw.TransactionType is not ("Expense" or "Income" or "Transfer"))
-            return;
 
         if (!TryResolveAccount(raw.Account, eligibleAccounts, out _))
             AddField(fields, "account");
@@ -217,6 +241,7 @@ public static class InterpretEndpoint
             }
 
             if (!string.IsNullOrEmpty(userInput)
+                && !accountHintApplied
                 && !fields.Contains("account", StringComparer.OrdinalIgnoreCase)
                 && !IsAccountMentionedInInput(raw.Account!, userInput))
             {
@@ -375,6 +400,7 @@ public static class InterpretEndpoint
             Type = raw.TransactionType!,
             Amount = raw.Amount!.Value,
             Description = raw.Description,
+            Category = ResolveCategory(raw.TransactionType!, raw.CategoryName),
             Account = raw.Account,
             ToAccount = raw.ToAccount,
             Date = raw.Date,
@@ -435,12 +461,22 @@ public static class InterpretEndpoint
             Type = txType,
             Amount = amount,
             Description = raw.Description,
+            CategoryName = ResolveCategory(type, raw.CategoryName),
             OccurredOn = occurredOn,
             Entries =
             [
                 new CreateTransactionEntryCommand { AccountId = accountId, Amount = signedAmount }
             ]
         };
+    }
+
+    private static string? ResolveCategory(string transactionType, string? categoryName)
+    {
+        if (transactionType == "Income") return "Pendapatan";
+        if (transactionType != "Expense") return null;
+        return categoryName is not null && ExpenseCategories.Contains(categoryName)
+            ? categoryName
+            : "Lainnya";
     }
 
     private static InterpretResponse NotFound(

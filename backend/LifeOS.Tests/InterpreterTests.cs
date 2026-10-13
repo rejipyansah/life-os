@@ -1112,6 +1112,89 @@ public class InterpreterTests : IDisposable
         Assert.Equal("Dana Servis Motor", response.SetAsidePreview!.Name);
         Assert.Equal("Dana Servis Motor", response.SetAsideCommand!.Name);
     }
+
+    [Fact]
+    public async Task Interpret_Expense_UsesAiCategoryInPreviewAndCreateCommand()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Expense",
+            Amount = 57_160m,
+            Description = "Beli kebutuhan rumah",
+            CategoryName = "Belanja",
+            Account = "Cash",
+            Date = "2026-10-13"
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "belanja kebutuhan rumah 57160 cash" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Belanja", response.Preview!.Category);
+        Assert.Equal("Belanja", response.Command!.CategoryName);
+    }
+
+    [Fact]
+    public async Task Interpret_Income_UsesSelectedAccountHintAndForcesIncomeCategory()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            TransactionType = "Income",
+            Amount = 1_500_000m,
+            Description = "Dana awal",
+            CategoryName = "Lainnya",
+            Account = null
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "dana awal 1.5jt", AccountHint = "Cash" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("Ready", response.State);
+        Assert.Equal("Cash", response.Preview!.Account);
+        Assert.Equal("Pendapatan", response.Preview.Category);
+        Assert.Equal("Pendapatan", response.Command!.CategoryName);
+    }
+
+    [Fact]
+    public async Task Interpret_MissingTransactionType_UsesSelectedAccountAndAsksForTypeInstead()
+    {
+        var fake = new FakeInterpreter(_ => Task.FromResult(new InterpretResult
+        {
+            Intent = "CreateTransaction",
+            Amount = 358_530m,
+            Description = "Dana awal",
+            Account = null,
+            ClarificationFields = ["account"]
+        }));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "dana awal 358530", AccountHint = "Mandiri" },
+            fake, _scopeId, _db);
+
+        var response = Assert.IsType<InterpretResponse>(result.Body);
+        Assert.Equal("NeedsClarification", response.State);
+        Assert.Contains("Jenis transaksinya belum terbaca. Ini uang masuk, uang keluar, atau transfer?", response.Clarifications);
+        Assert.DoesNotContain("Dari akun mana?", response.Clarifications);
+    }
+
+    [Fact]
+    public async Task Interpret_ProviderQuotaExceeded_ReturnsFallbackCode()
+    {
+        var fake = new FakeInterpreter(_ => throw new InterpreterQuotaExceededException("quota"));
+
+        var result = await InterpretEndpoint.HandleAsync(
+            new InterpretInputRequest { Input = "jajan 18rb" },
+            fake, _scopeId, _db);
+
+        Assert.Equal(429, result.StatusCode);
+        Assert.Equal("ai_quota_exceeded", Assert.IsType<ApiErrorResponse>(result.Body).Code);
+    }
+
     private class FakeInterpreter : IInterpreter
     {
         private readonly Func<InterpretRequest, Task<InterpretResult>> _handler;

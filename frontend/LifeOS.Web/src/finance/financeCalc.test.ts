@@ -315,6 +315,21 @@ describe('parseTransactionText', () => {
     }
   });
 
+  it('recognizes opening balance phrases as income for the quota fallback', () => {
+    expect(parseTransactionText('dana awal 57.160')).toMatchObject({
+      status: 'SUCCESS',
+      amount: 57_160,
+      type: 'Pemasukan',
+      category: 'Pendapatan',
+    });
+    expect(parseTransactionText('saldo awal 1.5jt')).toMatchObject({
+      status: 'SUCCESS',
+      amount: 1_500_000,
+      type: 'Pemasukan',
+      category: 'Pendapatan',
+    });
+  });
+
   it('uses explicit action words to classify mixed phrases and tolerates a typo', () => {
     expect(parseTransactionText('gajian bayar kos 2jt').type).toBe('Pengeluaran');
     expect(parseTransactionText('terima gaji 5jt').type).toBe('Pemasukan');

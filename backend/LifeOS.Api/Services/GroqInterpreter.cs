@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -49,8 +50,12 @@ public class GroqInterpreter : IInterpreter
             var body = await httpResponse.Content.ReadAsStringAsync(ct);
 
             if (!httpResponse.IsSuccessStatusCode)
+            {
+                if (IsQuotaExceeded(httpResponse.StatusCode, body))
+                    throw new InterpreterQuotaExceededException("Groq usage quota has been reached.");
                 throw new InterpreterProviderException(
                     $"Groq API returned {(int)httpResponse.StatusCode}: {body}");
+            }
 
             var doc = JsonNode.Parse(body);
             var content = doc?["choices"]?[0]?["message"]?["content"]?.GetValue<string>();
@@ -103,6 +108,20 @@ public class GroqInterpreter : IInterpreter
     private static string BuildSystemPrompt(DateOnly currentDate, IReadOnlyList<string> accounts)
         => InterpreterPrompts.Build(currentDate, accounts);
 
+    private static bool IsQuotaExceeded(HttpStatusCode statusCode, string body)
+    {
+        if (statusCode == HttpStatusCode.TooManyRequests)
+            return true;
+
+        if ((int)statusCode is not (402 or 403))
+            return false;
+
+        return body.Contains("quota", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("billing", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("limit", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("credit", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static JsonObject BuildSchema()
     {
         return new JsonObject
@@ -133,6 +152,17 @@ public class GroqInterpreter : IInterpreter
                 {
                     ["anyOf"] = new JsonArray(
                         new JsonObject { ["type"] = "string" },
+                        new JsonObject { ["type"] = "null" }
+                    )
+                },
+                ["categoryName"] = new JsonObject
+                {
+                    ["anyOf"] = new JsonArray(
+                        new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["enum"] = new JsonArray("Makan & Minum", "Transportasi", "Tagihan & Utilitas", "Belanja", "Kesehatan", "Hiburan", "Pendidikan", "Pendapatan", "Lainnya")
+                        },
                         new JsonObject { ["type"] = "null" }
                     )
                 },
@@ -191,12 +221,12 @@ public class GroqInterpreter : IInterpreter
                     ["items"] = new JsonObject
                     {
                         ["type"] = "string",
-                        ["enum"] = new JsonArray("amount", "account", "toAccount", "setAsideName", "title", "direction", "date")
+                        ["enum"] = new JsonArray("amount", "account", "toAccount", "transactionType", "setAsideName", "title", "direction", "date")
                     }
                 }
             },
             ["required"] = new JsonArray(
-                "intent", "transactionType", "amount", "description",
+                "intent", "transactionType", "amount", "description", "categoryName",
                 "account", "toAccount", "date", "feeAmount",
                 "setAsideName", "title", "direction", "clarificationFields"
             ),

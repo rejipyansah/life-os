@@ -454,6 +454,6 @@ export async function deleteUpcomingEvent(id: string): Promise<void> {
  * Interpreter only: menghasilkan structured command/preview tanpa menyentuh database.
  * User mengonfirmasi, lalu command dikirim ke endpoint yang sesuai.
  */
-export async function interpret(input: string): Promise<InterpretResponse> {
-  return request('/api/interpret', json('POST', { input }), 'interpret');
+export async function interpret(input: string, accountHint?: string): Promise<InterpretResponse> {
+  return request('/api/interpret', json('POST', { input, accountHint }), 'interpret');
 }

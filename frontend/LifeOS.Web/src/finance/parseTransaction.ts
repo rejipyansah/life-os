@@ -91,6 +91,7 @@ function findIntentKeyword(text: string, keywords: string[]): number {
 }
 
 function inferTransactionType(text: string): 'Pemasukan' | 'Pengeluaran' {
+  if (hasPhrase(text, 'dana awal') || hasPhrase(text, 'saldo awal')) return 'Pemasukan';
   const incomeAt = findIntentKeyword(text, INCOME_KEYWORDS);
   const expenseAt = findIntentKeyword(text, EXPENSE_KEYWORDS);
   if (incomeAt === Number.POSITIVE_INFINITY) return 'Pengeluaran';

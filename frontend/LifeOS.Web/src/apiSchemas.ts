@@ -39,11 +39,11 @@ const CreateTransactionEntryCommandSchema = z.object({
 const CreateTransactionCommandSchema: z.ZodType<CreateTransactionCommand> = z.object({
   type: TransactionTypeSchema,
   amount: z.number(),
-  description: z.string().optional(),
-  categoryName: z.string().optional(),
+  description: z.string().nullable().optional(),
+  categoryName: z.string().nullable().optional(),
   occurredOn: z.string(),
-  relatedTransactionId: z.string().optional(),
-  feeAmount: z.number().optional(),
+  relatedTransactionId: z.string().nullable().optional(),
+  feeAmount: z.number().nullable().optional(),
   entries: z.array(CreateTransactionEntryCommandSchema),
   setAsideId: z.string().nullable().optional(),
 }).passthrough();
@@ -285,6 +285,7 @@ const InterpretResponseSchema: z.ZodType<InterpretResponse> = z.object({
     type: z.string(),
     amount: z.number(),
     description: z.string().nullable(),
+    category: z.string().nullable(),
     account: z.string().nullable(),
     toAccount: z.string().nullable(),
     date: z.string().nullable(),

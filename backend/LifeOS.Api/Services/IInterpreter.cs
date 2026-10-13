@@ -28,6 +28,7 @@ public class InterpretResult
 
     public decimal? Amount { get; set; }
     public string? Description { get; set; }
+    public string? CategoryName { get; set; }
     public string? Account { get; set; }
     public string? ToAccount { get; set; }
     public string? Date { get; set; }
@@ -86,6 +87,9 @@ public class InterpretTransactionData
     [JsonPropertyName("description")]
     public string? Description { get; set; }
 
+    [JsonPropertyName("category")]
+    public string? Category { get; set; }
+
     [JsonPropertyName("account")]
     public string? Account { get; set; }
 
@@ -133,10 +137,19 @@ public class InterpretInputRequest
 {
     [JsonPropertyName("input")]
     public string Input { get; set; } = "";
+
+    [JsonPropertyName("accountHint")]
+    public string? AccountHint { get; set; }
 }
 
 public class InterpreterProviderException : Exception
 {
     public InterpreterProviderException(string message, Exception? innerException = null)
+        : base(message, innerException) { }
+}
+
+public sealed class InterpreterQuotaExceededException : InterpreterProviderException
+{
+    public InterpreterQuotaExceededException(string message, Exception? innerException = null)
         : base(message, innerException) { }
 }

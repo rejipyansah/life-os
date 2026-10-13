@@ -362,13 +362,13 @@ public class GroqInterpreterTests : IDisposable
     // ───────────────────── 11. HTTP error → InterpreterProviderException ─────────────────────
 
     [Fact]
-    public async Task Interpret_HttpError_ThrowsInterpreterProviderException()
+    public async Task Interpret_RateLimit_ThrowsQuotaException()
     {
         SetErrorResponse(HttpStatusCode.TooManyRequests, "rate limited");
 
-        var ex = await Assert.ThrowsAsync<InterpreterProviderException>(
+        var ex = await Assert.ThrowsAsync<InterpreterQuotaExceededException>(
             () => _interpreter.InterpretAsync(MakeRequest("jajan 18rb cash")));
-        Assert.Contains("429", ex.Message);
+        Assert.Contains("quota", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

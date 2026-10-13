@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 
+import { ApiRequestError } from '../../api';
+import type { InterpretResponse } from '../../types';
 import {
   formatCurrency,
   formatCurrencyRaw,
@@ -28,6 +30,7 @@ import {
 interface CatatTransaksiSectionProps {
   accounts: Account[];
   onSave: (parsed: ParsedTransaction) => Promise<boolean>;
+  onInterpret: (input: string, accountHint?: string) => Promise<InterpretResponse>;
 }
 
 const QUICK_PHRASES = [
@@ -71,6 +74,7 @@ function validateTransactionInput(transaction: ParsedTransaction, accounts: Acco
 export default function CatatTransaksiSection({
   accounts,
   onSave,
+  onInterpret,
 }: CatatTransaksiSectionProps) {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,6 +90,7 @@ export default function CatatTransaksiSection({
   const [parsed, setParsed] = useState<ParsedTransaction | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [interpreting, setInterpreting] = useState(false);
   const [quickMode, setQuickMode] = useState(false);
   const [quickType, setQuickType] = useState<'Pengeluaran' | 'Pemasukan'>('Pengeluaran');
   const [quickAmount, setQuickAmount] = useState('');
@@ -132,10 +137,9 @@ export default function CatatTransaksiSection({
   /** Resolve Sumber Dana: pilihan eksplisit user, atau nama akun yang cocok
    *  dengan hasil parser. Tanpa keduanya → panduan, bukan fallback diam-diam. */
   const resolveAccount = (result: ParsedTransaction): Account | undefined => {
-    if (selectedAccount) return selectedAccount;
     const wanted = result.account?.trim().toLowerCase();
-    if (!wanted) return undefined;
-    return selectorAccounts.find((a) => a.name.toLowerCase() === wanted);
+    return (wanted ? selectorAccounts.find((a) => a.name.toLowerCase() === wanted) : undefined)
+      ?? selectedAccount;
   };
 
   const buildParsed = (result: ParsedTransaction): ParsedTransaction | null => {
@@ -159,40 +163,71 @@ export default function CatatTransaksiSection({
     return next;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setQuickMode(false);
-    const result = parseTransactionText(input);
-    if (result.status === 'EMPTY') {
+    if (!input.trim()) {
       setGuidance('Masukkan catatan transaksi terlebih dahulu.');
       setParsed(null);
       return;
     }
-    if (result.status === 'NO_AMOUNT') {
-      setGuidance('Sertakan nominal transaksi (contoh: 25rb, 340rb, atau 1.5jt).');
-      setParsed(null);
-      return;
+    if (interpreting) return;
+
+    setInterpreting(true);
+    setGuidance(null);
+    setParsed(null);
+    try {
+      const result = await onInterpret(input.trim(), selectedAccount?.name);
+      if (result.state === 'NeedsClarification') {
+        setGuidance(result.clarifications.join(' ') || 'Mohon lengkapi detail transaksi.');
+        return;
+      }
+      if (result.state !== 'Ready' || !result.preview) {
+        setGuidance('Input belum dikenali sebagai transaksi yang didukung. Coba jelaskan transaksi dengan lebih lengkap.');
+        return;
+      }
+
+      const type = result.preview.type === 'Income'
+        ? 'Pemasukan'
+        : result.preview.type === 'Expense'
+          ? 'Pengeluaran'
+          : null;
+      if (!type) {
+        setGuidance(result.preview.type === 'Transfer'
+          ? 'Untuk transfer, gunakan menu Transfer di bagian Sumber Dana.'
+          : 'Catat Transaksi hanya untuk uang masuk atau keluar. Kelola rencana/alokasi di modul terkait.');
+        return;
+      }
+
+      buildParsed({
+        status: 'SUCCESS',
+        amount: Math.round(result.preview.amount),
+        type,
+        category: type === 'Pemasukan' ? 'Pendapatan' : result.preview.category ?? 'Lainnya',
+        description: result.preview.description ?? undefined,
+        account: result.preview.account ?? selectedAccount?.name,
+        occurredOn: result.preview.date ?? undefined,
+      });
+    } catch (error) {
+      const shouldUseLocalParser = error instanceof ApiRequestError
+        && ['rate_limited', 'ai_quota_exceeded'].includes(error.code);
+      if (!shouldUseLocalParser) {
+        setGuidance(error instanceof Error ? error.message : 'Layanan AI tidak tersedia. Coba lagi nanti.');
+        return;
+      }
+
+      const fallback = parseTransactionText(input);
+      if (fallback.status === 'SUCCESS'
+        && (fallback.type === 'Pengeluaran' || fallback.type === 'Pemasukan')) {
+        buildParsed({ ...fallback, account: selectedAccount?.name ?? fallback.account });
+        setGuidance('Batas pemakaian AI tercapai. Hasil sementara memakai parser lokal; periksa sebelum menyimpan.');
+      } else if (fallback.status === 'NO_AMOUNT') {
+        setGuidance('Batas pemakaian AI tercapai dan nominal belum terbaca oleh parser cadangan. Coba tulis nominal dengan jelas (contoh: 25rb atau 1.5jt).');
+      } else {
+        setGuidance('Batas pemakaian AI tercapai dan parser cadangan belum dapat membaca transaksi ini. Coba lagi nanti atau tulis dengan format yang lebih sederhana.');
+      }
+    } finally {
+      setInterpreting(false);
     }
-    if (result.status === 'AMBIGUOUS_AMOUNT') {
-      setGuidance('Nominal belum jelas. Gunakan angka utuh (contoh: 15000), 15rb, atau 1.5jt.');
-      setParsed(null);
-      return;
-    }
-    if (result.status === 'AMOUNT_OUT_OF_RANGE') {
-      setGuidance(`Nominal maksimum Rp ${formatNumberString(String(MAX_TRANSACTION_AMOUNT))}.`);
-      setParsed(null);
-      return;
-    }
-    if (result.type === 'Alokasi Pos') {
-      setGuidance('Catat Transaksi hanya untuk uang masuk atau keluar. Kelola alokasi di modul Dana yang Disisihkan.');
-      setParsed(null);
-      return;
-    }
-    if (result.type === 'Transfer Kas') {
-      setGuidance('Transfer memerlukan sumber dana tujuan. Gunakan menu Transfer di bagian Sumber Dana.');
-      setParsed(null);
-      return;
-    }
-    buildParsed(result);
   };
 
   const handleQuickAmountChange = (value: string) => {
@@ -463,7 +498,7 @@ export default function CatatTransaksiSection({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  handleSubmit();
+                  void handleSubmit();
                 }
               }}
               autoComplete="off"
@@ -483,10 +518,11 @@ export default function CatatTransaksiSection({
           </div>
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
+            disabled={interpreting}
             className="px-5 py-2.5 rounded-xl bg-lo-primary text-white hover:bg-lo-primary-hover text-xs sm:text-sm font-medium whitespace-nowrap shadow-sm hover:shadow transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]"
           >
-            <span>Catat Transaksi</span>
+            <span>{interpreting ? 'Memahami transaksi…' : 'Catat Transaksi'}</span>
             <Icon name="arrow_forward" className="text-[18px]" />
           </button>
         </div> : null}
@@ -688,20 +724,7 @@ export default function CatatTransaksiSection({
               setInput(phrase);
               setGuidance(null);
               setSavedMsg(null);
-              const result = parseTransactionText(phrase);
-              if (result.status === 'SUCCESS') {
-                if (result.type === 'Alokasi Pos') {
-                  setGuidance('Kelola alokasi di modul Dana yang Disisihkan.');
-                  setParsed(null);
-                } else {
-                  buildParsed(result);
-                }
-              } else if (result.status === 'NO_AMOUNT') {
-                setGuidance('Sertakan nominal transaksi (contoh: 25rb, 340rb, atau 1.5jt).');
-                setParsed(null);
-              } else {
-                setParsed(null);
-              }
+              setParsed(null);
             }}
             className="px-2.5 py-1 rounded-lg bg-lo-surface-recessed hover:bg-lo-accent-wash text-lo-text-ink border border-lo-border-hairline transition-colors cursor-pointer text-xs font-normal"
           >

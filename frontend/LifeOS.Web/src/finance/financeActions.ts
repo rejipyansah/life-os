@@ -188,7 +188,7 @@ export function createTransactionActions(
           amount,
           description: parsed.description || parsed.category || undefined,
           categoryName: parsed.category || (isIncome ? 'Pendapatan' : undefined),
-          occurredOn: todayIso(),
+          occurredOn: parsed.occurredOn || todayIso(),
           entries: [{ accountId, amount: isIncome ? amount : -amount }],
         }),
         () => pushToast(

@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiRequestError } from '../../api';
 import { deriveFinanceState, type Account, type BillDue, type ParsedTransaction, type PosItem } from '../../finance';
+import type { InterpretResponse } from '../../types';
 import CatatTransaksiSection from './CatatTransaksiSection';
 import { JatuhTempoCard } from './UangBebasSection';
 
@@ -53,6 +55,31 @@ const pos: PosItem = {
   icon: 'savings',
   archived: false,
 };
+
+function fakeInterpret(input: string): Promise<InterpretResponse> {
+  const income = /terima|gaji/i.test(input);
+  const amount = input.includes('40rb') ? 40_000 : 25_000;
+  return Promise.resolve({
+    intent: 'CreateTransaction',
+    state: 'Ready',
+    preview: {
+      type: income ? 'Income' : 'Expense',
+      amount,
+      description: income ? 'Pendapatan' : 'Kopi',
+      category: income ? 'Pendapatan' : 'Makan & Minum',
+      account: null,
+      toAccount: null,
+      date: '2026-10-13',
+      feeAmount: null,
+    },
+    command: null,
+    setAsidePreview: null,
+    setAsideCommand: null,
+    eventPreview: null,
+    eventCommand: null,
+    clarifications: [],
+  });
+}
 
 describe('JatuhTempoCard interactions', () => {
   it('requires a source account and sends the selected account and optional set-aside on payment', async () => {
@@ -121,6 +148,7 @@ describe('CatatTransaksiSection save flow', () => {
       <CatatTransaksiSection
         accounts={[accounts[0]]}
         onSave={onSave}
+        onInterpret={fakeInterpret}
       />,
     );
     await user.click(screen.getByRole('button', { name: /Rekening Aktif/ }));
@@ -174,6 +202,34 @@ describe('CatatTransaksiSection save flow', () => {
     expect(await screen.findByText('Rp 40.000')).toBeTruthy();
   });
 
+  it('uses the AI-selected category and passes the selected account as a hint', async () => {
+    const user = userEvent.setup();
+    const onInterpret = vi.fn(async (input: string) => {
+      const result = await fakeInterpret(input);
+      return {
+        ...result,
+        preview: result.preview ? { ...result.preview, category: 'Transportasi' } : null,
+      };
+    });
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} onInterpret={onInterpret} />);
+    await user.type(screen.getByPlaceholderText(/Contoh: bayar wifi/), 'isi bensin 25rb');
+    await user.click(screen.getByRole('button', { name: 'Catat Transaksi' }));
+
+    expect(await screen.findByRole('heading', { name: 'Transportasi' })).toBeTruthy();
+    expect(onInterpret).toHaveBeenCalledWith('isi bensin 25rb', 'Rekening Aktif');
+  });
+
+  it('uses the local parser only when the application rate limit is reached', async () => {
+    const user = userEvent.setup();
+    const onInterpret = vi.fn().mockRejectedValue(new ApiRequestError('rate limited', 429, 'rate_limited'));
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} onInterpret={onInterpret} />);
+    await user.type(screen.getByPlaceholderText(/Contoh: bayar wifi/), 'bayar wifi 340rb');
+    await user.click(screen.getByRole('button', { name: 'Catat Transaksi' }));
+
+    expect(await screen.findByRole('heading', { name: 'Tagihan & Utilitas' })).toBeTruthy();
+    expect(screen.getByText(/Batas pemakaian AI tercapai/)).toBeTruthy();
+  });
+
   it('allows correcting the category and amount before saving', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(true);
@@ -198,7 +254,7 @@ describe('CatatTransaksiSection save flow', () => {
   it('locks income category to Pendapatan and excludes it from expense choices', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(true);
-    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={onSave} />);
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={onSave} onInterpret={fakeInterpret} />);
 
     await user.click(screen.getByRole('button', { name: 'Input cepat' }));
     await user.click(screen.getByRole('button', { name: 'Pemasukan' }));
@@ -230,7 +286,7 @@ describe('CatatTransaksiSection save flow', () => {
   it('offers a structured quick-entry path with amount shortcuts', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(true);
-    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={onSave} />);
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={onSave} onInterpret={fakeInterpret} />);
     await user.click(screen.getByRole('button', { name: 'Input cepat' }));
     await user.click(screen.getByRole('button', { name: '+10k' }));
     await user.click(screen.getByRole('button', { name: '+10k' }));
@@ -242,7 +298,7 @@ describe('CatatTransaksiSection save flow', () => {
 
   it('enforces minimum and exact-safe maximum in quick amount entry', async () => {
     const user = userEvent.setup();
-    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} />);
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} onInterpret={fakeInterpret} />);
     await user.click(screen.getByRole('button', { name: 'Input cepat' }));
     const amount = screen.getByLabelText('Nominal (Rp)');
     fireEvent.change(amount, { target: { value: '0' } });
@@ -282,12 +338,12 @@ describe('CatatTransaksiSection save flow', () => {
   });
 
   it('does not expose POS selection in transaction capture', () => {
-    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} />);
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} onInterpret={fakeInterpret} />);
     expect(screen.queryByText('Dana yang Disisihkan')).toBeNull();
   });
 
   it('shows the available account balance beside its source name', () => {
-    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} />);
+    render(<CatatTransaksiSection accounts={[accounts[0]]} onSave={vi.fn()} onInterpret={fakeInterpret} />);
     expect(screen.getByRole('button', { name: 'Rekening Aktif' })).toBeTruthy();
     expect(screen.queryByText(/Saldo tersedia/)).toBeNull();
   });

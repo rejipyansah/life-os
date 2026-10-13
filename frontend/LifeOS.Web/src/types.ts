@@ -149,11 +149,11 @@ export interface CreateTransactionEntryCommand {
 export interface CreateTransactionCommand {
   type: TransactionType;
   amount: number;
-  description?: string;
-  categoryName?: string;
+  description?: string | null;
+  categoryName?: string | null;
   occurredOn: string;
-  relatedTransactionId?: string;
-  feeAmount?: number;
+  relatedTransactionId?: string | null;
+  feeAmount?: number | null;
   entries: CreateTransactionEntryCommand[];
   /**
    * Opsional. Dana yang Disisihkan (pos) yang dialokasikan/dilepas.
@@ -416,6 +416,7 @@ export interface InterpretTransactionData {
   type: string;
   amount: number;
   description: string | null;
+  category: string | null;
   account: string | null;
   toAccount: string | null;
   date: string | null;

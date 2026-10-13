@@ -7,6 +7,7 @@ import type { NavDestination } from '../Home/navItems';
 import { ToastViewport } from './shared';
 import { UangBebasCard, JatuhTempoCard, FormulaModal } from './UangBebasSection';
 import CatatTransaksiSection from './CatatTransaksiSection';
+import { interpret } from '../../api';
 import YangDisisihkanSection from './YangDisisihkanSection';
 import SumberDanaSection from './SumberDanaSection';
 import AgendaKasSection from './AgendaKasSection';
@@ -95,6 +96,7 @@ export default function FinancePage({
           <CatatTransaksiSection
             accounts={state.accounts}
             onSave={state.saveTransaction}
+            onInterpret={interpret}
           />
 
           {/* Row 3: Yang Disisihkan + Agenda | Sumber Dana + Aktivitas Terkini */}

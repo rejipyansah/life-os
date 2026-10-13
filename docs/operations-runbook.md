@@ -17,10 +17,7 @@ ASP.NET Core dapat menerima key konfigurasi melalui environment variable dengan 
 | Key | Wajib kapan | Keterangan |
 |---|---|---|
 | `ConnectionStrings__DefaultConnection` | API dan migrasi | Connection string PostgreSQL. Jangan commit credential. |
-| `AI__Provider` | Opsional | Provider interpreter; default di kode adalah `Gemini`. Alternatif yang diimplementasikan adalah `Groq`. |
-| `Gemini__ApiKey` | Saat `AI__Provider=Gemini` dan interpreter digunakan | Secret API Gemini. |
-| `Gemini__Model` | Opsional | Model Gemini; default kode `gemini-3.5-flash-lite`. |
-| `Groq__ApiKey` | Saat `AI__Provider=Groq` dan interpreter digunakan | Secret API Groq. |
+| `Groq__ApiKey` | API dijalankan | Secret API Groq. Groq adalah satu-satunya provider AI. |
 | `Groq__Model` | Opsional | Model Groq; default kode `openai/gpt-oss-20b`, dipakai oleh request provider. |
 | `Groq__Endpoint` | Opsional | Endpoint Groq-compatible; default `https://api.groq.com/openai/v1/`, dipakai sebagai base URL request. |
 | `Groq__ReasoningEffort` | Opsional | Default kode `low`, dipakai oleh request provider. |
@@ -28,7 +25,7 @@ ASP.NET Core dapat menerima key konfigurasi melalui environment variable dengan 
 
 Origin frontend yang dipercaya untuk CORS dan request mutasi cookie didefinisikan di `backend/LifeOS.Api/Services/ApiSecurityPolicies.cs`. Production mengizinkan origin `https://life-os.rejipyansah.workers.dev`, `https://life-os.rejip.my.id`, dan `https://rejip.my.id`; localhost hanya diizinkan pada Development. Jika domain frontend berubah, perbarui daftar tersebut dan verifikasi request browser serta test CSRF. Mutasi API memerlukan header `Origin` atau `Referer` yang tepercaya.
 
-Endpoint `POST /api/interpret` membatasi input hingga 2.000 karakter dan rate limit 10 request per menit per pengguna/sesi guest, dengan IP sebagai fallback. Rate limiter memakai `RemoteIpAddress`; bila API berada di belakang reverse proxy, forwarded headers hanya boleh diaktifkan dengan daftar proxy/network tepercaya agar alamat client tidak dapat dipalsukan. Sampai konfigurasi proxy tepercaya ditetapkan, fallback IP dapat merepresentasikan alamat proxy bersama, bukan alamat client.
+Endpoint `POST /api/interpret` membatasi input hingga 2.000 karakter dan rate limit 10 request per menit per sesi guest, dengan IP sebagai fallback. Owner yang login dikecualikan dari rate limit aplikasi; kuota provider Groq tetap berlaku. Saat guest mencapai rate limit aplikasi atau kuota provider Groq habis, frontend dapat memakai parser lokal sebagai cadangan. Rate limiter memakai `RemoteIpAddress`; bila API berada di belakang reverse proxy, forwarded headers hanya boleh diaktifkan dengan daftar proxy/network tepercaya agar alamat client tidak dapat dipalsukan. Sampai konfigurasi proxy tepercaya ditetapkan, fallback IP dapat merepresentasikan alamat proxy bersama, bukan alamat client.
 
 Nilai default kode berada di `backend/LifeOS.Api/appsettings.json`; file tersebut tidak boleh berisi secret produksi. `appsettings.Development.json` adalah konfigurasi lokal dan harus tetap menggunakan credential placeholder/non-produksi.
 

@@ -13,7 +13,7 @@ public class InterpretResultDeserializationTests
     };
 
     [Fact]
-    public void Deserialize_Expense_GeminiOutput()
+    public void Deserialize_Expense_ProviderOutput()
     {
         var json = """
         {
@@ -44,7 +44,7 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_Transfer_GeminiOutput()
+    public void Deserialize_Transfer_ProviderOutput()
     {
         var json = """
         {
@@ -68,7 +68,7 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_Unsupported_GeminiOutput()
+    public void Deserialize_Unsupported_ProviderOutput()
     {
         var json = """
         {
@@ -86,7 +86,7 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_WithClarificationFields_GeminiOutput()
+    public void Deserialize_WithClarificationFields_ProviderOutput()
     {
         var json = """
         {
@@ -108,9 +108,9 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_MissingFields_GeminiOutput()
+    public void Deserialize_MissingFields_ProviderOutput()
     {
-        // Gemini might omit null fields entirely
+        // Optional fields may be omitted by the provider.
         var json = """
         {
             "intent": "CreateTransaction",
@@ -128,9 +128,9 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_AmountAsInteger_GeminiOutput()
+    public void Deserialize_AmountAsInteger_ProviderOutput()
     {
-        // Gemini may return amounts as integers
+        // The provider may return amounts as integers.
         var json = """
         {
             "intent": "CreateTransaction",
@@ -148,9 +148,9 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_AmountAsDecimal_GeminiOutput()
+    public void Deserialize_AmountAsDecimal_ProviderOutput()
     {
-        // Gemini may return amounts with decimals
+        // The provider may return amounts with decimals.
         var json = """
         {
             "intent": "CreateTransaction",
@@ -189,7 +189,7 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_CreateSetAside_GeminiOutput()
+    public void Deserialize_CreateSetAside_ProviderOutput()
     {
         var json = """
         {
@@ -213,7 +213,7 @@ public class InterpretResultDeserializationTests
     }
 
     [Fact]
-    public void Deserialize_CreateSetAside_MissingName_GeminiOutput()
+    public void Deserialize_CreateSetAside_MissingName_ProviderOutput()
     {
         var json = """
         {

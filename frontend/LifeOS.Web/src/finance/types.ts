@@ -146,6 +146,8 @@ export interface ParsedTransaction {
   description?: string;
   /** Sumber Dana — uang keluar/masuk dari mana. */
   account?: string;
+  /** ISO date resolved by AI; defaults to today when omitted. */
+  occurredOn?: string;
 }
 
 export interface CreatePosInput {

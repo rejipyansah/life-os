@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiRequestError, getFinanceState, GuestSessionExpiredError, resumeGuestSession } from './api';
+import { ApiRequestError, getFinanceState, GuestSessionExpiredError, interpret, resumeGuestSession } from './api';
 
 describe('resumeGuestSession', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -79,5 +79,52 @@ describe('resumeGuestSession', () => {
       status: 502,
       code: 'invalid_api_response',
     } satisfies Partial<ApiRequestError>);
+  });
+});
+
+describe('interpret', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('accepts a ready transaction response with nullable backend command fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        intent: 'CreateTransaction',
+        state: 'Ready',
+        preview: {
+          type: 'Income',
+          amount: 35_853,
+          description: 'Dana awal',
+          category: 'Pendapatan',
+          account: 'Mandiri',
+          toAccount: null,
+          date: '2026-10-13',
+          feeAmount: null,
+        },
+        command: {
+          scopeId: 'scope-id',
+          type: 'Income',
+          amount: 35_853,
+          description: 'Dana awal',
+          categoryName: 'Pendapatan',
+          occurredOn: '2026-10-13',
+          relatedTransactionId: null,
+          feeAmount: null,
+          setAsideId: null,
+          entries: [{ accountId: 'account-id', amount: 35_853 }],
+        },
+        setAsidePreview: null,
+        setAsideCommand: null,
+        eventPreview: null,
+        eventCommand: null,
+        clarifications: [],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const response = await interpret('dana awal 35.853', 'Mandiri');
+
+    expect(response.state).toBe('Ready');
+    expect(response.preview?.category).toBe('Pendapatan');
+    expect(response.command?.relatedTransactionId).toBeNull();
   });
 });

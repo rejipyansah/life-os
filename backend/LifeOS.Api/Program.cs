@@ -41,24 +41,7 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.ConfigureApplicationCookie(options =>
-{
-    options.Cookie.HttpOnly = true;
-    options.Cookie.SameSite = SameSiteMode.None;
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-        ? CookieSecurePolicy.SameAsRequest
-        : CookieSecurePolicy.Always;
-    options.ExpireTimeSpan = TimeSpan.FromDays(30);
-    options.Events.OnRedirectToLogin = context =>
-    {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        return Task.CompletedTask;
-    };
-    options.Events.OnRedirectToAccessDenied = context =>
-    {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        return Task.CompletedTask;
-    };
-});
+    ApiSecurityPolicies.ConfigureApplicationCookie(options, builder.Environment.IsDevelopment()));
 
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(
@@ -79,14 +62,7 @@ builder.Services.AddScoped<SetAsideService>();
 builder.Services.AddScoped<UpcomingEventService>();
 builder.Services.AddScoped<FinanceStateService>();
 builder.Services.AddHttpClient<GroqInterpreter>();
-builder.Services.AddScoped<IInterpreter>(services =>
-{
-    var configuration = services.GetRequiredService<IConfiguration>();
-    var provider = configuration["AI:Provider"] ?? "Gemini";
-    return provider.Equals("Groq", StringComparison.OrdinalIgnoreCase)
-        ? services.GetRequiredService<GroqInterpreter>()
-        : new GeminiInterpreter(configuration);
-});
+builder.Services.AddScoped<IInterpreter>(services => services.GetRequiredService<GroqInterpreter>());
 
 var app = builder.Build();
 app.UseSafeExceptionHandler();
